@@ -138,7 +138,10 @@ fn result_response(r: &CallRecord) -> Result<Json<Value>> {
             "Operation {} has already been accepted and is still running.",
             r.invocation.id
         ),
-        "Use call show to inspect its outcome; do not repeat it with another idempotency key.",
+        &format!(
+            "Use mcport activity show {} to inspect its outcome; do not repeat it with another idempotency key.",
+            r.invocation.id
+        ),
     ))
 }
 async fn remote(app: &App, r: &CallRecord, cancellation: CancellationToken) -> Result<Value> {
