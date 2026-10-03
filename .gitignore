@@ -1,0 +1,17 @@
+target/
+/web/node_modules/
+/web/dist/
+/.local/
+*.sqlite*
+.env
+.env.*
+!.env.example
+*.log
+test-results/
+playwright-report/
+.DS_Store
+
+/targets/
+/dist/
+__pycache__/
+*.pyc

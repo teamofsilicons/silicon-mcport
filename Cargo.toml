@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/mcport-core", "crates/mcport-client", "crates/mcport-cli", "crates/mcport-mcp", "crates/mcport-daemon", "crates/mcport-server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/teamofsilicons/silicon-mcport"
+
+[profile.release]
+lto = "thin"
+strip = true

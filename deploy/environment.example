@@ -1,0 +1,17 @@
+# Store the completed file outside source control with mode 0600.
+MCPORT_BIND=127.0.0.1:4380
+MCPORT_APP_ID=mcport
+MCPORT_APP_SECRET=
+MCPORT_IAM_URL=https://backend.iam.teamofsilicons.com
+MCPORT_IAM_WEB_URL=https://iam.teamofsilicons.com
+MCPORT_PUBLIC_URL=https://your-mcport-host.example
+MCPORT_WEB_URL=https://your-mcport-host.example
+MCPORT_DATA_DIR=/var/lib/mcport
+MCPORT_WEBHOOK_SECRET=
+MCPORT_WEBHOOK_SECRET_VERSION=1
+MCPORT_LIFECYCLE_SECRET=
+MCPORT_TEST_APP_SECRETS={}
+MCPORT_TELEMETRY_KEY=
+MCPORT_TEST_TELEMETRY_KEYS={}
+POSTMARK_SERVER_TOKEN=
+MCPORT_REPORT_FROM=mcport@teamofsilicons.com

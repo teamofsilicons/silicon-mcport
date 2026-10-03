@@ -1,0 +1,90 @@
+name: Native release candidates
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: native-candidate-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native:
+    name: Test and build ${{ matrix.honeycomb }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, honeycomb: linux-x86_64, suffix: '' }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, honeycomb: linux-aarch64, suffix: '' }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, honeycomb: macos-x86_64, suffix: '' }
+          - { runner: macos-15, target: aarch64-apple-darwin, honeycomb: macos-aarch64, suffix: '' }
+          - { runner: windows-2025, target: x86_64-pc-windows-msvc, honeycomb: windows-x86_64, suffix: '.exe' }
+          - { runner: windows-11-arm, target: aarch64-pc-windows-msvc, honeycomb: windows-aarch64, suffix: '.exe' }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Configure native Python fixture and packaging dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r scripts/requirements.txt
+          python -c 'import os,sys; open(os.environ["GITHUB_ENV"], "a").write("MCPORT_TEST_PYTHON=" + sys.executable + "\n")'
+      - name: Verify release tag matches workspace
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python -c 'import os,tomllib; version=tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"]; assert not os.environ["RELEASE_REF"].startswith("refs/tags/") or os.environ["RELEASE_TAG"]=="v"+version, "Tag must match the Cargo version"'
+      - name: Test native CLI, SDK, transports and daemon
+        run: cargo test --locked -p mcport-cli -p mcport-client -p mcport-mcp -p mcport-daemon --target ${{ matrix.target }}
+      - name: Test package rejection rules
+        run: python -m unittest discover -s scripts/tests -p 'test_*.py'
+      - name: Build release CLI with embedded daemon
+        run: cargo build --locked --release -p mcport-cli --target ${{ matrix.target }}
+      - name: Native smoke and archive validation
+        run: python scripts/package.py stage --target ${{ matrix.honeycomb }} --binary target/${{ matrix.target }}/release/mcport${{ matrix.suffix }} --output stage/mcport-${{ matrix.honeycomb }}.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcport-native-${{ matrix.honeycomb }}
+          path: stage/*
+          if-no-files-found: error
+          retention-days: 14
+  assemble:
+    name: Complete six-target Honeycomb candidate
+    needs: native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r scripts/requirements.txt
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: mcport-native-*
+          merge-multiple: true
+          path: native
+      - name: Require every target, validate bytes and emit checksums
+        run: python scripts/package.py assemble --input native --output candidate/mcport-honeycomb.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcport-honeycomb-candidate
+          path: candidate/*
+          if-no-files-found: error
+          retention-days: 30
+# This workflow only creates reviewable candidates. Publishing to GitHub,
+# crates.io or Honeycomb and production deployment are separate authorized steps.

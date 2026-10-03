@@ -1,0 +1,40 @@
+[Unit]
+Description=Silicon MCPort gateway and website
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=mcport
+Group=mcport
+WorkingDirectory=/opt/mcport/current
+EnvironmentFile=/etc/mcport/runtime.env
+Environment=MCPORT_DATA_DIR=/var/lib/mcport
+Environment=MCPORT_BIND=127.0.0.1:4380
+ExecStart=/opt/mcport/current/mcport-server
+Restart=on-failure
+RestartSec=3
+# The server's graceful shutdown currently handles Ctrl-C/SIGINT.
+KillSignal=SIGINT
+TimeoutStopSec=45
+StateDirectory=mcport
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mcport
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

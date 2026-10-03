@@ -1,0 +1,31 @@
+{
+  "name": "@silicon/mcport-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4381",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4381",
+    "test": "vitest run",
+    "format": "prettier --write src/App.tsx src/Connections.tsx src/Pages.tsx src/ui.tsx src/lib/api.ts src/styles.css"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-switch": "^1.2.6",
+    "lucide-react": "^0.577.0",
+    "motion": "^12.35.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.1.11"
+  }
+}
