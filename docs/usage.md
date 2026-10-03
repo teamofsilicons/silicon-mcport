@@ -40,7 +40,7 @@ mcport account connect work
 mcport account show work --json
 ```
 
-OAuth prints a consent URL. Review the account and sharing mode there, authorize the provider, then inspect the account again. Providers without dynamic client registration require `--client-id`. For an existing bearer credential, `mcport account connect work --token` reads it without terminal echo. Structured credentials can come from a protected file with `--input @account.json`; avoid secrets in shell history.
+OAuth prints a consent URL. Review the account and sharing mode there, authorize the provider, then inspect the account again. MCPort uses an explicit `--client-id`, or advertised client ID metadata documents when MCPort has a configured public HTTPS URL, or dynamic client registration. If the provider supports neither automatic option, supply its registered public client ID. For an existing bearer credential, `mcport account connect work --token` reads it without terminal echo. Structured credentials can come from a protected file with `--input @account.json`; avoid secrets in shell history.
 
 Shared accounts are configured by the connection owner. Per-user accounts are configured separately by each caller. Local accounts must be configured or disconnected on the execution host.
 

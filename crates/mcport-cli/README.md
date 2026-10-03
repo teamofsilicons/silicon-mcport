@@ -2,6 +2,12 @@
 
 Configure an MCP once, then discover and call its tools through an authorized local or remote identity.
 
+The default backend is the local development service at `http://127.0.0.1:4380`. For a hosted workspace, save its actual backend URL before discovery or login:
+
+```sh
+mcport config set backend https://your-mcport-backend.example
+```
+
 ```sh
 mcport iam --json
 mcport login '<app-bound-slt>'

@@ -52,4 +52,6 @@ The website includes actual MIT-licensed [Arc UI](https://uiarc.dev/) components
 
 ## Distribution status
 
-This checkout is a development build. Honeycomb registration, hosted backend configuration, public repository/docs URLs, native release validation, registry publication and production approvals must be verified before advertising installation through Honeycomb. The manifest and CI describe the intended six native targets; their existence is not proof of a published release.
+This checkout has verified development candidates: all six native CLI targets passed CI tests and executable smoke checks, the combined archive passed official Honeycomb validation, and an AL2023 ARM64 backend candidate passed its build and startup/shutdown checks. The CI-produced Mac CLI was manually exercised through all three MCP transports. See [release readiness](docs/release-readiness.md) for exact revisions and evidence.
+
+Honeycomb registration, hosted backend configuration, public repository/docs URLs, registry publication, fresh Honeycomb installation and production approvals remain unverified. The candidates have not been deployed or publicly released.

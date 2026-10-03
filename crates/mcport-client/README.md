@@ -20,7 +20,7 @@ println!("{}", result.result);
 # Ok(()) }
 ```
 
-Pass `RequestContext::testing(environment_id)` on every test request, including login and refresh. Caller-owned storage must keep backend, environment, principal and organization credentials separate. Serialize refresh and atomically persist the new token pair before releasing that lock.
+Apply `.testing(environment_id)` to every test request context, including login and refresh: `RequestContext::default().testing(environment_id)` before login, then `RequestContext::authenticated(token).testing(environment_id)` for authenticated requests. Caller-owned storage must keep backend, environment, principal and organization credentials separate. Serialize refresh and atomically persist the new token pair before releasing that lock.
 
 Provider account authorization is separate from IAM application login. `Client::connect_account` saves a remote provider grant; `authorize_account` returns the browser consent URL. Local credentials stay in an explicitly supplied execution-host registry through the `local` feature.
 

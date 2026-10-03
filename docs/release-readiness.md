@@ -6,22 +6,24 @@ This is an evidence record and a proposed command sequence. The private GitHub r
 
 | Check | Observed result |
 |---|---|
-| Checkout | `main`, follow-up commit `2dd73dea86d26700d42c5870b21b5bd94a4df82d`; `origin` is now HTTPS. Backend candidate files remain a separate local change. |
+| Checkout | Implementation is committed through `09c0b3f4f22a1c3c7023d9f06eb72a22154fa8bd`; `origin` is HTTPS. The CLI candidate uses `2dd73dea86d26700d42c5870b21b5bd94a4df82d`; the subsequent commit adds the backend candidate workflow and source-revision health response. |
 | GitHub repository | `teamofsilicons/silicon-mcport` exists with visibility `PRIVATE`; the reviewed source has been pushed. |
 | GitHub identity/capability | `saket1225` is the active CLI identity; organization membership is active/admin, and GraphQL reports `viewerCanCreateRepositories: true`. Existing token scopes include `repo` and `workflow`. No token values were printed. |
 | Organization Actions policy | Reading the Actions policy returned 403 because the token lacks `admin:org`. Repository creation capability is verified; organization Actions policy/budget is not. This does not establish that running Actions is blocked. |
 | Honeycomb CLI/context | Installed `honeycomb 0.6.1`; selected backend is `https://backend.honeycomb.teamofsilicons.com`, home `/Users/codanium`, production context. |
 | Live Honeycomb authority | `login status`, `apps get mcport`, `apps organization tos` and `iam` all returned HTTP 503 `integration_unavailable` from IAM. Current org-admin authority and global `mcport` handle availability are **unverified**. |
 | Direct IAM CLI | Default production profile is not signed in; `iam config profiles --json` reports no configured profiles. This is separate from Honeycomb's saved application session. |
-| Six-platform delivery | Native candidate run `37159883311` and development checks `37159877931` were dispatched at `2dd73dea86d26700d42c5870b21b5bd94a4df82d`; both were pending at this update. Successful six-native results, fresh Honeycomb installation and public release remain unverified. |
+| Development checks | [Run 37160475215](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37160475215) passed at `09c0b3f`: 82 Rust tests, strict Clippy/formatting, 24 web tests/build, 16 packaging tests, 3 fixture tests and 64 actual-binary E2E assertions. |
+| Backend candidate | [Run 37160502815](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37160502815) passed at `09c0b3f`: native AL2023 ARM64 tests/build, exact-revision startup/shutdown smoke and website bundle. Downloaded archive SHA-256 `371aec82f773ec6da05d8b34ed34203ff77186a6b68a6c7d74d315434bd80021`, all 14 file checksums and read-only installer validation passed. It has not been deployed. |
+| Six-platform candidate | [Run 37159883311](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37159883311) passed all six native test/build/smoke jobs and final assembly at `2dd73dea`. The downloaded archive passed checksum verification and local official Honeycomb 0.6.1 validation with no errors. Fresh Honeycomb installation and public release remain unverified. |
 
 Do not recreate or overwrite an existing app based on the Honeycomb 503. Once that integration works, read `honeycomb apps get mcport --json` and the owning organization's apps before deciding whether registration or a revision update is needed. GitHub organization administration does not prove IAM organization administration.
 
-## Concrete path to six native CI results
+## Reproducing the six native CI results
 
 The workflow uses native Ubuntu 24.04 x86-64/ARM64, macOS 15 Intel/ARM64 and Windows x86-64/ARM64 runners. These labels are listed for private repositories in [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Linux and Windows ARM64 standard runners have supported private repositories since [January 29, 2026](https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/); no larger-runner workaround is required. The workflow uses SHA-pinned actions and creates artifacts with read-only repository permissions.
 
-After the final local changes are committed, push the reviewed revision and dispatch the native candidate workflow in the existing private repository:
+For a subsequent candidate, push the reviewed revision and dispatch the native candidate workflow in the existing private repository:
 
 ```sh
 git push -u origin main
@@ -33,7 +35,7 @@ gh run download <run-id> --repo teamofsilicons/silicon-mcport \
   --name mcport-honeycomb-candidate --dir .local/release-candidate
 ```
 
-The source push and first workflow dispatch have now completed. Follow [native run 37159883311](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37159883311) and [development checks 37159877931](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37159877931), checking their exact head SHA before interpreting results. Repository public visibility is a separate source-publication decision. The native workflow dispatch does not tag, upload to Honeycomb, publish crates, or deploy a backend.
+The first candidate and [development checks 37159877931](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37159877931) both passed at `2dd73dea`. Repository public visibility is a separate source-publication decision. The native workflow dispatch does not tag, upload to Honeycomb, publish crates, or deploy a backend.
 
 Each native job tests and executes the produced CLI before staging it. Assembly requires all six archives, checks binary CPU/format, hashes and permissions again, and emits `mcport-honeycomb.tar.gz`. The final job installs the published official `silicon-honeycomb-cli` version 0.6.1 and runs `honeycomb validate` before uploading the candidate. Older Linux/glibc compatibility is not established by Ubuntu 24.04 runs.
 
@@ -43,9 +45,9 @@ Each native job tests and executes the produced CLI before staging it. Assembly 
 
 The existing MCPort manifest fields match the contract: `format_version: 1`, optional identity `app_id: mcport`, version `0.1.0`, command mapping `mcport: main`, and six canonical Honeycomb target names, each with its own executable path. The daemon is embedded in the CLI binary.
 
-Native handoff ZIPs are intermediate artifacts only. Final packaging now uses deterministic tar/gzip, puts provenance outside the archive, and enforces Honeycomb's 512 MiB compressed / 2 GiB expanded limits. Local official `validate` accepted both our archive layout and a populated directory, and official `pack` followed by `validate` succeeded using temporary header fixtures. This proves **format compatibility only**, not six real native binaries. No header fixture was retained as a release candidate.
+Native handoff ZIPs are intermediate artifacts only. Final packaging uses deterministic tar/gzip, puts provenance outside the archive, and enforces Honeycomb's 512 MiB compressed / 2 GiB expanded limits. The actual downloaded six-native archive has SHA-256 `a9b9311068a1ff0134de7504a0a210acc839344810a4677df09d854bb2d8f6d9`; its sidecar matched and the installed official Honeycomb 0.6.1 validator returned `valid: true` with no errors. Its macOS ARM64 executable exactly matches the CI binary manually tested from a fresh home through all three MCP transports. Evidence is in `.local/release-candidate-2dd73de/proof.json` and [manual verification](testing/manual.md). Earlier temporary header fixtures were only format tests and were not retained in this candidate.
 
-After downloading the real candidate:
+To repeat the downloaded candidate checks:
 
 ```sh
 cd .local/release-candidate
