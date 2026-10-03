@@ -166,7 +166,25 @@ pub fn view(app: &App, mut c: Connection, a: &Auth) -> Result<Connection> {
     c.account = Some(account_status(app, &c, a)?);
     c.status = if let Some(host) = &c.host_id {
         match app.store.get::<crate::hosts::HostRecord>("host", host)? {
-            Some(h) if h.last_seen > now() - 35 && h.registered.contains(&c.id) => "ready",
+            Some(h) if h.last_seen > now() - 35 && h.registered.contains(&c.id) => {
+                if !c.account.as_ref().is_some_and(|x| x.connected) {
+                    "authentication_required"
+                } else {
+                    let principal = if c.auth_mode == "per-user" {
+                        a.actor().principal_id.as_str()
+                    } else {
+                        ""
+                    };
+                    local_mcp_status(
+                        h.capabilities
+                            .get(&c.id)
+                            .and_then(|v| v.get("health"))
+                            .and_then(|v| v.get(principal)),
+                        h.last_seen,
+                        now(),
+                    )
+                }
+            }
             _ => "offline",
         }
     } else if !c.account.as_ref().is_some_and(|x| x.connected) {
@@ -181,6 +199,56 @@ pub fn view(app: &App, mut c: Connection, a: &Auth) -> Result<Connection> {
         c.url = None;
     }
     Ok(c)
+}
+fn local_mcp_status(health: Option<&Value>, reported_at: i64, at: i64) -> &'static str {
+    let age = health
+        .and_then(|v| v.get("age_seconds"))
+        .and_then(Value::as_u64);
+    if !age.is_some_and(|age| age.saturating_add(at.saturating_sub(reported_at).max(0) as u64) < 90)
+    {
+        return "checking";
+    }
+    match health
+        .and_then(|v| v.get("online"))
+        .and_then(Value::as_bool)
+    {
+        Some(true) => "ready",
+        Some(false) => "offline",
+        None => "checking",
+    }
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+    #[test]
+    fn status_requires_a_recent_protocol_probe() {
+        assert_eq!(local_mcp_status(None, 100, 100), "checking");
+        assert_eq!(
+            local_mcp_status(Some(&json!({"age_seconds":null,"online":false})), 100, 100),
+            "checking"
+        );
+        assert_eq!(
+            local_mcp_status(Some(&json!({"age_seconds":3,"online":true})), 100, 105),
+            "ready"
+        );
+        assert_eq!(
+            local_mcp_status(Some(&json!({"age_seconds":3,"online":false})), 100, 105),
+            "offline"
+        );
+        assert_eq!(
+            local_mcp_status(Some(&json!({"age_seconds":89,"online":true})), 100, 105),
+            "checking"
+        );
+        assert_eq!(
+            local_mcp_status(
+                Some(&json!({"age_seconds":u64::MAX,"online":true})),
+                100,
+                105
+            ),
+            "checking"
+        );
+    }
 }
 fn validate_name(name: &str) -> Result<()> {
     if name.is_empty()

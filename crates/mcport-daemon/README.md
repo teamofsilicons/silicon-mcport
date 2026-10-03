@@ -1,8 +1,8 @@
 # mcport-daemon
 
-The outbound execution host connector, embedded in the `mcport` CLI. The CLI owns protected local registry/session files and starts or stops the daemon without requiring a system service.
+The outbound execution host connector, embedded in the `mcport` CLI. The public `mcport-client` local feature exposes registry/account helpers and explicit run/start/stop/status operations. The CLI supplies its protected home/session storage and executable path without requiring a system service.
 
-Gateway poll, progress and result calls use the public stateless `mcport-client` package with explicit `HostContext` credentials. No ambient user session or production fallback is used. The daemon retains polling/backoff, cancellation, account isolation and the durable job journal; the client does not retry requests. Result acknowledgements may be retried by job ID, while provider operations are never replayed after an unknown outcome.
+Gateway poll, progress and result calls use the stateless `mcport-api` transport (also re-exported by the public `mcport-client` package) with explicit `HostContext` credentials. No ambient user session or production fallback is used. The daemon retains polling/backoff, cancellation, account isolation and the durable job journal; the client does not retry requests. Result acknowledgements may be retried by job ID, while provider operations are never replayed after an unknown outcome.
 
 Only endpoints registered in the local allowlist execute. Gateway jobs carry IDs and MCP params, never executable paths, URLs or provider credentials. Each job is checked against host organization, current registered account, deadline and concurrency limits. A restart marks unfinished work outcome-unknown. Local account changes cancel existing work and invalidate pooled provider sessions.
 

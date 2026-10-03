@@ -290,15 +290,6 @@ pub fn secure_directory(path: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-pub fn exclusive_lock(path: &Path) -> Result<File, StoreError> {
-    if let Some(parent) = path.parent() {
-        secure_directory(parent)?;
-    }
-    let file = protected_open(path, false)?;
-    file.lock_exclusive()?;
-    Ok(file)
-}
-
 fn protected_open(path: &Path, exclusive: bool) -> Result<File, StoreError> {
     reject_symlink(path)?;
     let mut options = OpenOptions::new();

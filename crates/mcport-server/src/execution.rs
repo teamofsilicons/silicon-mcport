@@ -295,7 +295,15 @@ pub async fn execute(
             "Run account connect for this connection.",
         ));
     }
-    if c.host_id.is_some() && con::view(&app, c.clone(), &a)?.status != "ready" {
+    // MCP health is an advisory snapshot. A slow initialization or a provider
+    // accepting only one process must still be callable within the call timeout.
+    // Admission depends on the actual connector registration and current account.
+    if let Some(host) = &c.host_id
+        && app
+            .store
+            .get::<crate::hosts::HostRecord>("host", host)?
+            .is_none_or(|h| h.last_seen <= now() - 35 || !h.registered.contains(&c.id))
+    {
         return Err(Error::new(
             503,
             "host_offline",

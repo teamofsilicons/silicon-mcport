@@ -2,6 +2,8 @@
 
 Build the CLI from this checkout with `cargo build -p mcport-cli --release`. Add `target/release` to your PATH, or invoke its `mcport` binary directly. Set a deployed backend with `mcport config set backend https://your-mcport-backend.example`.
 
+Read bundled instructions with `mcport docs usage` or `mcport docs development`; both work offline before login.
+
 ## Log in
 
 ```sh
@@ -73,7 +75,7 @@ The invited Silicon logs in independently, then runs `mcport tool ls figma` and 
 
 ## Results and recovery
 
-Use `resource ls/read`, `resource templates`, and `prompt ls/show/get` as advertised by `--help`. `activity ls/show/cancel` exposes call IDs, progress and outcomes. `asset ls` and `asset download --help` retrieve caller-owned embedded results and safely materialized local `/assets/` links. Other resource URIs should be read through the provider's MCP resource API.
+Use `resource ls/read`, `resource templates`, and `prompt ls/get` as advertised by `--help`. `activity ls/show/cancel` exposes call IDs, progress and outcomes. `asset ls` and `asset get --help` retrieve caller-owned embedded results and safely materialized local `/assets/` links. Other resource URIs should be read through the provider's MCP resource API.
 
 For recoverable calls, supply `--idempotency-key <unique-operation-id>`. Reusing it with the identical request returns the accepted outcome; a different request conflicts. A timeout, lost response or restart can leave an unknown outcome. Inspect activity and the provider before starting another action. Cancellation cannot undo completed changes.
 

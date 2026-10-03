@@ -1,5 +1,5 @@
 {
-  "passed": 62,
+  "passed": 64,
   "checks": [
     "IAM discovery before login",
     "IAM owner login",
@@ -43,6 +43,8 @@
     "Connection deletion preserves another connection's shared grant",
     "Remote home invokes registered local HTTP MCP",
     "Remote home invokes allowlisted local stdio process",
+    "An open HTTP port without MCP is offline while its host remains online",
+    "A missing stdio executable is offline while working connections still run",
     "Local shared disconnect cannot fall back to desktop account",
     "Offline local host never silently reroutes",
     "Local host reconnect recovers service",

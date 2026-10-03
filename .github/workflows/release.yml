@@ -47,7 +47,7 @@ jobs:
         run: |
           python -c 'import os,tomllib; version=tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"]; assert not os.environ["RELEASE_REF"].startswith("refs/tags/") or os.environ["RELEASE_TAG"]=="v"+version, "Tag must match the Cargo version"'
       - name: Test native CLI, SDK, transports and daemon
-        run: cargo test --locked -p mcport-cli -p mcport-client -p mcport-mcp -p mcport-daemon --target ${{ matrix.target }}
+        run: cargo test --locked -p mcport-cli -p mcport-client -p mcport-api -p mcport-mcp -p mcport-daemon --target ${{ matrix.target }}
       - name: Test package rejection rules
         run: python -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Build release CLI with embedded daemon
@@ -64,7 +64,7 @@ jobs:
     name: Complete six-target Honeycomb candidate
     needs: native
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -78,8 +78,13 @@ jobs:
           pattern: mcport-native-*
           merge-multiple: true
           path: native
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Install the official package validator
+        run: cargo install --locked silicon-honeycomb-cli --version 0.6.1
       - name: Require every target, validate bytes and emit checksums
-        run: python scripts/package.py assemble --input native --output candidate/mcport-honeycomb.zip
+        run: python scripts/package.py assemble --input native --output candidate/mcport-honeycomb.tar.gz
+      - name: Validate the final archive with official Honeycomb
+        run: honeycomb validate candidate/mcport-honeycomb.tar.gz --json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mcport-honeycomb-candidate

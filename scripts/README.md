@@ -27,10 +27,10 @@ cargo build --locked --release -p mcport-cli --target aarch64-apple-darwin
 ```sh
 .local/devtools/bin/python scripts/package.py assemble \
   --input .local/native \
-  --output .local/candidate/mcport-honeycomb.zip
+  --output .local/candidate/mcport-honeycomb.tar.gz
 ```
 
-Both commands verify the exact manifest version and paths. Assembly rechecks ELF64, Mach-O64 or PE32+ architecture, permissions, native smoke metadata and binary SHA-256; missing, extra, duplicate, truncated, wrong-architecture and altered payloads fail. Outputs use sorted paths, fixed timestamps and stored ZIP entries for deterministic bytes. Existing archives are never overwritten. The complete ZIP includes `honeycomb.yaml`, all declared binaries and their build records, accompanied by `.sha256` and `SHA256SUMS`. Tests use synthetic headers only to exercise validation; the staging command never fabricates executables.
+Both commands verify the exact manifest version and paths. Assembly rechecks ELF64, Mach-O64 or PE32+ architecture, permissions, native smoke metadata and binary SHA-256; missing, extra, duplicate, truncated, wrong-architecture and altered payloads fail. Native handoffs use stored ZIP entries. The complete candidate uses sorted USTAR entries and gzip with a fixed timestamp and empty filename for deterministic bytes. Existing archives are never overwritten. The complete `.tar.gz` contains only root `honeycomb.yaml` and declared binaries below `targets/`, as Honeycomb requires. Build records stay in a `.provenance.json` sidecar, alongside `.sha256` and `SHA256SUMS`. Assembly enforces the official 2 GiB expanded / 512 MiB compressed limits. CI installs the official `silicon-honeycomb-cli` 0.6.1 and requires `honeycomb validate` on the final archive before uploading the candidate artifact. Locally, use `honeycomb validate <archive.tar.gz>`; `honeycomb pack <populated-directory> --output <archive.tar.gz>` is the official alternative packer. Tests use synthetic headers only to exercise validation; the staging command never fabricates executables.
 
 The workflow produces downloadable candidate artifacts only. It has read-only repository permissions and no publish/deploy step. Six green native jobs and the assembled artifact are required before claiming all target builds were verified. A local test pass does not establish those remote results.
 

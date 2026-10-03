@@ -21,7 +21,9 @@ enum CliError {
     #[error(transparent)]
     Store(#[from] store::StoreError),
     #[error(transparent)]
-    Daemon(#[from] mcport_daemon::DaemonError),
+    Daemon(#[from] mcport_client::local::DaemonError),
+    #[error(transparent)]
+    Local(#[from] mcport_client::local::Error),
     #[error("{0}")]
     Input(String),
     #[error("Local I/O failed: {0}")]
@@ -51,6 +53,12 @@ type Result<T> = std::result::Result<T, CliError>;
 async fn main() {
     let cli = Cli::parse();
     let machine = cli.json;
+    if let Command::Docs { topic } = &cli.command
+        && !machine
+    {
+        println!("{}", topic.content());
+        return;
+    }
     match run(cli).await {
         Ok(value) => {
             let failed = value
@@ -166,6 +174,9 @@ async fn authenticated(
 }
 
 async fn run(cli: Cli) -> Result<Value> {
+    if let Command::Docs { topic } = &cli.command {
+        return Ok(json!({"topic":topic.name(),"content":topic.content()}));
+    }
     if let Command::Daemon(DaemonCommand::Run { registry }) = &cli.command {
         let cancellation = tokio_util::sync::CancellationToken::new();
         let signal = cancellation.clone();
@@ -174,7 +185,7 @@ async fn run(cli: Cli) -> Result<Value> {
                 signal.cancel();
             }
         });
-        mcport_daemon::run(registry, cancellation).await?;
+        mcport_client::local::run(registry, cancellation).await?;
         return Ok(json!({"stopped":true}));
     }
     let store = Store::discover()?;
@@ -340,46 +351,23 @@ async fn dispatch_inner(
                     session,
                 )?;
                 let _registry_lock = local::registry_lock(&path)?;
-                let mut registry = mcport_daemon::Registry::load(&path)?;
+                let mut registry = mcport_client::local::Registry::load(&path)?;
                 if registry.host.owner_id != session.principal_id {
                     return Err(CliError::Input(
                         "The local host registry belongs to another account.".into(),
                     ));
                 }
-                if registry.connections.contains_key(&connection.id) {
+                let added = mcport_client::local::register_connection(
+                    &mut registry,
+                    &connection,
+                    &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                    parse_environment(environment)?,
+                )?;
+                if !added {
                     return Ok(
                         json!({"registered":true,"already_registered":true,"connection_id":connection.id,"host_id":host_id,"note":"Existing local credentials and process configuration were preserved."}),
                     );
                 }
-                let env = parse_environment(environment)?;
-                let endpoint = match connection.transport.as_str() {
-                    "http" => {
-                        if !env.is_empty() {
-                            return Err(CliError::Input(
-                                "--env applies only to local stdio processes.".into(),
-                            ));
-                        }
-                        mcport_mcp::Endpoint::http(connection.url.clone().ok_or_else(|| {
-                            CliError::Input("HTTP connection has no endpoint URL.".into())
-                        })?)
-                    }
-                    "stdio" => {
-                        let command = connection.command.clone().ok_or_else(|| {
-                            CliError::Input("stdio connection has no executable.".into())
-                        })?;
-                        if !std::path::Path::new(&command).is_absolute() {
-                            return Err(CliError::Input("The configured stdio command is not an absolute path. Correct the connection before approving it.".into()));
-                        }
-                        mcport_mcp::Endpoint::Stdio {
-                            command,
-                            args: connection.args.clone(),
-                            env,
-                            cwd: None,
-                        }
-                    }
-                    _ => return Err(CliError::Input("Unsupported execution transport.".into())),
-                };
-                registry.register(&connection.id, endpoint, &connection.auth_mode)?;
                 registry.save(&path)?;
                 Ok(
                     json!({"registered":true,"connection_id":connection.id,"host_id":host_id,"connection":connection}),
@@ -448,19 +436,13 @@ async fn dispatch_inner(
                 let created = client.create_connection(ctx, &input).await?;
                 if let Some(path) = local_path {
                     let _registry_lock = local::registry_lock(&path)?;
-                    let mut registry = mcport_daemon::Registry::load(&path)?;
-                    let execution = match transport {
-                        Transport::Http => {
-                            mcport_mcp::Endpoint::http(endpoint.expect("validated endpoint"))
-                        }
-                        Transport::Stdio => mcport_mcp::Endpoint::Stdio {
-                            command: command.expect("validated command"),
-                            args: arguments,
-                            env,
-                            cwd: None,
-                        },
-                    };
-                    registry.register(&created.id, execution, auth.value())?;
+                    let mut registry = mcport_client::local::Registry::load(&path)?;
+                    mcport_client::local::register_connection(
+                        &mut registry,
+                        &created,
+                        &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                        env,
+                    )?;
                     if let Err(error) = registry.save(&path) {
                         return Err(CliError::Input(format!(
                             "Connection {} was saved centrally, but its local registration failed: {error}. It cannot execute. Delete it with mcport connection rm {} and retry after fixing local storage.",
@@ -501,17 +483,21 @@ async fn dispatch_inner(
             ConnectionCommand::Rm { connection } => {
                 let existing = client.connection(ctx, &connection).await?;
                 let response = client.delete_connection(ctx, &existing.id).await?;
-                if let Some(host_id) = existing.host_id {
+                if let Some(host_id) = &existing.host_id {
                     let path = local::registry_path(
                         store,
                         &client.backend_url(),
                         ctx.test_id.as_deref(),
-                        &host_id,
+                        host_id,
                     );
                     if path.exists() {
                         let _registry_lock = local::registry_lock(&path)?;
-                        let mut registry = mcport_daemon::Registry::load(&path)?;
-                        registry.connections.remove(&existing.id);
+                        let mut registry = mcport_client::local::Registry::load(&path)?;
+                        mcport_client::local::unregister_connection(
+                            &mut registry,
+                            &existing,
+                            &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                        )?;
                         registry.save(&path)?;
                     }
                 }
@@ -665,18 +651,15 @@ async fn dispatch_inner(
                     ctx.test_id.as_deref(),
                     &registration.host.id,
                 );
-                let registry = mcport_daemon::Registry::new(mcport_daemon::HostConfig {
-                    backend_url: client.backend_url(),
-                    host_id: registration.host.id.clone(),
-                    host_token: registration.host_token,
-                    environment: registration.host.environment.clone(),
-                    org_id: registration.host.org_id.clone(),
-                    owner_id: registration.host.owner_id.clone(),
-                    isi: ctx.isi.clone(),
-                });
+                let host = registration.host.clone();
+                let registry = mcport_client::local::registry_for_host(
+                    registration,
+                    &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                    ctx.isi.clone(),
+                )?;
                 registry.save(&path)?;
                 let daemon = local::start(&path).await?;
-                Ok(json!({"host":registration.host,"daemon":daemon}))
+                Ok(json!({"host":host,"daemon":daemon}))
             }
             HostCommand::Rm { host } => {
                 let host = client.host(ctx, &host).await?;
@@ -837,6 +820,8 @@ mod tests {
         let cases = [
             vec!["mcport", "login", "status", "--json"],
             vec!["mcport", "login", "slt-secret"],
+            vec!["mcport", "docs"],
+            vec!["mcport", "docs", "development", "--json"],
             vec!["mcport", "completion", "get", "notes", "--input", "{}"],
             vec![
                 "mcport",

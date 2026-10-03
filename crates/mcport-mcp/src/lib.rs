@@ -473,6 +473,9 @@ impl McpSession {
                 .request("tools/list", params, discovery)
                 .await
                 .map_err(|mut error| {
+                    if error.outcome_unknown {
+                        error.message = "Tool discovery did not complete. The tool was not called; check the MCP endpoint before trying again.".into();
+                    }
                     error.outcome_unknown = false;
                     error
                 })?;

@@ -4,15 +4,23 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Stateless public API client for Silicon MCPort"
+description = "Primary Rust interface for Silicon MCPort, with explicit local host support"
+
+[features]
+default = []
+local = ["dep:mcport-daemon", "dep:mcport-mcp", "dep:serde_json", "dep:thiserror", "dep:fs2", "dep:tokio", "dep:tokio-util"]
 
 [dependencies]
-mcport-core = { path = "../mcport-core", version = "0.1.0" }
-reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "stream"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-url = "2"
+mcport-api = { path = "../mcport-api", version = "0.1.0" }
+mcport-daemon = { path = "../mcport-daemon", version = "0.1.0", optional = true }
+mcport-mcp = { path = "../mcport-mcp", version = "0.1.0", optional = true }
+serde_json = { version = "1", optional = true }
+thiserror = { version = "2", optional = true }
+fs2 = { version = "0.4", optional = true }
+tokio = { version = "1", features = ["time"], optional = true }
+tokio-util = { version = "0.7", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

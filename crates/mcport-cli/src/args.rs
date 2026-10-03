@@ -20,6 +20,11 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Read bundled usage or development documentation without logging in.
+    Docs {
+        #[arg(value_enum, default_value = "usage")]
+        topic: DocsTopic,
+    },
     /// Discover IAM login details before signing in. Example: mcport iam --json.
     Iam,
     /// Exchange an app-bound short-lived token, or inspect login status.
@@ -382,4 +387,25 @@ pub enum CompletionCommand {
         #[arg(long, allow_hyphen_values = true)]
         input: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum DocsTopic {
+    Usage,
+    #[value(alias = "dev")]
+    Development,
+}
+impl DocsTopic {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Usage => "usage",
+            Self::Development => "development",
+        }
+    }
+    pub fn content(self) -> &'static str {
+        match self {
+            Self::Usage => include_str!("../README.md"),
+            Self::Development => include_str!("../docs/development.md"),
+        }
+    }
 }

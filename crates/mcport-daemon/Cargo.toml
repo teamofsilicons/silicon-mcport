@@ -7,7 +7,7 @@ description = "Outbound local MCP host connector for Silicon MCPort"
 
 [dependencies]
 mcport-core = { path = "../mcport-core", version = "0.1.0" }
-mcport-client = { path = "../mcport-client", version = "0.1.0" }
+mcport-api = { path = "../mcport-api", version = "0.1.0" }
 mcport-mcp = { path = "../mcport-mcp", version = "0.1.0" }
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls", "json"] }
 serde = { version = "1", features = ["derive"] }

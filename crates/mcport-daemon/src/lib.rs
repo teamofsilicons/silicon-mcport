@@ -1,8 +1,9 @@
 //! The local host connector only executes endpoints present in its own registry.
 //! Jobs never contain executable commands, URLs, or upstream credentials.
 mod assets;
+mod health;
 
-use mcport_client::{Client, HostContext};
+use mcport_api::{Client, HostContext};
 use mcport_core::{Actor, ApiError, HostJob, HostJobResult, HostPoll, HostPollResult};
 use mcport_mcp::{Endpoint, ExecutionOptions, McpSession, NetworkPolicy};
 use serde::{Deserialize, Serialize};
@@ -375,13 +376,14 @@ impl Backend {
         &self,
         registry: &Registry,
         active: Vec<String>,
+        health: BTreeMap<String, Value>,
     ) -> Result<HostPollResult, DaemonError> {
         let mut capabilities = BTreeMap::new();
         capabilities.insert("active_jobs".into(), json!(active.len()));
         capabilities.insert("active_job_ids".into(), json!(active));
         capabilities.insert("max_concurrent_jobs".into(), json!(4));
         for (id, connection) in &registry.connections {
-            capabilities.insert(id.clone(),json!({"account_owners":connection.personal_accounts.keys().collect::<Vec<_>>(),"shared_account":connection.shared_account.is_some(),"shared_account_disconnected":connection.shared_account_disconnected}));
+            capabilities.insert(id.clone(),json!({"account_owners":connection.personal_accounts.keys().collect::<Vec<_>>(),"shared_account":connection.shared_account.is_some(),"shared_account_disconnected":connection.shared_account_disconnected,"health":health.get(id)}));
         }
         self.client
             .host_poll(
@@ -393,7 +395,7 @@ impl Backend {
             )
             .await
             .map_err(|failure| match failure {
-                mcport_client::Error::Api {
+                mcport_api::Error::Api {
                     status: 401 | 403 | 404,
                     ..
                 } => DaemonError::Unauthorized,
@@ -405,7 +407,7 @@ impl Backend {
     async fn complete(&self, id: &str, result: &HostJobResult) -> bool {
         match self.client.host_result(&self.context, id, result).await {
             Ok(_) => true,
-            Err(mcport_client::Error::Api {
+            Err(mcport_api::Error::Api {
                 status: 404 | 409 | 410,
                 ..
             }) => true,
@@ -480,6 +482,7 @@ pub async fn run(
     let (completed_tx, mut completed_rx) = mpsc::channel::<(String, HostJobResult)>(16);
     let mut active: HashMap<String, ActiveJob> = HashMap::new();
     let mut sessions: SessionPool = HashMap::new();
+    let mut health = health::Monitor::default();
     let mut polling: Option<tokio::task::JoinHandle<Result<HostPollResult, DaemonError>>> = None;
     let mut poll_at = tokio::time::Instant::now();
     let mut failures = 0u32;
@@ -488,6 +491,8 @@ pub async fn run(
     loop {
         if polling.is_none() && tokio::time::Instant::now() >= poll_at {
             registry = reload_registry(&registry_path, &registry)?;
+            health.sync(&registry);
+            health.tick(&sessions);
             for (id, job) in &active {
                 let changed = registry
                     .connections
@@ -525,12 +530,14 @@ pub async fn run(
             let backend = backend.clone();
             let snapshot = registry.clone();
             let active_ids = active.keys().cloned().collect();
+            let health_snapshot = health.snapshot();
             polling = Some(tokio::spawn(async move {
-                backend.poll(&snapshot, active_ids).await
+                backend.poll(&snapshot, active_ids, health_snapshot).await
             }));
         }
         tokio::select! {
             _=control_tick.tick()=>{
+                health.tick(&sessions);
                 if stop_path.exists(){let _=fs::remove_file(&stop_path);shutdown.cancel();}
                 let modified=fs::metadata(&registry_path)?.modified()?;
                 if modified!=registry_modified{
@@ -754,7 +761,7 @@ async fn execute_in_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn host() -> HostConfig {
+    pub(super) fn host() -> HostConfig {
         HostConfig {
             backend_url: "http://127.0.0.1:4380".into(),
             host_id: "host".into(),

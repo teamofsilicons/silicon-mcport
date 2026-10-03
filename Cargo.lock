@@ -1471,6 +1471,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
+name = "mcport-api"
+version = "0.1.0"
+dependencies = [
+ "mcport-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "mcport-cli"
 version = "0.1.0"
 dependencies = [
@@ -1479,8 +1492,6 @@ dependencies = [
  "dirs",
  "fs2",
  "mcport-client",
- "mcport-daemon",
- "mcport-mcp",
  "rpassword",
  "serde",
  "serde_json",
@@ -1496,13 +1507,15 @@ dependencies = [
 name = "mcport-client"
 version = "0.1.0"
 dependencies = [
- "mcport-core",
- "reqwest",
- "serde",
+ "fs2",
+ "mcport-api",
+ "mcport-daemon",
+ "mcport-mcp",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
- "url",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1520,7 +1533,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "fs2",
- "mcport-client",
+ "mcport-api",
  "mcport-core",
  "mcport-mcp",
  "reqwest",

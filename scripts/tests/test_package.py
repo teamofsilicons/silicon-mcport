@@ -7,6 +7,7 @@ from pathlib import Path
 import stat
 import struct
 import tempfile
+import tarfile
 import unittest
 import zipfile
 
@@ -73,7 +74,7 @@ class PackagingTests(unittest.TestCase):
             path = Path(directory)
             for target in list(package.TARGETS)[:-1]:
                 self.stage_fixture(path, target)
-            args = argparse.Namespace(manifest=package.ROOT / "honeycomb.yaml", input=path, output=path / "candidate.zip")
+            args = argparse.Namespace(manifest=package.ROOT / "honeycomb.yaml", input=path, output=path / "candidate.tar.gz")
             with self.assertRaisesRegex(package.PackageError, "Missing native targets"):
                 package.assemble(args)
             self.assertFalse(args.output.exists())
@@ -82,27 +83,28 @@ class PackagingTests(unittest.TestCase):
                 package.assemble(args)
             self.assertFalse(args.output.exists())
 
-    def test_deterministic_complete_zip_and_no_overwrite(self):
+    def test_deterministic_complete_tar_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             staged = path / "staged"
             staged.mkdir()
             for target in package.TARGETS:
                 self.stage_fixture(staged, target)
-            first, second = path / "first.zip", path / "second.zip"
+            first, second = path / "first.tar.gz", path / "second.tar.gz"
             for output in (first, second):
                 package.assemble(argparse.Namespace(manifest=package.ROOT / "honeycomb.yaml", input=staged, output=output))
             self.assertEqual(first.read_bytes(), second.read_bytes())
-            with zipfile.ZipFile(first) as archive:
-                self.assertEqual(len(archive.infolist()), 13)
+            with tarfile.open(first) as archive:
+                self.assertEqual(len(archive.getmembers()), 7)
                 for target in package.TARGETS:
                     data, _ = package.manifest(package.ROOT / "honeycomb.yaml")
-                    info = archive.getinfo(package.binary_path(data, target))
-                    self.assertEqual(stat.S_IMODE(info.external_attr >> 16), 0o755)
-                    self.assertEqual(info.date_time, package.FIXED_TIME)
+                    info = archive.getmember(package.binary_path(data, target))
+                    self.assertEqual(info.mode, 0o755)
+                    self.assertEqual(info.mtime, 0)
+                    self.assertTrue(info.isfile())
             before = first.read_bytes()
             with self.assertRaises(package.PackageError):
-                package.write_zip(first, {})
+                package.write_honeycomb_tar(first, {})
             self.assertEqual(before, first.read_bytes())
 
     def test_duplicate_manifest_keys_rejected(self):
@@ -120,7 +122,7 @@ class PackagingTests(unittest.TestCase):
             data = header_fixture(target)
             record = {"target": target, "rust_target": package.TARGETS[target][2], "version": manifest["version"], "sha256": "0" * 64, "native_smoke": True}
             filename = path / "mcport-linux-x86_64.zip"
-            args = argparse.Namespace(manifest=package.ROOT / "honeycomb.yaml", input=path, output=path / "candidate.zip")
+            args = argparse.Namespace(manifest=package.ROOT / "honeycomb.yaml", input=path, output=path / "candidate.tar.gz")
             package.write_zip(filename, {"../mcport": (data, 0o755), f"build/{target}.json": (json.dumps(record).encode(), 0o644)})
             with self.assertRaisesRegex(package.PackageError, "Unexpected native archive paths"):
                 package.assemble(args)

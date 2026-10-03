@@ -15,7 +15,7 @@ use mcport_core::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Attempt {
@@ -120,6 +120,26 @@ async fn fetch(app: &App, url: &str) -> Result<Value> {
     })?)
     .await
 }
+async fn discover(app: &App, urls: &[String]) -> Result<Value> {
+    for url in urls {
+        let response = client(app, url).await?.get(url).send().await.map_err(|_| {
+            failure(
+                "provider_oauth_unavailable",
+                "The OAuth discovery endpoint could not be reached.",
+            )
+        })?;
+        // Only an absent endpoint permits fallback. Do not hide an invalid
+        // document, issuer mismatch, redirect or authorization failure.
+        if matches!(response.status().as_u16(), 404 | 410) {
+            continue;
+        }
+        return body(response).await;
+    }
+    Err(failure(
+        "oauth_metadata_not_found",
+        "The provider did not publish OAuth metadata at its supported discovery endpoints.",
+    ))
+}
 fn required(v: &Value, key: &str) -> Result<String> {
     v.get(key)
         .and_then(Value::as_str)
@@ -138,6 +158,235 @@ fn metadata_url(issuer: &url::Url, name: &str) -> String {
         "{}/.well-known/{name}{path}",
         issuer.origin().ascii_serialization()
     )
+}
+fn authorization_metadata_urls(issuer: &url::Url) -> Vec<String> {
+    let mut urls = vec![
+        metadata_url(issuer, "oauth-authorization-server"),
+        metadata_url(issuer, "openid-configuration"),
+    ];
+    if !issuer.path().trim_matches('/').is_empty() {
+        urls.push(format!(
+            "{}/.well-known/openid-configuration",
+            issuer.as_str().trim_end_matches('/')
+        ));
+    }
+    urls
+}
+async fn authorization_metadata(app: &App, issuer: &str) -> Result<Value> {
+    let metadata = discover(app, &authorization_metadata_urls(&issuer_url(issuer)?)).await?;
+    if required(&metadata, "issuer")? != issuer {
+        return Err(failure(
+            "issuer_mismatch",
+            "The OAuth metadata issuer does not match its discovery source.",
+        ));
+    }
+    Ok(metadata)
+}
+
+#[derive(Default, Debug, PartialEq, Eq)]
+struct BearerChallenge {
+    resource_metadata: Option<String>,
+    scope: Option<String>,
+}
+fn challenge_error() -> Error {
+    failure(
+        "provider_oauth_invalid",
+        "The provider returned an invalid or ambiguous Bearer challenge.",
+    )
+}
+fn token_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
+}
+fn auth_value(value: &str) -> Result<String> {
+    if let Some(quoted) = value.strip_prefix('"') {
+        let mut escaped = false;
+        let mut result = String::new();
+        for (index, ch) in quoted.char_indices() {
+            if escaped {
+                if ch.is_control() {
+                    return Err(challenge_error());
+                }
+                result.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                return if quoted[index + 1..].trim().is_empty() {
+                    Ok(result)
+                } else {
+                    Err(challenge_error())
+                };
+            } else if ch.is_control() {
+                return Err(challenge_error());
+            } else {
+                result.push(ch);
+            }
+        }
+        Err(challenge_error())
+    } else if !value.is_empty() && value.bytes().all(token_char) {
+        Ok(value.into())
+    } else {
+        Err(challenge_error())
+    }
+}
+fn bearer_challenge(headers: &HeaderMap) -> Result<BearerChallenge> {
+    let mut bearer: Option<BTreeMap<String, String>> = None;
+    let mut challenges = Vec::new();
+    let mut bytes = 0;
+    for header in headers.get_all(header::WWW_AUTHENTICATE) {
+        let text = header.to_str().map_err(|_| challenge_error())?;
+        bytes += text.len();
+        if bytes > 16384 {
+            return Err(challenge_error());
+        }
+        let mut quoted = false;
+        let mut escaped = false;
+        let mut start = 0;
+        let mut parts = Vec::new();
+        for (index, byte) in text.bytes().enumerate() {
+            if escaped {
+                escaped = false;
+            } else if quoted && byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = !quoted;
+            } else if !quoted && byte == b',' {
+                parts.push(&text[start..index]);
+                start = index + 1;
+            }
+        }
+        if quoted || escaped {
+            return Err(challenge_error());
+        }
+        parts.push(&text[start..]);
+        for part in parts {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let token_end = part.bytes().take_while(|b| token_char(*b)).count();
+            if token_end == 0 {
+                return Err(challenge_error());
+            }
+            let mut name = &part[..token_end];
+            let mut rest = part[token_end..].trim_start();
+            if !rest.starts_with('=') {
+                if let Some(previous) = bearer.take() {
+                    challenges.push(previous);
+                }
+                if !name.eq_ignore_ascii_case("bearer") {
+                    continue;
+                }
+                bearer = Some(BTreeMap::new());
+                if rest.is_empty() {
+                    continue;
+                }
+                let token_end = rest.bytes().take_while(|b| token_char(*b)).count();
+                name = &rest[..token_end];
+                rest = rest[token_end..].trim_start();
+            }
+            if let Some(params) = &mut bearer {
+                let value = auth_value(rest.strip_prefix('=').ok_or_else(challenge_error)?.trim())?;
+                if name.is_empty()
+                    || params.len() >= 32
+                    || params.insert(name.to_ascii_lowercase(), value).is_some()
+                {
+                    return Err(challenge_error());
+                }
+            }
+        }
+        if let Some(previous) = bearer.take() {
+            challenges.push(previous);
+        }
+    }
+    if challenges.len() > 1 {
+        return Err(challenge_error());
+    }
+    let mut params = challenges.pop().unwrap_or_default();
+    Ok(BearerChallenge {
+        resource_metadata: params.remove("resource_metadata"),
+        scope: params.remove("scope"),
+    })
+}
+fn selected_scope(challenge: &BearerChallenge, resource: &Value) -> Result<Option<String>> {
+    let scope = match &challenge.scope {
+        Some(scope) => scope.clone(),
+        None => match resource.get("scopes_supported") {
+            None => return Ok(None),
+            Some(Value::Array(scopes)) => scopes
+                .iter()
+                .map(|scope| scope.as_str().ok_or_else(challenge_error))
+                .collect::<Result<Vec<_>>>()?
+                .join(" "),
+            _ => return Err(challenge_error()),
+        },
+    };
+    if scope.is_empty() && challenge.scope.is_none() {
+        return Ok(None);
+    }
+    if scope.is_empty()
+        || scope.len() > 8192
+        || !scope.bytes().all(|b| {
+            b == b' ' || b == b'!' || (b'#'..=b'[').contains(&b) || (b']'..=b'~').contains(&b)
+        })
+    {
+        return Err(challenge_error());
+    }
+    let scope = scope
+        .split(' ')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if scope.is_empty() {
+        return Err(challenge_error());
+    }
+    Ok(Some(scope))
+}
+
+fn public_endpoints(app: &App) -> Result<(url::Url, String, String)> {
+    let base = app.config.public_url.trim_end_matches('/');
+    let url = issuer_url(base)?;
+    if base.len() > 2048
+        || base.contains('\\')
+        || base.split('/').any(|part| {
+            matches!(
+                part.to_ascii_lowercase().as_str(),
+                "." | ".." | "%2e" | ".%2e" | "%2e." | "%2e%2e"
+            )
+        })
+    {
+        return Err(failure(
+            "invalid_public_url",
+            "Configure a public MCPort URL without dot path segments or a query.",
+        ));
+    }
+    Ok((
+        url,
+        format!("{base}/oauth/client-metadata.json"),
+        format!("{base}/oauth/callback"),
+    ))
+}
+fn registration_metadata(app: &App) -> Result<Value> {
+    let (url, _, redirect) = public_endpoints(app)?;
+    let local = url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
+    });
+    Ok(
+        json!({"client_name":"Silicon MCPort","redirect_uris":[redirect],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":if local {"native"} else {"web"}}),
+    )
+}
+pub async fn client_metadata(State(app): State<App>) -> Result<Json<Value>> {
+    let (url, client_id, _) = public_endpoints(&app)?;
+    if url.scheme() != "https" {
+        return Err(Error::missing());
+    }
+    let mut metadata = registration_metadata(&app)?;
+    metadata["client_id"] = json!(client_id);
+    Ok(Json(metadata))
 }
 fn issuer_url(issuer: &str) -> Result<url::Url> {
     let url = url::Url::parse(issuer).map_err(|_| {
@@ -174,6 +423,71 @@ fn validate_issuer(expected: &str, actual: Option<&str>, required: bool) -> Resu
     }
     Ok(())
 }
+async fn client_identifier(
+    app: &App,
+    configured: Option<String>,
+    metadata: &Value,
+) -> Result<String> {
+    if let Some(client_id) = configured {
+        if client_id.is_empty() || client_id.len() > 2048 || client_id.chars().any(char::is_control)
+        {
+            return Err(Error::bad("Invalid provider client ID."));
+        }
+        return Ok(client_id);
+    }
+    let (public_url, client_id, _) = public_endpoints(app)?;
+    if metadata.get("client_id_metadata_document_supported") == Some(&Value::Bool(true))
+        && public_url.scheme() == "https"
+    {
+        return Ok(client_id);
+    }
+    if let Some(registration) = metadata
+        .get("registration_endpoint")
+        .and_then(Value::as_str)
+    {
+        let response = client(app, registration)
+            .await?
+            .post(registration)
+            .json(&registration_metadata(app)?)
+            .send()
+            .await
+            .map_err(|_| {
+                failure(
+                    "provider_registration_failed",
+                    "OAuth client registration could not be completed.",
+                )
+            })?;
+        if !response.status().is_success() {
+            return Err(failure(
+                "provider_registration_failed",
+                "The provider rejected public PKCE client registration. Check its callback and application-type requirements, or supply a pre-registered public client ID.",
+            ));
+        }
+        let registration = body(response).await?;
+        if registration
+            .get("token_endpoint_auth_method")
+            .and_then(Value::as_str)
+            .is_some_and(|x| x != "none")
+        {
+            return Err(failure(
+                "registration_required",
+                "The provider requires a confidential OAuth client. Configure a public PKCE client with the provider.",
+            ));
+        }
+        let client_id = required(&registration, "client_id")?;
+        if client_id.len() > 2048 || client_id.chars().any(char::is_control) {
+            return Err(failure(
+                "provider_oauth_invalid",
+                "The provider returned an invalid client identifier.",
+            ));
+        }
+        return Ok(client_id);
+    }
+    Err(failure(
+        "registration_required",
+        "Register a public PKCE OAuth client with this provider, or configure a publicly reachable HTTPS MCPORT_PUBLIC_URL for providers supporting client metadata documents.",
+    ))
+}
 #[derive(Deserialize)]
 pub struct AuthorizeInput {
     pub client_id: Option<String>,
@@ -199,8 +513,7 @@ pub async fn authorize(
     let account_epoch = epoch(&app, &c, &a)?;
     let endpoint = url::Url::parse(c.url.as_deref().ok_or_else(Error::internal)?)
         .map_err(|_| Error::bad("Invalid MCP URL."))?;
-    let mut resource_url = metadata_url(&endpoint, "oauth-protected-resource");
-    // Prefer a provider's explicit protected-resource metadata challenge.
+    // Only the initial unauthorized Bearer challenge chooses requested scopes.
     let probe = client(&app, endpoint.as_str())
         .await?
         .get(endpoint.as_str())
@@ -212,18 +525,28 @@ pub async fn authorize(
                 "The MCP provider could not be reached.",
             )
         })?;
-    if let Some(challenge) = probe
-        .headers()
-        .get(header::WWW_AUTHENTICATE)
-        .and_then(|v| v.to_str().ok())
-        && let Some(value) = challenge
-            .split("resource_metadata=\"")
-            .nth(1)
-            .and_then(|v| v.split('"').next())
-    {
-        resource_url = value.to_owned()
-    }
-    let resource = fetch(&app, &resource_url).await?;
+    let challenge = if probe.status() == reqwest::StatusCode::UNAUTHORIZED {
+        bearer_challenge(probe.headers())?
+    } else {
+        BearerChallenge::default()
+    };
+    drop(probe);
+    let resource = if let Some(resource_url) = &challenge.resource_metadata {
+        fetch(&app, resource_url).await?
+    } else {
+        let path = metadata_url(&endpoint, "oauth-protected-resource");
+        let root = format!(
+            "{}/.well-known/oauth-protected-resource",
+            endpoint.origin().ascii_serialization()
+        );
+        let urls = if path == root {
+            vec![root]
+        } else {
+            vec![path, root]
+        };
+        discover(&app, &urls).await?
+    };
+    let scope = selected_scope(&challenge, &resource)?;
     let resource_id = required(&resource, "resource")?;
     let resource_parsed = url::Url::parse(&resource_id).map_err(|_| {
         failure(
@@ -258,18 +581,7 @@ pub async fn authorize(
                 "This MCP did not advertise an OAuth authorization server.",
             )
         })?;
-    let issuer_url = issuer_url(issuer)?;
-    let metadata = fetch(
-        &app,
-        &metadata_url(&issuer_url, "oauth-authorization-server"),
-    )
-    .await?;
-    if required(&metadata, "issuer")? != issuer {
-        return Err(failure(
-            "issuer_mismatch",
-            "The OAuth metadata issuer does not match its discovery source.",
-        ));
-    }
+    let metadata = authorization_metadata(&app, issuer).await?;
     if !metadata
         .get("code_challenge_methods_supported")
         .and_then(Value::as_array)
@@ -284,38 +596,8 @@ pub async fn authorize(
     let token_url = required(&metadata, "token_endpoint")?;
     let _ = client(&app, &authorize_url).await?;
     let _ = client(&app, &token_url).await?;
-    let redirect = format!(
-        "{}/oauth/callback",
-        app.config.public_url.trim_end_matches('/')
-    );
-    let client_id = if let Some(client_id) = input.client_id {
-        if client_id.is_empty() || client_id.len() > 2048 {
-            return Err(Error::bad("Invalid provider client ID."));
-        }
-        client_id
-    } else if let Some(registration) = metadata
-        .get("registration_endpoint")
-        .and_then(Value::as_str)
-    {
-        let response=client(&app,registration).await?.post(registration).json(&json!({"client_name":"Silicon MCPort","redirect_uris":[redirect],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"})).send().await.map_err(|_|failure("provider_registration_failed","OAuth client registration could not be completed."))?;
-        let registration = body(response).await?;
-        if registration
-            .get("token_endpoint_auth_method")
-            .and_then(Value::as_str)
-            .is_some_and(|x| x != "none")
-        {
-            return Err(failure(
-                "registration_required",
-                "The provider requires a confidential OAuth client. Configure a public PKCE client with the provider.",
-            ));
-        }
-        required(&registration, "client_id")?
-    } else {
-        return Err(failure(
-            "registration_required",
-            "Register a public PKCE OAuth client with this provider, then retry with its client ID.",
-        ));
-    };
+    let (_, _, redirect) = public_endpoints(&app)?;
+    let client_id = client_identifier(&app, input.client_id, &metadata).await?;
     let verifier = secret("");
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let state = secret("mpo_");
@@ -332,15 +614,8 @@ pub async fn authorize(
         .append_pair("code_challenge", &challenge)
         .append_pair("code_challenge_method", "S256")
         .append_pair("resource", &resource_id);
-    if let Some(scopes) = resource.get("scopes_supported").and_then(Value::as_array) {
-        let scopes = scopes
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !scopes.is_empty() {
-            destination.query_pairs_mut().append_pair("scope", &scopes);
-        }
+    if let Some(scope) = scope {
+        destination.query_pairs_mut().append_pair("scope", &scope);
     }
     let attempt = Attempt {
         key: key.clone(),
@@ -528,7 +803,7 @@ pub async fn callback(
         secret: access,
         header_name: None,
         oauth: Some(
-            json!({"token_url":attempt.token_url,"client_id":attempt.client_id,"resource":attempt.resource,"refresh_token":tokens.get("refresh_token"),"expires_at":now()+tokens.get("expires_in").and_then(Value::as_i64).unwrap_or(3600).clamp(1,31536000)}),
+            json!({"issuer":attempt.issuer,"token_url":attempt.token_url,"client_id":attempt.client_id,"resource":attempt.resource,"refresh_token":tokens.get("refresh_token"),"expires_at":now()+tokens.get("expires_in").and_then(Value::as_i64).unwrap_or(3600).clamp(1,31536000)}),
         ),
     };
     // Every successful account replacement advances the epoch, including OAuth
@@ -721,7 +996,7 @@ mod tests {
         let app = App::new(config).unwrap();
         let a = Auth {
             session: StoredSession {
-                key: "session".into(),
+                key: hash("gateway-session"),
                 family: "family".into(),
                 actor: Actor {
                     principal_id: "c:alice".into(),
@@ -1035,5 +1310,369 @@ mod tests {
         );
         assert_eq!(provider.exchanges.load(Ordering::SeqCst), 0);
         server.abort();
+    }
+    #[derive(Clone)]
+    struct Reply {
+        status: u16,
+        headers: Vec<(String, String)>,
+        json: Value,
+    }
+    #[derive(Default)]
+    struct Discovery {
+        replies: std::sync::Mutex<BTreeMap<String, Reply>>,
+        requests: std::sync::Mutex<Vec<String>>,
+        registrations: std::sync::Mutex<Vec<Value>>,
+    }
+    impl Discovery {
+        fn reply(&self, path: &str, status: u16, json: Value) {
+            self.replies.lock().unwrap().insert(
+                path.into(),
+                Reply {
+                    status,
+                    headers: vec![],
+                    json,
+                },
+            );
+        }
+        fn challenge(&self, value: &str) {
+            self.replies.lock().unwrap().insert(
+                "/mcp".into(),
+                Reply {
+                    status: 401,
+                    headers: vec![("www-authenticate".into(), value.into())],
+                    json: json!({}),
+                },
+            );
+        }
+    }
+    async fn discovery_request(
+        State(state): State<Arc<Discovery>>,
+        uri: Uri,
+        body: String,
+    ) -> Response {
+        state.requests.lock().unwrap().push(uri.path().into());
+        if uri.path() == "/register" {
+            state
+                .registrations
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(&body).unwrap());
+        }
+        let reply = state
+            .replies
+            .lock()
+            .unwrap()
+            .get(uri.path())
+            .cloned()
+            .unwrap_or(Reply {
+                status: 404,
+                headers: vec![],
+                json: json!({"error":"not_found"}),
+            });
+        let mut response = (
+            axum::http::StatusCode::from_u16(reply.status).unwrap(),
+            Json(reply.json),
+        )
+            .into_response();
+        for (name, value) in reply.headers {
+            response.headers_mut().append(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        response
+    }
+    async fn discovery_fixture(
+        app: &App,
+        c: &Connection,
+    ) -> (App, Arc<Discovery>, String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let state = Arc::new(Discovery::default());
+        let router = Router::new()
+            .fallback(discovery_request)
+            .with_state(state.clone());
+        let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let mut app = app.clone();
+        let mut config = (*app.config).clone();
+        config.upstream_origins.insert(origin.clone());
+        config.public_url = "https://configured.mcport.example".into();
+        app.config = Arc::new(config);
+        let mut c = c.clone();
+        c.url = Some(format!("{origin}/mcp"));
+        app.store
+            .put(
+                "connection",
+                &c.id,
+                &c.environment,
+                &c.org_id,
+                &c.owner_id,
+                Some(&c.name),
+                &c,
+                None,
+            )
+            .unwrap();
+        (app, state, origin, task)
+    }
+    async fn authorize_fixture(app: &App, configured: Option<&str>) -> Result<Attempt> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            "Bearer gateway-session".parse().unwrap(),
+        );
+        let response = authorize(
+            State(app.clone()),
+            headers,
+            Path("connection".into()),
+            Json(AuthorizeInput {
+                client_id: configured.map(str::to_owned),
+            }),
+        )
+        .await?;
+        let body: Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        Ok(app
+            .store
+            .get(
+                "oauth_attempt",
+                &hash(body["data"]["state"].as_str().unwrap()),
+            )?
+            .unwrap())
+    }
+    fn metadata(origin: &str, issuer: &str) -> Value {
+        json!({"issuer":issuer,"authorization_endpoint":format!("{origin}/authorize"),"token_endpoint":format!("{origin}/token"),
+            "code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,
+            "client_id_metadata_document_supported":true,"registration_endpoint":format!("{origin}/register")})
+    }
+    #[test]
+    fn challenge_parser_handles_multiple_schemes_quoted_commas_and_rejects_ambiguity() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            header::WWW_AUTHENTICATE,
+            r#"Basic realm="ignore, this""#.parse().unwrap(),
+        );
+        headers.append(header::WWW_AUTHENTICATE, r#"bEaReR realm="a\"b", Resource_Metadata = "https://provider.example/meta?x=1,2", scope = "read write""#.parse().unwrap());
+        assert_eq!(
+            bearer_challenge(&headers).unwrap(),
+            BearerChallenge {
+                resource_metadata: Some("https://provider.example/meta?x=1,2".into()),
+                scope: Some("read write".into())
+            }
+        );
+        for invalid in [
+            r#"Bearer scope="read", scope="write""#,
+            r#"Bearer scope="read", Bearer scope="write""#,
+            r#"Bearer scope="unterminated"#,
+            r#"Bearer scope="read"trailing"#,
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::WWW_AUTHENTICATE, invalid.parse().unwrap());
+            assert!(bearer_challenge(&headers).is_err(), "{invalid}");
+        }
+        let challenge = BearerChallenge {
+            scope: Some("read".into()),
+            resource_metadata: None,
+        };
+        assert_eq!(
+            selected_scope(&challenge, &json!({"scopes_supported":["admin"]})).unwrap(),
+            Some("read".into())
+        );
+        assert_eq!(
+            selected_scope(
+                &BearerChallenge::default(),
+                &json!({"scopes_supported":["read","write"]})
+            )
+            .unwrap(),
+            Some("read write".into())
+        );
+        assert_eq!(
+            selected_scope(&BearerChallenge::default(), &json!({})).unwrap(),
+            None
+        );
+    }
+    #[tokio::test]
+    async fn oidc_appended_discovery_and_root_resource_fallback_use_challenge_scope_and_cimd() {
+        let (app, _dir, _a, c, _provider, iam) = fixture().await;
+        let (app, discovery, origin, server) = discovery_fixture(&app, &c).await;
+        let issuer = format!("{origin}/tenant");
+        discovery.challenge(r#"Basic realm="ignore, this", Bearer scope="read:one read:two""#);
+        discovery.reply("/.well-known/oauth-protected-resource",200,json!({"resource":format!("{origin}/mcp"),"authorization_servers":[issuer],"scopes_supported":["admin"]}));
+        discovery.reply(
+            "/tenant/.well-known/openid-configuration",
+            200,
+            metadata(&origin, &issuer),
+        );
+        let attempt = authorize_fixture(&app, None).await.unwrap();
+        assert_eq!(attempt.issuer, issuer);
+        assert_eq!(
+            attempt.client_id,
+            "https://configured.mcport.example/oauth/client-metadata.json"
+        );
+        let url = url::Url::parse(&attempt.authorization_url).unwrap();
+        let pairs: BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(pairs["scope"], "read:one read:two");
+        assert_eq!(pairs["resource"], format!("{origin}/mcp"));
+        assert_eq!(
+            pairs["redirect_uri"],
+            "https://configured.mcport.example/oauth/callback"
+        );
+        assert_eq!(pairs["code_challenge_method"], "S256");
+        assert_eq!(
+            pairs["code_challenge"],
+            URL_SAFE_NO_PAD.encode(Sha256::digest(attempt.verifier.as_bytes()))
+        );
+        assert_eq!(
+            *discovery.requests.lock().unwrap(),
+            vec![
+                "/mcp",
+                "/.well-known/oauth-protected-resource/mcp",
+                "/.well-known/oauth-protected-resource",
+                "/.well-known/oauth-authorization-server/tenant",
+                "/.well-known/openid-configuration/tenant",
+                "/tenant/.well-known/openid-configuration"
+            ]
+        );
+        assert!(discovery.registrations.lock().unwrap().is_empty());
+        server.abort();
+        iam.abort();
+    }
+    #[tokio::test]
+    async fn discovery_does_not_fallback_after_issuer_mismatch_or_redirect() {
+        let (app, _dir, _a, c, _provider, iam) = fixture().await;
+        let (app, discovery, origin, server) = discovery_fixture(&app, &c).await;
+        let issuer = format!("{origin}/tenant");
+        discovery.reply(
+            "/.well-known/oauth-authorization-server/tenant",
+            200,
+            metadata(&origin, "https://wrong.example"),
+        );
+        discovery.reply(
+            "/.well-known/openid-configuration/tenant",
+            200,
+            metadata(&origin, &issuer),
+        );
+        assert_eq!(
+            authorization_metadata(&app, &issuer)
+                .await
+                .unwrap_err()
+                .1
+                .code,
+            "issuer_mismatch"
+        );
+        assert_eq!(discovery.requests.lock().unwrap().len(), 1);
+        discovery.replies.lock().unwrap().insert(
+            "/.well-known/oauth-authorization-server/tenant".into(),
+            Reply {
+                status: 302,
+                headers: vec![(
+                    "location".into(),
+                    format!("{origin}/.well-known/openid-configuration/tenant"),
+                )],
+                json: json!({}),
+            },
+        );
+        assert_eq!(
+            authorization_metadata(&app, &issuer)
+                .await
+                .unwrap_err()
+                .1
+                .code,
+            "provider_oauth_rejected"
+        );
+        assert_eq!(discovery.requests.lock().unwrap().len(), 2);
+        server.abort();
+        iam.abort();
+    }
+    #[tokio::test]
+    async fn registration_order_and_application_type_respect_configured_public_url() {
+        let (app, _dir, _a, c, _provider, iam) = fixture().await;
+        let (mut app, discovery, origin, server) = discovery_fixture(&app, &c).await;
+        let metadata = metadata(&origin, &origin);
+        discovery.reply(
+            "/register",
+            201,
+            json!({"client_id":"dynamic-id","token_endpoint_auth_method":"none"}),
+        );
+        assert_eq!(
+            client_identifier(&app, Some("explicit-id".into()), &metadata)
+                .await
+                .unwrap(),
+            "explicit-id"
+        );
+        assert_eq!(
+            client_identifier(&app, None, &metadata).await.unwrap(),
+            "https://configured.mcport.example/oauth/client-metadata.json"
+        );
+        assert!(discovery.registrations.lock().unwrap().is_empty());
+        let mut config = (*app.config).clone();
+        config.public_url = "http://127.0.0.1:4380".into();
+        app.config = Arc::new(config);
+        assert_eq!(
+            client_identifier(&app, None, &metadata).await.unwrap(),
+            "dynamic-id"
+        );
+        assert_eq!(
+            discovery.registrations.lock().unwrap()[0]["application_type"],
+            "native"
+        );
+        assert_eq!(
+            discovery.registrations.lock().unwrap()[0]["redirect_uris"],
+            json!(["http://127.0.0.1:4380/oauth/callback"])
+        );
+        assert!(client_metadata(State(app.clone())).await.is_err());
+        let mut config = (*app.config).clone();
+        config.public_url = "https://configured.mcport.example".into();
+        app.config = Arc::new(config);
+        let mut legacy = metadata.clone();
+        legacy["client_id_metadata_document_supported"] = json!(false);
+        assert_eq!(
+            client_identifier(&app, None, &legacy).await.unwrap(),
+            "dynamic-id"
+        );
+        assert_eq!(
+            discovery.registrations.lock().unwrap()[1]["application_type"],
+            "web"
+        );
+        server.abort();
+        iam.abort();
+    }
+    #[tokio::test]
+    async fn client_metadata_route_is_public_and_never_uses_request_host() {
+        use tower::ServiceExt;
+        let (app, _dir, _a, c, _provider, iam) = fixture().await;
+        let (app, _discovery, _origin, server) = discovery_fixture(&app, &c).await;
+        let response = crate::router(app)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/oauth/client-metadata.json")
+                    .header("host", "attacker.example")
+                    .header("x-forwarded-host", "attacker.example")
+                    .header("x-forwarded-proto", "http")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let data = axum::body::to_bytes(response.into_body(), 5120)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&data).unwrap();
+        assert_eq!(
+            json["client_id"],
+            "https://configured.mcport.example/oauth/client-metadata.json"
+        );
+        assert_eq!(
+            json["redirect_uris"],
+            json!(["https://configured.mcport.example/oauth/callback"])
+        );
+        assert_eq!(json["token_endpoint_auth_method"], "none");
+        assert!(json.get("client_secret").is_none());
+        server.abort();
+        iam.abort();
     }
 }

@@ -113,6 +113,7 @@ fn router(app: App) -> Router {
     .route("/internal/honeycomb/organizations/{org}/testing-environments/{environment}/operations/{operation}",put(lifecycle::apply).get(lifecycle::receipt))
     .route("/webhooks/iam",post(lifecycle::webhook))
     .route("/oauth/start",get(oauth::start))
+    .route("/oauth/client-metadata.json",get(oauth::client_metadata))
     .route("/oauth/callback",get(oauth::callback))
     .fallback_service(ServeDir::new("web/dist").not_found_service(ServeFile::new("web/dist/index.html")))
     .layer(DefaultBodyLimit::max(20*1024*1024))

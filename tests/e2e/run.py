@@ -151,6 +151,14 @@ class Journey:
             time.sleep(0.3)
         raise AssertionError("Connection readiness did not change: " + name)
 
+    def wait_status(self, name, status):
+        for _ in range(160):
+            response = self.cli("owner", "connection", "show", name)
+            if response["status"] == status:
+                return response
+            time.sleep(0.3)
+        raise AssertionError("Connection did not reach " + status + ": " + name)
+
     def run(self):
         self.check("IAM discovery before login", self.cli("owner", "iam")["app_id"] == "mcport")
         for role in ("owner", "silicon", "stranger", "crossorg"):
@@ -261,6 +269,13 @@ class Journey:
         self.cli("owner", "connection", "new", "stdio", "--host", "laptop", "--transport", "stdio", "--command", sys.executable, "--arg", str(ROOT / "tests/e2e/fixtures.py"), "--arg=--stdio", "--env", "FIXTURE_ACCOUNT=stdio-isolated", "--auth", "none", "--visibility", "org")
         self.wait_connection("stdio")
         self.check("Remote home invokes allowlisted local stdio process", self.cli("silicon", "tool", "call", "stdio", "whoami")["result"]["structuredContent"]["account"] == "stdio-isolated")
+        self.cli("owner", "connection", "new", "not-mcp", "--host", "laptop", "--transport", "http", "--url", self.provider + "/not-an-mcp", "--auth", "none", "--visibility", "org")
+        self.wait_status("not-mcp", "offline")
+        self.check("An open HTTP port without MCP is offline while its host remains online", self.cli("owner", "host", "show", "laptop")["online"])
+        missing = str((self.directory / "missing-mcp-program").resolve())
+        self.cli("owner", "connection", "new", "missing-program", "--host", "laptop", "--transport", "stdio", "--command", missing, "--auth", "none", "--visibility", "org")
+        self.wait_status("missing-program", "offline")
+        self.check("A missing stdio executable is offline while working connections still run", self.cli("silicon", "tool", "call", "desktop", "whoami")["result"]["structuredContent"]["account"] == "desktop-owner")
         self.cli("owner", "account", "disconnect", "desktop")
         self.cli("silicon", "tool", "call", "desktop", "whoami", expected=False)
         self.check("Local shared disconnect cannot fall back to desktop account")

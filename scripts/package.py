@@ -7,6 +7,8 @@ stage archive per declared target. Neither command publishes or creates binaries
 from __future__ import annotations
 import argparse
 import hashlib
+import gzip
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -15,6 +17,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tarfile
 import tomllib
 import zipfile
 
@@ -139,6 +142,33 @@ def write_zip(output: Path, entries: dict[str, tuple[bytes, int]]):
         raise
 
 
+def write_honeycomb_tar(output: Path, entries: dict[str, tuple[bytes, int]]):
+    if not output.name.endswith(".tar.gz"):
+        raise PackageError("The complete Honeycomb candidate must end in .tar.gz")
+    if sum(len(data) for data, _ in entries.values()) > 2 * 1024 * 1024 * 1024:
+        raise PackageError("Expanded Honeycomb payload exceeds 2 GiB")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with output.open("xb") as destination:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=destination, mtime=0, compresslevel=9) as compressed:
+                with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+                    for name, (data, mode) in sorted(entries.items()):
+                        if name != "honeycomb.yaml" and not name.startswith("targets/"):
+                            raise PackageError("Honeycomb forbids extra top-level archive entries")
+                        info = tarfile.TarInfo(name)
+                        info.size, info.mode = len(data), mode
+                        info.uid = info.gid = info.mtime = 0
+                        info.uname = info.gname = ""
+                        archive.addfile(info, io.BytesIO(data))
+        if output.stat().st_size > 512 * 1024 * 1024:
+            raise PackageError("Compressed Honeycomb archive exceeds 512 MiB")
+    except FileExistsError:
+        raise PackageError(f"Output already exists: {output}") from None
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise
+
+
 def checksum(path: Path):
     with path.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
@@ -167,6 +197,7 @@ def assemble(args):
     files = sorted(args.input.glob("mcport-*.zip"))
     seen = set()
     entries = {"honeycomb.yaml": (raw, 0o644)}
+    provenance = {}
     for path in files:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
@@ -189,11 +220,12 @@ def assemble(args):
             if record != {"target": target, "rust_target": TARGETS[target][2], "version": data["version"], "sha256": hashlib.sha256(payload).hexdigest(), "native_smoke": True}:
                 raise PackageError(f"Native artifact provenance/version/checksum mismatch in {path}")
             entries[expected_path] = (payload, 0o755)
-            entries[metadata[0].filename] = (archive.read(metadata[0]), 0o644)
+            provenance[target] = record
             seen.add(target)
     if seen != set(TARGETS):
         raise PackageError("Missing native targets: " + ", ".join(sorted(set(TARGETS) - seen)))
-    write_zip(args.output, entries)
+    write_honeycomb_tar(args.output, entries)
+    args.output.with_name(args.output.name + ".provenance.json").write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n")
     digest = checksum(args.output)
     sums = args.output.parent / "SHA256SUMS"
     sums.write_text(f"{digest}  {args.output.name}\n")
@@ -208,7 +240,7 @@ def main():
     one.add_argument("--target", choices=TARGETS, required=True)
     one.add_argument("--binary", type=Path, required=True)
     one.add_argument("--output", type=Path, required=True)
-    all_targets = sub.add_parser("assemble", help="Require all six native stage archives and assemble a candidate")
+    all_targets = sub.add_parser("assemble", help="Require all six native stage archives and assemble a Honeycomb .tar.gz candidate")
     all_targets.add_argument("--manifest", type=Path, default=ROOT / "honeycomb.yaml")
     all_targets.add_argument("--input", type=Path, required=True)
     all_targets.add_argument("--output", type=Path, required=True)

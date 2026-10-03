@@ -187,7 +187,9 @@ async fn outbound_relay_rejects_unregistered_expired_cross_org_and_never_replays
         .unwrap()
         .unwrap();
     assert_eq!(fixture.tool_calls.load(Ordering::SeqCst), 3);
-    assert_eq!(fixture.discoveries.load(Ordering::SeqCst), 2);
+    // Two isolated caller sessions plus one read-only protocol health probe.
+    // Same-caller calls still reuse their session, and probes never invoke tools.
+    assert_eq!(fixture.discoveries.load(Ordering::SeqCst), 3);
     // Restart and receive the same lease again: durable tombstone prevents replay.
     let shutdown = CancellationToken::new();
     let cancellation = shutdown.clone();

@@ -40,6 +40,8 @@ The browser attempt binds identity kind, environment, expiry and state. State is
 
 `ConnectionUpdate` accepts `name`, `description`, `visibility`, and `version`. Use permission does not grant management permission. Visibility, organization membership, provider account and tool policy are checked again before execution.
 
+Local status separates the host heartbeat from the MCP protocol check: `offline` means the host/registration is unavailable or a recent MCP check failed, `checking` means no fresh protocol result, and `authentication_required` means the caller's execution account is missing. `ready` requires a recent successful check. Protocol health is advisory; an authorized caller can retry within the ordinary execution timeout. Health checks use only registered endpoints and the selected account, never tool calls.
+
 ## Provider accounts
 
 | Method and path | Behavior |
@@ -50,6 +52,8 @@ The browser attempt binds identity kind, environment, expiry and state. State is
 | POST `/connections/{connection}/account/authorize` | `{client_id?:string}` → `{authorization_url,state}`. Discover OAuth metadata and prepare PKCE; providers may require a pre-registered client. |
 
 Remote credentials require HTTPS and never travel in URLs. The returned authorization URL opens `/oauth/start` for account/sharing confirmation before provider consent; `/oauth/callback` checks the attempt-bound issuer, resource, owner and state. Local execution credentials stay in the host registry. Configure or disconnect them through the CLI on that host, not by uploading secrets to the gateway.
+
+Public `GET /oauth/client-metadata.json` (outside `/api/v1`) serves Client ID Metadata when the gateway has a configured public HTTPS URL. Its client ID and exact callback come from configuration; request Host headers cannot change them. Registration supports an explicit public client ID, advertised metadata registration, or dynamic client registration. Confidential clients and automatic runtime scope upgrades are unsupported.
 
 ## MCP execution and history
 
