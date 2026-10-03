@@ -44,7 +44,7 @@ The public Cloudflare endpoint is a real service. The fixture launcher only subs
 - [API contract](docs/API.md)
 - [Manual test evidence](docs/testing/manual.md)
 - [Repeatable E2E fixtures](tests/e2e/README.md)
-- [Stateless Rust client](crates/mcport-client/README.md)
+- [Rust client and explicit local host API](crates/mcport-client/README.md)
 - [CLI reference](crates/mcport-cli/README.md)
 - [Human-owned understanding](understanding/UNDERSTANDING.md)
 

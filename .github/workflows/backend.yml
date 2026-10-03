@@ -1,0 +1,106 @@
+name: Native backend candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: backend-candidate-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: npm test --prefix web
+      - run: npm run build --prefix web
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-website
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 14
+  server:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 70
+    env:
+      # Official ARM64 AL2023 image observed October 4, 2026. Immutable base.
+      BUILD_IMAGE: public.ecr.aws/amazonlinux/amazonlinux@sha256:bdaba6be6ef19640b0a8149f845972d8b2b5189c44cd5ed9b3402cc4269ff71d
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Native tests, release build and health smoke on AL2023
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -e SOURCE_REVISION="$GITHUB_SHA" -e BUILD_IMAGE \
+            -v "$PWD:/src" -w /src "$BUILD_IMAGE" bash -euo pipefail -c '
+              dnf install -y gcc gcc-c++ make perl tar gzip git findutils python3 binutils curl-minimal
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+              source /root/.cargo/env
+              export CARGO_TARGET_DIR=/src/target/backend-al2023
+              export MCPORT_TEST_PYTHON=/usr/bin/python3
+              export MCPORT_BUILD_REVISION="$SOURCE_REVISION"
+              test "$(uname -m)" = aarch64
+              cargo test --locked -p mcport-server -p mcport-core -p mcport-mcp
+              cargo build --locked --release -p mcport-server
+              mkdir -p backend-build
+              install -m 0755 "$CARGO_TARGET_DIR/release/mcport-server" backend-build/mcport-server
+              ldd backend-build/mcport-server > backend-build/ldd.txt
+              readelf --version-info backend-build/mcport-server > backend-build/elf-versions.txt
+              python3 scripts/backend_smoke.py --binary backend-build/mcport-server \
+                --revision "$SOURCE_REVISION" --image "$BUILD_IMAGE" \
+                --output backend-build/provenance.json
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-server
+          path: backend-build/*
+          if-no-files-found: error
+          retention-days: 14
+  assemble:
+    needs: [web, server]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: backend-website
+          path: backend-web
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: backend-server
+          path: backend-build
+      - name: Restore executable bit lost by artifact transfer
+        run: chmod 755 backend-build/mcport-server
+      - name: Test bundle and installer rejection rules
+        run: python -m unittest discover -s scripts/tests -p test_backend_package.py
+      - name: Package exact revision and validate without installation
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          python scripts/package_backend.py --binary backend-build/mcport-server \
+            --web backend-web --provenance backend-build/provenance.json \
+            --revision "$SOURCE_REVISION" \
+            --output "candidate/mcport-backend-$SOURCE_REVISION-linux-aarch64.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcport-backend-candidate
+          path: candidate/*
+          if-no-files-found: error
+          retention-days: 30
+# Candidate only: no production credentials, upload, installation or deployment.

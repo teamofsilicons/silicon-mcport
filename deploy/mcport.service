@@ -16,8 +16,8 @@ Environment=MCPORT_BIND=127.0.0.1:4380
 ExecStart=/opt/mcport/current/mcport-server
 Restart=on-failure
 RestartSec=3
-# The server's graceful shutdown currently handles Ctrl-C/SIGINT.
-KillSignal=SIGINT
+# SIGTERM drains pending executions before the service exits.
+KillSignal=SIGTERM
 TimeoutStopSec=45
 StateDirectory=mcport
 StateDirectoryMode=0700

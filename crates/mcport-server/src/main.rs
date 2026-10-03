@@ -79,7 +79,7 @@ fn router(app: App) -> Router {
             .expect("MCPORT_PUBLIC_URL valid origin"),
     ];
     Router::new()
-    .route("/health",get(||async{Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")}))}))
+    .route("/health",get(||async{Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION"),"source_revision":option_env!("MCPORT_BUILD_REVISION")}))}))
     .route("/api/v1/iam",get(iam))
     .route("/api/{*unknown}",get(||async{error::Error::missing()}).post(||async{error::Error::missing()}))
     .route("/api/v1/settings",get(operations::get_settings).patch(operations::update_settings))
