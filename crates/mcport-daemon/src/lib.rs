@@ -493,21 +493,7 @@ pub async fn run(
             registry = reload_registry(&registry_path, &registry)?;
             health.sync(&registry);
             health.tick(&sessions);
-            for (id, job) in &active {
-                let changed = registry
-                    .connections
-                    .get(&job.connection_id)
-                    .and_then(|connection| endpoint_for(connection, &job.actor).ok())
-                    .is_none_or(|endpoint| fingerprint(&endpoint) != job.fingerprint);
-                if changed
-                    || journal
-                        .jobs
-                        .get(id)
-                        .is_some_and(|entry| entry.started_at + 600 < now())
-                {
-                    job.cancellation.cancel();
-                }
-            }
+            cancel_changed_jobs(&registry, &active, &journal);
             sessions.retain(
                 |(connection, org, principal), entry| match entry.try_lock() {
                     Ok(entry) => {
@@ -541,8 +527,14 @@ pub async fn run(
                 if stop_path.exists(){let _=fs::remove_file(&stop_path);shutdown.cancel();}
                 let modified=fs::metadata(&registry_path)?.modified()?;
                 if modified!=registry_modified{
+                    registry=reload_registry(&registry_path,&registry)?;
                     registry_modified=modified;
-                    if let Some(task)=polling.take(){task.abort();}
+                    health.sync(&registry);
+                    health.tick(&sessions);
+                    cancel_changed_jobs(&registry,&active,&journal);
+                    // The gateway may already have leased a job into this
+                    // response. Drain the bounded poll instead of discarding
+                    // its only delivery, then advertise the latest registry.
                     poll_at=tokio::time::Instant::now();
                 }
             },
@@ -616,6 +608,28 @@ pub async fn run(
     private_json(&journal_path, &journal)?;
     let _ = fs::remove_file(&status_path);
     Ok(())
+}
+
+fn cancel_changed_jobs(
+    registry: &Registry,
+    active: &HashMap<String, ActiveJob>,
+    journal: &Journal,
+) {
+    for (id, job) in active {
+        let changed = registry
+            .connections
+            .get(&job.connection_id)
+            .and_then(|connection| endpoint_for(connection, &job.actor).ok())
+            .is_none_or(|endpoint| fingerprint(&endpoint) != job.fingerprint);
+        if changed
+            || journal
+                .jobs
+                .get(id)
+                .is_some_and(|entry| entry.started_at + 600 < now())
+        {
+            job.cancellation.cancel();
+        }
+    }
 }
 
 async fn flush_results(

@@ -19,6 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-e2e", action="store_true", help="Run only unit, build and lint gates")
     parser.add_argument("--skip-web", action="store_true", help="Skip web tests/build if working only on Rust")
+    parser.add_argument("--e2e-run-dir", type=Path, help="Retain isolated integration logs in this fresh directory")
     args = parser.parse_args()
     run("cargo", "fmt", "--all", "--check")
     run("cargo", "test", "--workspace", "--locked")
@@ -33,7 +34,8 @@ def main():
         run(npm, "test", cwd=ROOT / "web")
         run(npm, "run", "build", cwd=ROOT / "web")
     if not args.skip_e2e:
-        run(sys.executable, "tests/e2e/run.py")
+        options = ["--run-dir", args.e2e_run_dir] if args.e2e_run_dir else []
+        run(sys.executable, "tests/e2e/run.py", *options)
 
 
 if __name__ == "__main__":
