@@ -241,3 +241,35 @@ describe("browser API security and contract", () => {
     });
   });
 });
+
+describe("directory API", () => {
+  it("encodes searches and IDs and preserves optimistic version on organization edits", async () => {
+    saveSession(session);
+    const input = {
+      name: "Docs",
+      description: "Team docs",
+      category: "Knowledge",
+      source_url: null,
+      template: null,
+    };
+    fetchMock.mockImplementation(() => Promise.resolve(response([])));
+    await api.directory("team & docs");
+    await api.directoryEntry("org/design");
+    await api.createDirectoryEntry(input);
+    await api.updateDirectoryEntry("org/design", input, 7);
+    await api.deleteDirectoryEntry("org/design");
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      "/api/v1/directory?q=team%20%26%20docs",
+      "/api/v1/directory/org%2Fdesign",
+      "/api/v1/directory",
+      "/api/v1/directory/org%2Fdesign",
+      "/api/v1/directory/org%2Fdesign",
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({
+      input,
+      version: 7,
+    });
+    expect(fetchMock.mock.calls[3][1].method).toBe("PUT");
+    expect(fetchMock.mock.calls[4][1].method).toBe("DELETE");
+  });
+});

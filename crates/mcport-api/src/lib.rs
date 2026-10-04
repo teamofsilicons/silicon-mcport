@@ -320,6 +320,57 @@ impl Client {
         self.post(ctx, &["auth", "logout"], json!({})).await
     }
 
+    /// Search community references and the caller's organization directory.
+    pub async fn directory(
+        &self,
+        ctx: &RequestContext,
+        search: Option<&str>,
+    ) -> Result<Vec<DirectoryEntry>, Error> {
+        let query = search.map(|q| vec![("q", q)]).unwrap_or_default();
+        self.request(ctx, Method::GET, &["directory"], &query, None)
+            .await
+    }
+    /// Read an exact directory ID, including its source and optional template.
+    pub async fn directory_entry(
+        &self,
+        ctx: &RequestContext,
+        id: &str,
+    ) -> Result<DirectoryEntry, Error> {
+        self.get(ctx, &["directory", id]).await
+    }
+    /// Create an entry owned by the caller in their current organization/environment.
+    pub async fn create_directory_entry(
+        &self,
+        ctx: &RequestContext,
+        input: &DirectoryInput,
+    ) -> Result<DirectoryEntry, Error> {
+        self.post(ctx, &["directory"], input).await
+    }
+    /// Replace an owned entry. Its expected version prevents stale overwrites.
+    pub async fn update_directory_entry(
+        &self,
+        ctx: &RequestContext,
+        id: &str,
+        input: &DirectoryUpdate,
+    ) -> Result<DirectoryEntry, Error> {
+        self.request(
+            ctx,
+            Method::PUT,
+            &["directory", id],
+            &[],
+            Some(to_value(input)?),
+        )
+        .await
+    }
+    /// Remove an owned directory entry; existing connections are unaffected.
+    pub async fn delete_directory_entry(
+        &self,
+        ctx: &RequestContext,
+        id: &str,
+    ) -> Result<Value, Error> {
+        self.delete(ctx, &["directory", id]).await
+    }
+
     pub async fn connections(&self, ctx: &RequestContext) -> Result<Vec<Connection>, Error> {
         self.get(ctx, &["connections"]).await
     }
@@ -839,6 +890,89 @@ mod tests {
         );
         assert!(Client::new("https://secret@example.test").is_err());
         assert!(Client::new("https://example.test?token=bad").is_err());
+    }
+
+    #[tokio::test]
+    async fn directory_crud_preserves_context_search_and_expected_version() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let entry = json!({"id":"dir/one","name":"Team docs","description":"Shared reference","category":"Documentation","source":"org","source_url":"https://example.test","source_revision":null,"owner_id":"si:writer","org_id":"tos","environment":"test-one","can_manage":true,"template":{"transport":"http","url":"https://example.test/mcp","command":null,"args":[],"auth_mode":"per-user"},"version":7,"created_at":1,"updated_at":2});
+        let response_entry = entry.clone();
+        let server = tokio::spawn(async move {
+            let mut requests = vec![];
+            for data in [
+                json!([response_entry.clone()]),
+                response_entry.clone(),
+                response_entry.clone(),
+                response_entry,
+                json!({"deleted":true}),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                requests.push(String::from_utf8(request_bytes(&mut stream).await).unwrap());
+                let body = json!({"data":data}).to_string();
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            requests
+        });
+        let client = Client::new(&format!("http://{address}")).unwrap();
+        let ctx = RequestContext::authenticated("directory-fixture").testing("test-one");
+        let entries = client.directory(&ctx, Some("docs & tools")).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        let current = client.directory_entry(&ctx, "dir/one").await.unwrap();
+        assert_eq!(serde_json::to_value(&current).unwrap(), entry);
+        let input = DirectoryInput {
+            name: "New docs".into(),
+            description: current.description,
+            category: current.category,
+            source_url: current.source_url,
+            template: current.template,
+        };
+        client.create_directory_entry(&ctx, &input).await.unwrap();
+        client
+            .update_directory_entry(
+                &ctx,
+                "dir/one",
+                &DirectoryUpdate {
+                    input,
+                    version: current.version,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .delete_directory_entry(&ctx, "dir/one")
+                .await
+                .unwrap()["deleted"],
+            true
+        );
+        let requests = server.await.unwrap();
+        for (request, expected) in requests.iter().zip([
+            "GET /api/v1/directory?q=docs+%26+tools HTTP/1.1",
+            "GET /api/v1/directory/dir%2Fone HTTP/1.1",
+            "POST /api/v1/directory HTTP/1.1",
+            "PUT /api/v1/directory/dir%2Fone HTTP/1.1",
+            "DELETE /api/v1/directory/dir%2Fone HTTP/1.1",
+        ]) {
+            assert!(request.starts_with(expected), "{request}");
+            assert!(request.contains("authorization: Bearer directory-fixture"));
+            assert!(request.contains("x-mcport-test: test-one"));
+        }
+        let update: Value =
+            serde_json::from_str(requests[3].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(update["version"], 7);
+        assert_eq!(update["input"]["name"], "New docs");
+        assert!(update["input"].get("owner_id").is_none());
     }
 
     #[tokio::test]

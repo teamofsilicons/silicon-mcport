@@ -153,7 +153,7 @@ export function HostsPage() {
                   <p>Create a local connection here or use the CLI.</p>
                   <Code>
                     {
-                      "mcport connection new figma --host my-mac --transport http \\\n  --url http://127.0.0.1:3845/mcp --auth shared --visibility private"
+                      "mcport connection new figma --host my-mac --transport http \\\n  --url http://127.0.0.1:3845/mcp --auth shared --visibility invited"
                     }
                   </Code>
                 </div>
@@ -594,13 +594,13 @@ export function HelpPage({ discovery }: { discovery: Discovery | null }) {
             <span className="step-label">02 / ADD YOUR MCP</span>
             <h2>Give your tools a home</h2>
             <p>
-              Create a private cloud connection. The saved connection holds its
-              endpoint and account settings, so you don’t repeat them with every
-              call.
+              Create an organization cloud connection. The saved connection
+              holds its endpoint and account settings, so you don’t repeat them
+              with every call.
             </p>
             <Code>
               {
-                'mcport connection new docs --transport http \\\n  --url "https://mcp.example.com/mcp" \\\n  --auth none --visibility private\n\nmcport connection ls --json'
+                'mcport connection new docs --transport http \\\n  --url "https://mcp.example.com/mcp" \\\n  --auth none --visibility org\n\nmcport connection ls --json'
               }
             </Code>
             <p className="field-help">

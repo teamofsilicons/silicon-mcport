@@ -1,6 +1,7 @@
 mod assets;
 mod auth;
 mod connections;
+mod directory;
 mod error;
 mod execution;
 mod hosts;
@@ -94,6 +95,8 @@ fn router(app: App) -> Router {
     .route("/api/v1/auth/browser/start",get(auth::browser_start))
     .route("/api/v1/auth/browser/complete",post(auth::browser_complete))
     .route("/api/v1/auth/browser/refresh",post(auth::browser_refresh))
+    .route("/api/v1/directory",get(directory::list).post(directory::create))
+    .route("/api/v1/directory/{entry}",get(directory::get).put(directory::update).delete(directory::remove))
     .route("/api/v1/connections",get(connections::list).post(connections::create))
     .route("/api/v1/connections/{connection}",get(connections::get).patch(connections::update).delete(connections::remove))
     .route("/api/v1/connections/{connection}/access",get(connections::access_list).post(connections::invite))
@@ -135,6 +138,10 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     let bind = config.bind.clone();
     let app = App::new(config).map_err(|e| anyhow::anyhow!(e.1.message))?;
+    app.store
+        .migrate_private_visibility()
+        .map_err(|e| anyhow::anyhow!(e.1.message))?;
+    directory::seed(&app).map_err(|e| anyhow::anyhow!(e.1.message))?;
     execution::recover(&app).map_err(|e| anyhow::anyhow!(e.1.message))?;
     operations::init_telemetry(&app);
     let shutdown = tokio_util::sync::CancellationToken::new();

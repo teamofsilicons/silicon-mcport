@@ -56,6 +56,7 @@ pub struct ConnectionInput {
     #[serde(default)]
     pub args: Vec<String>,
     pub auth_mode: String,
+    #[serde(default)]
     pub visibility: String,
 }
 
@@ -198,4 +199,54 @@ pub struct ResultAsset {
     pub size: u64,
     pub source_uri: Option<String>,
     pub download_url: String,
+}
+
+/// Public discovery metadata. Templates never contain credentials or execute on selection.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryTemplate {
+    pub transport: String,
+    pub url: Option<String>,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub auth_mode: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryInput {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub category: String,
+    pub source_url: Option<String>,
+    pub template: Option<DirectoryTemplate>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryUpdate {
+    pub input: DirectoryInput,
+    pub version: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DirectoryEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub source: String,
+    pub source_url: Option<String>,
+    pub source_revision: Option<String>,
+    pub owner_id: String,
+    pub org_id: String,
+    pub environment: String,
+    pub can_manage: bool,
+    pub template: Option<DirectoryTemplate>,
+    pub version: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
 }

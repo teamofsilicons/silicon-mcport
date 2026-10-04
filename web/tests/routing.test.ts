@@ -20,6 +20,7 @@ describe("workspace deep links", () => {
     expect(parseRoute(routePath(route))).toEqual(route);
     for (const page of [
       "connections",
+      "directory",
       "hosts",
       "activity",
       "settings",

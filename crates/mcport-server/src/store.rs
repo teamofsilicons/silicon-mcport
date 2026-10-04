@@ -34,7 +34,7 @@ impl Store {
             "CREATE TABLE IF NOT EXISTS public_id_allocator(singleton INTEGER PRIMARY KEY CHECK(singleton=1),cursor TEXT NOT NULL,seed BLOB NOT NULL);
              CREATE TABLE IF NOT EXISTS public_ids(id TEXT PRIMARY KEY NOT NULL);
              CREATE TABLE IF NOT EXISTS public_id_replays(kind TEXT NOT NULL,replay_key TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(kind,replay_key),FOREIGN KEY(kind,id) REFERENCES records(kind,id) ON DELETE CASCADE);
-             INSERT OR IGNORE INTO public_ids(id) SELECT id FROM records WHERE kind IN ('connection','host','call','report');",
+             INSERT OR IGNORE INTO public_ids(id) SELECT id FROM records WHERE kind IN ('connection','host','call','report','directory','catalog');",
         )?;
         migration.execute(
             "INSERT OR IGNORE INTO public_id_allocator(singleton,cursor,seed) VALUES(1,?,?)",
@@ -103,7 +103,10 @@ impl Store {
         replay_key: Option<&str>,
         make: impl FnOnce(String) -> T,
     ) -> Result<(T, bool)> {
-        if !matches!(kind, "connection" | "host" | "call" | "report") {
+        if !matches!(
+            kind,
+            "connection" | "host" | "call" | "report" | "directory" | "catalog"
+        ) {
             return Err(Error::internal());
         }
         let mut db = self.db.lock().map_err(|_| Error::internal())?;
@@ -196,6 +199,119 @@ impl Store {
         tx.execute("INSERT INTO records(kind,id,environment,org_id,owner_id,name,value) VALUES(?,?,?,?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET environment=excluded.environment,org_id=excluded.org_id,owner_id=excluded.owner_id,name=excluded.name,value=excluded.value,revision=records.revision+1",params![kind,id,env,org,owner,name,cipher])?;
         tx.commit()?;
         Ok(())
+    }
+    /// Persist a legacy private-to-invited update without activating dormant grants.
+    pub fn put_connection_reset_grants(
+        &self,
+        connection: &mcport_core::Connection,
+        expected: i64,
+    ) -> Result<()> {
+        let mut db = self.db.lock().map_err(|_| Error::internal())?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let cipher = self.encrypt(
+            connection,
+            &Self::aad(
+                "connection",
+                &connection.id,
+                &connection.environment,
+                &connection.org_id,
+                &connection.owner_id,
+            ),
+        )?;
+        let changed = tx.execute(
+            "UPDATE records SET name=?,value=?,revision=revision+1 WHERE kind='connection' AND id=? AND environment=? AND org_id=? AND owner_id=? AND revision=?",
+            params![connection.name, cipher, connection.id, connection.environment, connection.org_id, connection.owner_id, expected],
+        )?;
+        if changed != 1 {
+            return Err(Error::new(
+                409,
+                "revision_conflict",
+                "This connection changed.",
+                "Refresh before applying the change.",
+            ));
+        }
+        self.delete_connection_grants(&tx, connection)?;
+        tx.commit()?;
+        Ok(())
+    }
+    fn delete_connection_grants(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        connection: &mcport_core::Connection,
+    ) -> Result<()> {
+        let rows = {
+            let mut statement = tx.prepare("SELECT id,owner_id,value FROM records WHERE kind='grant' AND environment=? AND org_id=?")?;
+            statement
+                .query_map(params![connection.environment, connection.org_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        for (id, owner, cipher) in rows {
+            let value: serde_json::Value = self.decrypt(
+                &cipher,
+                &Self::aad(
+                    "grant",
+                    &id,
+                    &connection.environment,
+                    &connection.org_id,
+                    &owner,
+                ),
+            )?;
+            if value
+                .get("connection_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(&connection.id)
+            {
+                tx.execute("DELETE FROM records WHERE kind='grant' AND id=?", [&id])?;
+            }
+        }
+        Ok(())
+    }
+    /// Startup migration is atomic across all contexts and does not expand access.
+    pub fn migrate_private_visibility(&self) -> Result<usize> {
+        let mut db = self.db.lock().map_err(|_| Error::internal())?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rows = {
+            let mut statement = tx.prepare(
+                "SELECT id,environment,org_id,owner_id,value FROM records WHERE kind='connection'",
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                })?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut changed = 0;
+        for (id, env, org, owner, cipher) in rows {
+            let aad = Self::aad("connection", &id, &env, &org, &owner);
+            let mut connection: mcport_core::Connection = self.decrypt(&cipher, &aad)?;
+            if connection.visibility != "private" {
+                continue;
+            }
+            self.delete_connection_grants(&tx, &connection)?;
+            connection.visibility = "invited".into();
+            connection.version += 1;
+            connection.updated_at = crate::state::now();
+            let cipher = self.encrypt(&connection, &aad)?;
+            tx.execute(
+                "UPDATE records SET value=?,revision=revision+1 WHERE kind='connection' AND id=?",
+                params![cipher, id],
+            )?;
+            changed += 1;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
     pub fn get<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<Option<T>> {
         let row: Option<(String, String, String, String)> = self
@@ -722,6 +838,184 @@ mod tests {
         assert!(
             !raw.windows(b"protected-fixture".len())
                 .any(|b| b == b"protected-fixture")
+        );
+    }
+}
+
+#[cfg(test)]
+mod visibility_migration_tests {
+    use super::*;
+    use mcport_core::Connection as McpConnection;
+    use serde_json::json;
+    fn connection(id: &str, environment: &str, visibility: &str) -> McpConnection {
+        serde_json::from_value(json!({"id":id,"name":id,"description":"","org_id":"tos","owner_id":"c:owner","environment":environment,"transport":"http","url":"https://example.com/mcp","host_id":null,"command":null,"args":[],"auth_mode":"shared","visibility":visibility,"status":"ready","can_manage":false,"account":null,"created_at":1,"updated_at":1,"version":1})).unwrap()
+    }
+    fn save(store: &Store, connection: &McpConnection) {
+        store
+            .put(
+                "connection",
+                &connection.id,
+                &connection.environment,
+                "tos",
+                "c:owner",
+                Some(&connection.name),
+                connection,
+                Some(0),
+            )
+            .unwrap();
+        store.put("grant",&format!("grant-{}",connection.id),&connection.environment,"tos","c:owner",None,&json!({"connection_id":connection.id,"grant":{"principal_id":"si:invitee","created_at":1}}),Some(0)).unwrap();
+        store
+            .put(
+                "credential",
+                &format!("credential-{}", connection.id),
+                &connection.environment,
+                "tos",
+                "c:owner",
+                None,
+                &json!({"connection_id":connection.id,"secret":"private-fixture"}),
+                Some(0),
+            )
+            .unwrap();
+    }
+    #[test]
+    fn migration_clears_only_dormant_grants_preserves_authority_and_is_restart_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        let store = Store::open(&path, &[7; 32]).unwrap();
+        for c in [
+            connection("private-prod", "production", "private"),
+            connection("private-test", "test-world", "private"),
+            connection("invited", "production", "invited"),
+            connection("org", "production", "org"),
+        ] {
+            save(&store, &c);
+        }
+        assert_eq!(store.migrate_private_visibility().unwrap(), 2);
+        for id in ["private-prod", "private-test"] {
+            let c = store
+                .get::<McpConnection>("connection", id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(c.visibility, "invited");
+            assert_eq!(c.version, 2);
+            assert!(c.updated_at > 1);
+            assert!(
+                store
+                    .get::<serde_json::Value>("grant", &format!("grant-{id}"))
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                store
+                    .get::<serde_json::Value>("credential", &format!("credential-{id}"))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        for id in ["invited", "org"] {
+            assert_eq!(
+                store
+                    .get::<McpConnection>("connection", id)
+                    .unwrap()
+                    .unwrap()
+                    .version,
+                1
+            );
+            assert!(
+                store
+                    .get::<serde_json::Value>("grant", &format!("grant-{id}"))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        drop(store);
+        let store = Store::open(&path, &[7; 32]).unwrap();
+        assert_eq!(store.migrate_private_visibility().unwrap(), 0);
+        assert_eq!(
+            store
+                .list::<McpConnection>("connection", None)
+                .unwrap()
+                .len(),
+            4
+        );
+    }
+    #[test]
+    fn legacy_private_update_resets_grants_only_after_revision_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.sqlite"), &[7; 32]).unwrap();
+        let mut c = connection("existing", "production", "org");
+        save(&store, &c);
+        c.visibility = "invited".into();
+        c.version = 2;
+        assert_eq!(
+            store.put_connection_reset_grants(&c, 0).unwrap_err().1.code,
+            "revision_conflict"
+        );
+        assert!(
+            store
+                .get::<serde_json::Value>("grant", "grant-existing")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            store
+                .get::<McpConnection>("connection", "existing")
+                .unwrap()
+                .unwrap()
+                .visibility,
+            "org"
+        );
+        store.put_connection_reset_grants(&c, 1).unwrap();
+        assert_eq!(
+            store
+                .get::<McpConnection>("connection", "existing")
+                .unwrap()
+                .unwrap()
+                .visibility,
+            "invited"
+        );
+        assert!(
+            store
+                .get::<serde_json::Value>("grant", "grant-existing")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .get::<serde_json::Value>("credential", "credential-existing")
+                .unwrap()
+                .is_some()
+        );
+    }
+    #[test]
+    fn migration_rolls_back_all_changes_if_an_encrypted_grant_is_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.sqlite"), &[7; 32]).unwrap();
+        save(&store, &connection("first", "production", "private"));
+        save(&store, &connection("second", "test-world", "private"));
+        store
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE records SET value='invalid' WHERE kind='grant' AND id='grant-second'",
+                [],
+            )
+            .unwrap();
+        assert!(store.migrate_private_visibility().is_err());
+        for id in ["first", "second"] {
+            let c = store
+                .get::<McpConnection>("connection", id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(c.visibility, "private");
+            assert_eq!(c.version, 1);
+        }
+        assert!(
+            store
+                .get::<serde_json::Value>("grant", "grant-first")
+                .unwrap()
+                .is_some()
         );
     }
 }

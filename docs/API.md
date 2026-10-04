@@ -2,7 +2,7 @@
 
 Application endpoints use `/api/v1`. Success is `{ "data": value }`; errors use an HTTP failure status and `{ "error": {"code", "message", "recovery": string|null, "outcome_unknown": boolean} }`. Raw asset downloads are the exception. Public DTOs live in `mcport-core`; timestamps are Unix seconds. Lists return arrays in `data`. Connection and host selectors accept IDs or unambiguous names. Reads never expose provider credentials.
 
-New connection, host, invocation/job and report IDs use case-sensitive base62 (`a-z`, `0-9`, `A-Z`), starting at three characters. All four resource types and all environments share one persistent namespace per gateway database. After all 238,328 three-character values have been used or reserved, IDs grow to four characters, then continue growing only after each complete width is exhausted. Deleted IDs are never reused. Treat IDs as opaque locators, not secrets: authorization is still required. Existing UUID and legacy invocation IDs remain valid after upgrade. IAM/Honeycomb IDs, authentication tokens, OAuth state and telemetry UUIDs retain their own formats.
+New connection, host, invocation/job, report and directory IDs use case-sensitive base62 (`a-z`, `0-9`, `A-Z`), starting at three characters. These resource types and all environments share one persistent namespace per gateway database. After all 238,328 three-character values have been used or reserved, IDs grow to four characters, then continue growing only after each complete width is exhausted. Deleted IDs are never reused. Treat IDs as opaque locators, not secrets: authorization is still required. Existing UUID and legacy invocation IDs remain valid after upgrade. IAM/Honeycomb IDs, authentication tokens, OAuth state and telemetry UUIDs retain their own formats.
 
 An accessible exact connection/host ID takes precedence over a matching name. Inaccessible IDs do not hide names that the caller may use. If a name collides with another accessible ID, use the intended resource's own ID and rename it if needed.
 
@@ -25,6 +25,22 @@ CLI/SDK `Session` includes `{access_token,refresh_token,expires_at,actor,environ
 
 The browser attempt binds identity kind, environment, expiry and state. State is embedded in IAM's callback `redirect_uri`; the callback receives `slt` and `state`, removes them from its URL immediately, and exchanges them with the matching cookie. Popup messages must match the expected origin, source window and state. Only public session metadata belongs in JavaScript storage. `/auth/status` and browser refresh restore login after reload.
 
+## Directory
+
+Directory entries describe reusable setup. They never include provider credentials, host registrations, or access grants and never execute a server. The bundled community snapshot is read-only; organization members can create entries in their current organization/environment and only the creator can manage them. Selecting one copies settings into an ordinary connection; later directory edits do not change it.
+
+| Method and path | Behavior |
+|---|---|
+| GET `/directory?q=` | Search visible community and org entries; returns `DirectoryEntry[]`. Authentication required. |
+| POST `/directory` | `DirectoryInput` → org `DirectoryEntry`. |
+| GET `/directory/{id}` | Visible entry by ID. |
+| PUT `/directory/{id}` | Owner-only `{input:DirectoryInput,version:i64}` → updated entry; stale version returns 409. |
+| DELETE `/directory/{id}` | Owner-only → `{deleted:true}`; configured connections remain. |
+
+`DirectoryInput`: `{name,description?,category?,source_url?:string|null,template?:DirectoryTemplate|null}`. `DirectoryTemplate`: `{transport:"http"|"stdio",url?:string|null,command?:string|null,args?:[],auth_mode:"none"|"per-user"|"shared"}`. Templates may omit machine-specific values; normal connection validation applies at creation. Source and endpoint URLs cannot embed credentials; provide secrets separately at account setup.
+
+`DirectoryEntry` includes the input plus `{id,source:"community"|"org",source_revision:string|null,owner_id,org_id,environment,can_manage,version,created_at,updated_at}`. Source metadata identifies a bundled revision, not a live website mirror or compatibility guarantee. Org additions are not submitted externally. Public catalog records survive testing cleanup; org entries follow the normal environment lifecycle.
+
 ## Connections and access
 
 | Method and path | Behavior |
@@ -40,7 +56,9 @@ The browser attempt binds identity kind, environment, expiry and state. State is
 | GET `/connections/{connection}/policies` | `ToolPolicy[]`; owners see all, other callers see applicable policies. |
 | PUT `/connections/{connection}/policies` | Owner-only `{tool,principal_id:string|null,enabled}` → `ToolPolicy`. A principal-specific allow cannot override a connection-wide deny. |
 
-`ConnectionInput`: `{name,description?,transport:"http"|"stdio",url?,host_id?,command?,args?:[],auth_mode:"none"|"per-user"|"shared",visibility:"private"|"org"|"invited"}`. HTTP requires a URL; stdio requires an owned host and command. A host identifies local HTTP execution too. Remote HTTP uses public upstream hosts unless the operator explicitly configures an exception. Names are unique per organization/environment. Provider credentials are configured separately.
+`ConnectionInput`: `{name,description?,transport:"http"|"stdio",url?,host_id?,command?,args?:[],auth_mode:"none"|"per-user"|"shared",visibility?:"org"|"invited"}`. HTTP requires a URL; stdio requires an owned host and command. A host identifies local HTTP execution too. Remote HTTP uses public upstream hosts unless the operator explicitly configures an exception. Names are unique per organization/environment. Provider credentials are configured separately. Omitted or empty visibility defaults to `org` for `auth_mode:none` and `invited` for `per-user` or `shared`. Invite-only with no grants is owner-only. Explicit audience choices are preserved.
+
+Legacy `private` input remains compatible: a new connection becomes invite-only without grants; an update atomically clears its invitations and stores `invited`. Startup converts existing private connections the same way, without widening access.
 
 `ConnectionUpdate` accepts `name`, `description`, `visibility`, and `version`. Use permission does not grant management permission. Visibility, organization membership, provider account and tool policy are checked again before execution.
 

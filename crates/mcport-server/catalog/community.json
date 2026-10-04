@@ -1,0 +1,3587 @@
+{
+  "repository": "https://github.com/wong2/awesome-mcp-servers",
+  "revision": "39eb1d76d76e562657f3c657266a504cea159e23",
+  "readme_sha256": "abc684fb19f6954df1691c39f1eb73dd688fb293149f54d988449c61ea083e6a",
+  "license": "MIT",
+  "license_text": "MIT License\n\nCopyright (c) 2024 wong2\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+  "skipped_rows": [
+    {
+      "line": 170,
+      "reason": "Unrecognized Markdown server row"
+    },
+    {
+      "line": 511,
+      "reason": "Unrecognized Markdown server row"
+    }
+  ],
+  "entries": [
+    {
+      "name": "1mcpserver",
+      "description": "MCP of MCPs. Automatic discovery and configure MCP servers on your local machine. Fully REMOTE! Just use https://mcp.1mcpserver.com/mcp/",
+      "category": "Other",
+      "source_url": "https://github.com/particlefuture/1mcpserver",
+      "template": null
+    },
+    {
+      "name": "21st.dev Magic",
+      "description": "Create crafted UI components inspired by the best 21st.dev design engineers.",
+      "category": "Other",
+      "source_url": "https://github.com/21st-dev/magic-mcp",
+      "template": null
+    },
+    {
+      "name": "4everland/4everland-hosting-mcp",
+      "description": "An MCP server implementation for 4EVERLAND Hosting enabling instant deployment of AI-generated code to decentralized storage networks like Greenfield, IPFS, and Arweave.",
+      "category": "Other",
+      "source_url": "https://github.com/4everland/4everland-hosting-mcp",
+      "template": null
+    },
+    {
+      "name": "Adfin",
+      "description": "The only platform you need to get paid - all payments in one place, invoicing and accounting reconciliations with Adfin.",
+      "category": "Other",
+      "source_url": "https://github.com/Adfin-Engineering/mcp-server-adfin",
+      "template": null
+    },
+    {
+      "name": "Agent Mindshare",
+      "description": "Track and monitor AI agent mindshare across platforms - measure brand visibility in AI conversations with Agent Mindshare.",
+      "category": "Other",
+      "source_url": "https://agentmindshare.com",
+      "template": null
+    },
+    {
+      "name": "AgentQL",
+      "description": "Enable AI agents to get structured data from unstructured web with AgentQL.",
+      "category": "Other",
+      "source_url": "https://github.com/tinyfish-io/agentql-mcp",
+      "template": null
+    },
+    {
+      "name": "AgentRPC",
+      "description": "Connect to any function, any language, across network boundaries using AgentRPC.",
+      "category": "Other",
+      "source_url": "https://github.com/agentrpc/agentrpc",
+      "template": null
+    },
+    {
+      "name": "Agentset",
+      "description": "RAG MCP for your Agentset data.",
+      "category": "Other",
+      "source_url": "https://github.com/agentset-ai/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Agile Luminary",
+      "description": "Simpler Project Management - send Agile Luminary stories straight to your IDE",
+      "category": "Other",
+      "source_url": "https://github.com/AgileLuminary/mcp-agile-luminary",
+      "template": null
+    },
+    {
+      "name": "Airtable",
+      "description": "Read and write access to Airtable databases.",
+      "category": "Other",
+      "source_url": "https://github.com/domdomegg/airtable-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Aiven",
+      "description": "Navigate your Aiven projects and interact with the PostgreSQL®, Apache Kafka®, ClickHouse® and OpenSearch® services",
+      "category": "Other",
+      "source_url": "https://github.com/Aiven-Open/mcp-aiven",
+      "template": null
+    },
+    {
+      "name": "ALAPI",
+      "description": "ALAPI MCP Tools,Call hundreds of API interfaces via MCP",
+      "category": "Other",
+      "source_url": "https://github.com/ALAPI-SDK/mcp-alapi-cn",
+      "template": null
+    },
+    {
+      "name": "Alby Bitcoin Payments MCP",
+      "description": "Connect any bitcoin lightning wallet to agents to send and receive payments instantly at low cost.",
+      "category": "Other",
+      "source_url": "https://github.com/getAlby/mcp",
+      "template": null
+    },
+    {
+      "name": "Alertmanager",
+      "description": "A Model Context Protocol (MCP) server that enables AI assistants to integrate with Prometheus Alertmanager",
+      "category": "Other",
+      "source_url": "https://github.com/ntk148v/alertmanager-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Algorand",
+      "description": "A comprehensive MCP server for tooling interactions(40+) and resource accessibility(60+) plus many useful prompts to interact with Algorand Blockchain.",
+      "category": "Other",
+      "source_url": "https://github.com/GoPlausible/algorand-mcp",
+      "template": null
+    },
+    {
+      "name": "AlibabaCloud DevOps MCP",
+      "description": "Yunxiao MCP Server provides AI assistants with the ability to interact with the Yunxiao platform.",
+      "category": "Other",
+      "source_url": "https://github.com/aliyun/alibabacloud-devops-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AllInOneMCP",
+      "description": "MCP of MCPs. A central hub for MCP servers. Helps you discover available MCP servers and learn how to install and use them. REMOTE! Use the url https://mcp.pfvc.io/mcp/ to add the server. Remember the final backslash\\*\\*.",
+      "category": "Other",
+      "source_url": "https://github.com/particlefuture/MCPDiscovery",
+      "template": null
+    },
+    {
+      "name": "AllVoiceLab",
+      "description": "An AI voice toolkit with TTS, voice cloning, and video translation, now available as an MCP server for smarter agent integration.",
+      "category": "Other",
+      "source_url": "https://www.allvoicelab.com/mcp",
+      "template": null
+    },
+    {
+      "name": "Allyson",
+      "description": "AI-powered SVG animation generator that transforms static files into animated SVG components using the Allyson platform",
+      "category": "Other",
+      "source_url": "https://github.com/isaiahbjork/allyson-mcp",
+      "template": null
+    },
+    {
+      "name": "Android MCP",
+      "description": "📲 An MCP server that provides control over Android devices through ADB. Offers device screenshot capture, UI layout analysis, package management, and ADB command execution capabilities.",
+      "category": "Other",
+      "source_url": "https://github.com/minhalvp/android-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AniList",
+      "description": "AniList MCP server for accessing AniList API data",
+      "category": "Other",
+      "source_url": "https://github.com/yuna0x0/anilist-mcp",
+      "template": null
+    },
+    {
+      "name": "AnkiConnect",
+      "description": "AnkiConnect MCP server for interacting with Anki via AnkiConnect.",
+      "category": "Other",
+      "source_url": "https://github.com/spacholski1225/anki-connect-mcp",
+      "template": null
+    },
+    {
+      "name": "any-chat-completions-mcp",
+      "description": "Chat with any other OpenAI SDK Compatible Chat Completions API, like Perplexity, Groq, xAI and more",
+      "category": "Other",
+      "source_url": "https://github.com/pyroprompts/any-chat-completions-mcp",
+      "template": null
+    },
+    {
+      "name": "AnyCrawl",
+      "description": "AnyCrawl MCP Server, Powerful web scraping and crawling for Cursor, Claude, and other LLM clients via the Model Context Protocol (MCP).",
+      "category": "Other",
+      "source_url": "https://github.com/any4ai/anycrawl-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Apache Doris",
+      "description": "MCP Server For Apache Doris, an MPP-based real-time data warehouse.",
+      "category": "Other",
+      "source_url": "https://github.com/apache/doris-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Apify",
+      "description": "Actors MCP Server: Use 3,000+ pre-built cloud tools to extract data from websites, e-commerce, social media, search engines, maps, and more",
+      "category": "Other",
+      "source_url": "https://github.com/apify/actors-mcp-server",
+      "template": null
+    },
+    {
+      "name": "APIMatic MCP",
+      "description": "APIMatic MCP Server is used to validate OpenAPI specifications using APIMatic. The server processes OpenAPI files and returns validation summaries by leveraging APIMatic’s API.",
+      "category": "Other",
+      "source_url": "https://github.com/apimatic/apimatic-validator-mcp",
+      "template": null
+    },
+    {
+      "name": "APISIX-MCP",
+      "description": "APISIX Model Context Protocol (MCP) server is used to bridge large language models (LLMs) with the APISIX Admin API, supporting querying and managing all resources in Apache APISIX.",
+      "category": "Other",
+      "source_url": "https://github.com/api7/apisix-mcp",
+      "template": null
+    },
+    {
+      "name": "Apple Notes",
+      "description": "Talk with your Apple Notes",
+      "category": "Other",
+      "source_url": "https://github.com/RafalWilinski/mcp-apple-notes",
+      "template": null
+    },
+    {
+      "name": "Apple Shortcuts",
+      "description": "An MCP Server Integration with Apple Shortcuts",
+      "category": "Other",
+      "source_url": "https://github.com/recursechat/mcp-server-apple-shortcuts",
+      "template": null
+    },
+    {
+      "name": "Armor Crypto MCP",
+      "description": "MCP to interface with multiple blockchains, staking, DeFi, swap, bridging, wallet management, DCA, Limit Orders, Coin Lookup, Tracking and more.",
+      "category": "Other",
+      "source_url": "https://github.com/armorwallet/armor-crypto-mcp",
+      "template": null
+    },
+    {
+      "name": "Atla",
+      "description": "Enable AI agents to interact with the Atla API for state-of-the-art LLMJ evaluation.",
+      "category": "Other",
+      "source_url": "https://github.com/atla-ai/atla-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Atlan",
+      "description": "Official MCP Server from Atlan which enables you to bring the power of metadata to your AI tools",
+      "category": "Other",
+      "source_url": "https://github.com/atlanhq/agent-toolkit/tree/main/modelcontextprotocol",
+      "template": null
+    },
+    {
+      "name": "Audiense Insights",
+      "description": "Marketing insights and audience analysis from Audiense reports, covering demographic, cultural, influencer, and content engagement analysis.",
+      "category": "Other",
+      "source_url": "https://github.com/AudienseCo/mcp-audiense-insights",
+      "template": null
+    },
+    {
+      "name": "Audioscrape",
+      "description": "Search 1M+ hours of podcasts, interviews, talks and your private audio uploads with speaker identification and timestamps. Official Remote MCP server (via https://mcp.audioscrape.com) enabling AI assistants to access and analyze audio content through semantic and text-based search.",
+      "category": "Other",
+      "source_url": "https://www.audioscrape.com/docs/mcp",
+      "template": null
+    },
+    {
+      "name": "Augments",
+      "description": "Comprehensive framework documentation and code examples for popular development tools and libraries.",
+      "category": "Other",
+      "source_url": "https://augments.dev",
+      "template": null
+    },
+    {
+      "name": "AutoGen documentation",
+      "description": "A Model Context Protocol (MCP) server that provides AI assistants with the ability to search and retrieve Microsoft AutoGen documentation.",
+      "category": "Other",
+      "source_url": "https://github.com/sykuang/mcp-autogen-doc",
+      "template": null
+    },
+    {
+      "name": "AWS Bedrock KB Retrieval",
+      "description": "Query Amazon Bedrock Knowledge Bases using natural language to retrieve relevant information from your data sources.",
+      "category": "Other",
+      "source_url": "https://github.com/awslabs/mcp/tree/main/src/bedrock-kb-retrieval-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AWS CDK",
+      "description": "Get prescriptive CDK advice, explain CDK Nag rules, check suppressions, generate Bedrock Agent schemas, and discover AWS Solutions Constructs patterns.",
+      "category": "Other",
+      "source_url": "https://github.com/awslabs/mcp/tree/main/src/cdk-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AWS Core",
+      "description": "Core AWS MCP server providing prompt understanding and server management capabilities.",
+      "category": "Other",
+      "source_url": "https://github.com/awslabs/mcp/tree/main/src/core-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AWS Cost Analysis",
+      "description": "Analyze CDK projects to identify AWS services used and get pricing information from AWS pricing webpages and API.",
+      "category": "Other",
+      "source_url": "https://github.com/awslabs/mcp/tree/main/src/cost-analysis-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AWS Documentation",
+      "description": "Fetch, convert, and search AWS documentation pages, with recommendations for related content.",
+      "category": "Other",
+      "source_url": "https://github.com/awslabs/mcp/tree/main/src/aws-documentation-mcp-server",
+      "template": null
+    },
+    {
+      "name": "AWS EC2 Pricing",
+      "description": "Get up-to-date EC2 pricing information with one call. Fast. Powered by a pre-parsed AWS pricing catalogue.",
+      "category": "Other",
+      "source_url": "https://github.com/trilogy-group/aws-pricing-mcp",
+      "template": null
+    },
+    {
+      "name": "AWS Nova Canvas",
+      "description": "Generate images using Amazon Nova Canvas with text prompts and color guidance.",
+      "category": "Other",
+      "source_url": "https://github.com/awslabs/mcp/tree/main/src/nova-canvas-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Axiom",
+      "description": "Query and analyze your Axiom logs, traces, and all other event data in natural language",
+      "category": "Other",
+      "source_url": "https://github.com/axiomhq/mcp-server-axiom",
+      "template": null
+    },
+    {
+      "name": "aymericzip/intlayer",
+      "description": "A MCP Server that enhance your IDE with AI-powered assistance for Intlayer i18n / CMS tool: smart CLI access, versioned docs.",
+      "category": "Other",
+      "source_url": "https://github.com/aymericzip/intlayer",
+      "template": null
+    },
+    {
+      "name": "Azure DevOps",
+      "description": "The MCP server for Azure DevOps, bringing the power of Azure DevOps directly to your agents.",
+      "category": "Other",
+      "source_url": "https://github.com/microsoft/azure-devops-mcp",
+      "template": null
+    },
+    {
+      "name": "Backup",
+      "description": "Add smart Backup ability to coding agents like Windsurf, Cursor, Cluade Coder, etc",
+      "category": "Other",
+      "source_url": "https://github.com/hexitex/MCP-Backup-Server",
+      "template": null
+    },
+    {
+      "name": "Bankless Onchain",
+      "description": "Query Onchain data, like ERC20 tokens, transaction history, smart contract state.",
+      "category": "Other",
+      "source_url": "https://github.com/bankless/onchain-mcp",
+      "template": null
+    },
+    {
+      "name": "Basecamp",
+      "description": "Integration with Basecamp project management platform for managing projects, to-dos, card tables, documents, and team collaboration",
+      "category": "Other",
+      "source_url": "https://github.com/georgeantonopoulos/Basecamp-MCP-Server",
+      "template": null
+    },
+    {
+      "name": "Baserow",
+      "description": "Read and write access to your Baserow tables.",
+      "category": "Other",
+      "source_url": "https://baserow.io/user-docs/mcp-server",
+      "template": null
+    },
+    {
+      "name": "BGG MCP",
+      "description": "BGG MCP enables AI tools to interact with the BoardGameGeek API.",
+      "category": "Other",
+      "source_url": "https://github.com/kkjdaniel/bgg-mcp",
+      "template": null
+    },
+    {
+      "name": "BigQuery",
+      "description": "(by LucasHild) - BigQuery database integration with schema inspection and query capabilities",
+      "category": "Other",
+      "source_url": "https://github.com/LucasHild/mcp-server-bigquery",
+      "template": null
+    },
+    {
+      "name": "BigQuery",
+      "description": "(by ergut) - Server implementation for Google BigQuery integration that enables direct BigQuery database access and querying capabilities",
+      "category": "Other",
+      "source_url": "https://github.com/ergut/mcp-bigquery-server",
+      "template": null
+    },
+    {
+      "name": "Binary Ninja",
+      "description": "A Binary Ninja plugin, MCP server, and bridge that seamlessly integrates Binary Ninja with your favorite MCP client.",
+      "category": "Other",
+      "source_url": "https://github.com/fosdickio/binary_ninja_mcp",
+      "template": null
+    },
+    {
+      "name": "Bing Webmaster Tools",
+      "description": "MCP server for Bing Webmaster Tools API integration providing access to search analytics, site management, URL submission, and SEO insights",
+      "category": "Other",
+      "source_url": "https://github.com/isiahw1/mcp-server-bing-webmaster",
+      "template": null
+    },
+    {
+      "name": "BloodHound-MCP",
+      "description": "(by MorDavid) - integration that connects BloodHound with AI through MCP, allowing security professionals to analyze Active Directory attack paths using natural language queries instead of Cypher.",
+      "category": "Other",
+      "source_url": "https://github.com/MorDavid/BloodHound-MCP-AI",
+      "template": null
+    },
+    {
+      "name": "Bluesky",
+      "description": "integrates with Bluesky API to query and search feeds and posts.",
+      "category": "Other",
+      "source_url": "https://github.com/keturiosakys/bluesky-context-server",
+      "template": null
+    },
+    {
+      "name": "Box",
+      "description": "Interact with the Intelligent Content Management platform through Box AI.",
+      "category": "Other",
+      "source_url": "https://github.com/box-community/mcp-server-box",
+      "template": null
+    },
+    {
+      "name": "Box",
+      "description": "File access and search for Box.",
+      "category": "Other",
+      "source_url": "https://github.com/hmk/box-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Bright Data",
+      "description": "Discover, extract, and interact with the web - one interface powering automated access across the public internet.",
+      "category": "Other",
+      "source_url": "https://github.com/brightdata/brightdata-mcp",
+      "template": null
+    },
+    {
+      "name": "Browser MCP",
+      "description": "Automate your local browser",
+      "category": "Other",
+      "source_url": "https://github.com/browsermcp/mcp",
+      "template": null
+    },
+    {
+      "name": "Browser MCP",
+      "description": "(by UI-TARS) - A fast, lightweight MCP server that empowers LLMs with browser automation via Puppeteer’s structured accessibility data, featuring optional vision mode for complex visual understanding and flexible, cross-platform configuration.",
+      "category": "Other",
+      "source_url": "https://github.com/bytedance/UI-TARS-desktop/tree/main/packages/agent-infra/mcp-servers/browser",
+      "template": null
+    },
+    {
+      "name": "Browserbase",
+      "description": "Automate browser interactions in the cloud (e.g. web navigation, data extraction, form filling, and more)",
+      "category": "Other",
+      "source_url": "https://github.com/browserbase/mcp-server-browserbase",
+      "template": null
+    },
+    {
+      "name": "BrowserStack",
+      "description": "Bring the full power of BrowserStack’s Test Platform to your AI tools, making testing faster and easier for every developer and tester on your team.",
+      "category": "Other",
+      "source_url": "https://github.com/browserstack/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Bucket",
+      "description": "Flag features, manage company data, and control feature access using Bucket",
+      "category": "Other",
+      "source_url": "https://github.com/bucketco/bucket-javascript-sdk/tree/main/packages/cli",
+      "template": null
+    },
+    {
+      "name": "Buildable",
+      "description": "Official MCP server for Buildable AI-powered development platform. Enables AI assistants to manage tasks, track progress, get project context, and collaborate with humans on software projects.",
+      "category": "Other",
+      "source_url": "https://github.com/chunkydotdev/bldbl-mcp",
+      "template": null
+    },
+    {
+      "name": "Buildkite",
+      "description": "Manage Buildkite pipelines and builds.",
+      "category": "Other",
+      "source_url": "https://github.com/buildkite/buildkite-mcp-server",
+      "template": null
+    },
+    {
+      "name": "bytebase/dbhub",
+      "description": "📇 Universal database MCP server supporting mainstream databases.\\",
+      "category": "Other",
+      "source_url": "https://github.com/bytebase/dbhub",
+      "template": null
+    },
+    {
+      "name": "Calculator",
+      "description": "This server enables LLMs to use calculator for precise numerical calculations.",
+      "category": "Other",
+      "source_url": "https://github.com/githejie/mcp-server-calculator",
+      "template": null
+    },
+    {
+      "name": "CalDAV MCP",
+      "description": "A CalDAV MCP server to expose calendar operations as tools for AI assistants.",
+      "category": "Other",
+      "source_url": "https://github.com/dominik1001/caldav-mcp",
+      "template": null
+    },
+    {
+      "name": "CallHub",
+      "description": "Python-based MCP tool providing a comprehensive set of functions for managing contacts, phonebooks, agents, teams, campaigns, and other CallHub resources.",
+      "category": "Other",
+      "source_url": "https://github.com/callhub/callhub-mcp",
+      "template": null
+    },
+    {
+      "name": "Campertunity",
+      "description": "Search campgrounds around the world on campertunity, check availability, and provide booking links.",
+      "category": "Other",
+      "source_url": "https://github.com/campertunity/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Canvas LMS",
+      "description": "MCP server for easy access to education data through your Canvas LMS instance.",
+      "category": "Other",
+      "source_url": "https://github.com/ahnopologetic/canvas-lms-mcp",
+      "template": null
+    },
+    {
+      "name": "Carbon Voice",
+      "description": "MCP Server that connects AI Agents to Carbon Voice. Create, manage, and interact with voice messages, conversations, direct messages, folders, voice memos, AI actions and more in Carbon Voice.",
+      "category": "Other",
+      "source_url": "https://github.com/PhononX/cv-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Career Site Jobs",
+      "description": "A MCP server to retrieve up-to-date jobs from company career sites.",
+      "category": "Other",
+      "source_url": "https://apify.com/fantastic-jobs/career-site-job-listing-api/api/mcp",
+      "template": null
+    },
+    {
+      "name": "Chaitin IP Intelligence",
+      "description": "Search for IP addresses using Chaitin's IP Intelligence API.",
+      "category": "Other",
+      "source_url": "https://github.com/co0ontty/chaitin-ip-intelligence-search-tool",
+      "template": null
+    },
+    {
+      "name": "Chargebee",
+      "description": "MCP Server that connects AI agents to Chargebee platform.",
+      "category": "Other",
+      "source_url": "https://github.com/chargebee/agentkit/tree/main/modelcontextprotocol",
+      "template": null
+    },
+    {
+      "name": "Chart",
+      "description": "This server offers a wide variety of chart types with comprehensive Zod schema validation for type-safe chart configuration.",
+      "category": "Other",
+      "source_url": "https://github.com/KamranBiglari/mcp-server-chart",
+      "template": null
+    },
+    {
+      "name": "Chart",
+      "description": "🤖 A Model Context Protocol server for generating visual charts using AntV.",
+      "category": "Other",
+      "source_url": "https://github.com/antvis/mcp-server-chart",
+      "template": null
+    },
+    {
+      "name": "Chroma",
+      "description": "Embeddings, vector search, document storage, and full-text search with the open-source AI application database",
+      "category": "Other",
+      "source_url": "https://github.com/chroma-core/chroma-mcp",
+      "template": null
+    },
+    {
+      "name": "Chroma Package Search",
+      "description": "Add to coding agents like Claude or Cursor to give them the ability to understand and better use thousands of dependencies.",
+      "category": "Other",
+      "source_url": "https://trychroma.com/package-search",
+      "template": null
+    },
+    {
+      "name": "Chronulus AI",
+      "description": "Predict anything with Chronulus AI forecasting and prediction agents.",
+      "category": "Other",
+      "source_url": "https://github.com/ChronulusAI/chronulus-mcp",
+      "template": null
+    },
+    {
+      "name": "ChuckNorris",
+      "description": "A specialized MCP gateway for LLM enhancement prompts and jailbreaks with dynamic schema adaptation. Provides prompts for different LLMs using an enum-based approach.",
+      "category": "Other",
+      "source_url": "https://github.com/pollinations/chucknorris-mcp",
+      "template": null
+    },
+    {
+      "name": "CircleCI",
+      "description": "Enable AI Agents to fix build failures from CircleCI.",
+      "category": "Other",
+      "source_url": "https://github.com/CircleCI-Public/mcp-server-circleci",
+      "template": null
+    },
+    {
+      "name": "ClickHouse",
+      "description": "Query your ClickHouse database server.",
+      "category": "Other",
+      "source_url": "https://github.com/ClickHouse/mcp-clickhouse",
+      "template": null
+    },
+    {
+      "name": "clj-kondo-MCP",
+      "description": "Clojure linter",
+      "category": "Other",
+      "source_url": "https://github.com/Bigsy/clj-kondo-MCP",
+      "template": null
+    },
+    {
+      "name": "Clojars",
+      "description": "Obtains latest dependency details for Clojure libraries.",
+      "category": "Other",
+      "source_url": "https://github.com/Bigsy/Clojars-MCP-Server",
+      "template": null
+    },
+    {
+      "name": "clojure-mcp",
+      "description": "Clojure development tools, direct access to the running program via REPL.",
+      "category": "Other",
+      "source_url": "https://github.com/bhauman/clojure-mcp",
+      "template": null
+    },
+    {
+      "name": "Cloudbet",
+      "description": "Structured sports and esports data via Cloudbet API: fixtures, live odds, stake limits, and markets.",
+      "category": "Other",
+      "source_url": "https://github.com/cloudbet/sports-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Cloudflare Documentation",
+      "description": "Search the official Cloudflare reference documentation. This template does not access or administer a Cloudflare account.",
+      "category": "Documentation",
+      "source_url": "https://github.com/cloudflare/mcp-server-cloudflare",
+      "template": {
+        "transport": "http",
+        "url": "https://docs.mcp.cloudflare.com/mcp",
+        "command": null,
+        "args": [],
+        "auth_mode": "none"
+      }
+    },
+    {
+      "name": "CockroachDB",
+      "description": "A Model Context Protocol server for managing, monitoring, and querying data in CockroachDB.",
+      "category": "Other",
+      "source_url": "https://github.com/amineelkouhen/mcp-cockroachdb",
+      "template": null
+    },
+    {
+      "name": "Codesys-mcp-toolkit",
+      "description": "A Model Context Protocol (MCP) server for CODESYS V3 programming environments.",
+      "category": "Other",
+      "source_url": "https://github.com/johannesPettersson80/codesys-mcp-toolkit",
+      "template": null
+    },
+    {
+      "name": "CoinCap",
+      "description": "A MCP server that provides real-time cryptocurrency market data through CoinCap's public API without requiring authentication",
+      "category": "Other",
+      "source_url": "https://github.com/QuantGeekDev/coincap-mcp",
+      "template": null
+    },
+    {
+      "name": "CoinGecko",
+      "description": "Official CoinGecko API MCP Server for Crypto Price & Market Data, across 200+ blokchain networks and 8M+ tokens.",
+      "category": "Other",
+      "source_url": "https://docs.coingecko.com/reference/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Comet Opik",
+      "description": "Query and analyze your Opik logs, traces, prompts and all other telemtry data from your LLMs in natural language.",
+      "category": "Other",
+      "source_url": "https://github.com/comet-ml/opik-mcp",
+      "template": null
+    },
+    {
+      "name": "consult7",
+      "description": "Analyze large codebases and document collections using high-context models via OpenRouter, OpenAI, or Google AI -- very useful, e.g., with Claude Code",
+      "category": "Other",
+      "source_url": "https://github.com/szeider/consult7",
+      "template": null
+    },
+    {
+      "name": "Contentful",
+      "description": "Interact with your content on the Contentful platform",
+      "category": "Other",
+      "source_url": "https://github.com/ivo-toby/contentful-mcp",
+      "template": null
+    },
+    {
+      "name": "Context 7",
+      "description": "Context7 MCP - Up-to-date Docs For Any Cursor Prompt",
+      "category": "Other",
+      "source_url": "https://github.com/upstash/context7-mcp",
+      "template": null
+    },
+    {
+      "name": "context-awesome",
+      "description": "A MCP server for querying 8,500+ curated awesome lists (1M+ items) and fetching the best resources for your agent.",
+      "category": "Other",
+      "source_url": "https://github.com/bh-rat/context-awesome",
+      "template": null
+    },
+    {
+      "name": "Convex",
+      "description": "Introspect and query your apps deployed to Convex.",
+      "category": "Other",
+      "source_url": "https://stack.convex.dev/convex-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Coresignal",
+      "description": "Access comprehensive B2B data on companies, employees, and job postings for your LLMs and AI workflows.",
+      "category": "Other",
+      "source_url": "https://github.com/Coresignal-com/coresignal-mcp",
+      "template": null
+    },
+    {
+      "name": "Couchbase",
+      "description": "Interact with the data stored in Couchbase clusters using natural language.",
+      "category": "Other",
+      "source_url": "https://github.com/Couchbase-Ecosystem/mcp-server-couchbase",
+      "template": null
+    },
+    {
+      "name": "Crawlbase MCP",
+      "description": "Enables AI agents to access real-time web data with HTML, markdown, and screenshot support. SDKs: Node.js, Python, Java, PHP, .NET.",
+      "category": "Other",
+      "source_url": "https://github.com/crawlbase/crawlbase-mcp",
+      "template": null
+    },
+    {
+      "name": "Creatify",
+      "description": "MCP Server that exposes Creatify AI API capabilities for AI video generation, including avatar videos, URL-to-video conversion, text-to-speech, and AI-powered editing tools.",
+      "category": "Other",
+      "source_url": "https://github.com/TSavo/creatify-mcp",
+      "template": null
+    },
+    {
+      "name": "CRIC Wuye AI",
+      "description": "Interact with capabilities of the CRIC Wuye AI platform, an intelligent assistant specifically for the property management industry.",
+      "category": "Other",
+      "source_url": "https://github.com/wuye-ai/mcp-server-wuye-ai",
+      "template": null
+    },
+    {
+      "name": "Cua",
+      "description": "MCP server for the Computer-Use Agent (CUA), allowing you to run CUA through Claude Desktop or other MCP clients.",
+      "category": "Other",
+      "source_url": "https://github.com/trycua/cua/tree/main/libs/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Currents",
+      "description": "Enable AI Agents to fix Playwright test failures reported to Currents.",
+      "category": "Other",
+      "source_url": "https://github.com/currents-dev/currents-mcp",
+      "template": null
+    },
+    {
+      "name": "Cycode",
+      "description": "Boost security in your dev lifecycle via SAST, SCA, Secrets & IaC scanning with Cycode.",
+      "category": "Other",
+      "source_url": "https://github.com/cycodehq/cycode-cli",
+      "template": null
+    },
+    {
+      "name": "DAISYS",
+      "description": "Generate high-quality text-to-speech and text-to-voice outputs using the DAISYS platform.",
+      "category": "Other",
+      "source_url": "https://github.com/daisys-ai/daisys-mcp",
+      "template": null
+    },
+    {
+      "name": "Danielpeter-99/calcom-mcp",
+      "description": "MCP server for Calcom (Also known as Cal.com). Manage event types, create bookings, and access Cal.com scheduling data through LLMs.",
+      "category": "Other",
+      "source_url": "https://github.com/Danielpeter-99/calcom-mcp",
+      "template": null
+    },
+    {
+      "name": "Dart",
+      "description": "Interact with task, doc, and project data in Dart, an AI-native project management tool",
+      "category": "Other",
+      "source_url": "https://github.com/its-dart/dart-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Dash0",
+      "description": "Navigate your OpenTelemetry resources, investigate incidents and query metrics, logs and traces on Dash0.",
+      "category": "Other",
+      "source_url": "https://github.com/dash0hq/mcp-dash0",
+      "template": null
+    },
+    {
+      "name": "Data Exploration",
+      "description": "MCP server for autonomous data exploration on .csv-based datasets, providing intelligent insights with minimal effort.",
+      "category": "Other",
+      "source_url": "https://github.com/reading-plus-ai/mcp-server-data-exploration",
+      "template": null
+    },
+    {
+      "name": "Database",
+      "description": "(by Legion AI) - Universal database MCP server supporting multiple database types including PostgreSQL, Redshift, CockroachDB, MySQL, RDS MySQL, Microsoft SQL Server, BigQuery, Oracle DB, and SQLite",
+      "category": "Other",
+      "source_url": "https://github.com/TheRaLabs/legion-mcp",
+      "template": null
+    },
+    {
+      "name": "DataWorks",
+      "description": "A Model Context Protocol (MCP) server that provides tools for AI, allowing it to interact with the DataWorks Open API through a standardized interface. This implementation is based on the Aliyun Open API and enables AI agents to perform cloud resources operations seamlessly.",
+      "category": "Other",
+      "source_url": "https://github.com/aliyun/alibabacloud-dataworks-mcp-server",
+      "template": null
+    },
+    {
+      "name": "dbt",
+      "description": "Official MCP server for dbt (data build tool) providing integration with dbt Core/Cloud CLI, project metadata discovery, model information, and semantic layer querying capabilities.",
+      "category": "Other",
+      "source_url": "https://github.com/dbt-labs/dbt-mcp",
+      "template": null
+    },
+    {
+      "name": "dbt-docs",
+      "description": "MCP server for dbt-core (OSS) users as the official dbt MCP only supports dbt Cloud. Supports project metadata, model and column-level lineage and dbt documentation.",
+      "category": "Other",
+      "source_url": "https://github.com/mattijsdp/dbt-docs-mcp",
+      "template": null
+    },
+    {
+      "name": "DealX",
+      "description": "MCP Server for DealX platform",
+      "category": "Other",
+      "source_url": "https://github.com/DealExpress/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Debugg AI",
+      "description": "Enable your code gen agents to create & run 0-config end-to-end tests against new code changes in remote browsers via the Debugg AI testing platform.",
+      "category": "Other",
+      "source_url": "https://github.com/debugg-ai/debugg-ai-mcp",
+      "template": null
+    },
+    {
+      "name": "Decodo",
+      "description": "Easy web data access. Simplified retrieval of information from websites and online sources.",
+      "category": "Other",
+      "source_url": "https://github.com/Decodo/decodo-mcp-server",
+      "template": null
+    },
+    {
+      "name": "DeepResearch",
+      "description": "Lightning-Fast, High-Accuracy Deep Research Agent 👉 8–10x faster 👉 Greater depth & accuracy 👉 Unlimited parallel runs",
+      "category": "Other",
+      "source_url": "https://github.com/OctagonAI/octagon-deep-research-mcp",
+      "template": null
+    },
+    {
+      "name": "DeepView MCP",
+      "description": "Enables IDEs like Cursor and Windsurf to analyze large codebases using Gemini's 1M context window.",
+      "category": "Other",
+      "source_url": "https://github.com/ai-1st/deepview-mcp",
+      "template": null
+    },
+    {
+      "name": "DeepWiki by Devin",
+      "description": "Remote, no-auth MCP server providing AI-powered codebase context and answers",
+      "category": "Other",
+      "source_url": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+      "template": null
+    },
+    {
+      "name": "DevHub",
+      "description": "Manage and utilize website content within the DevHub CMS platform",
+      "category": "Other",
+      "source_url": "https://github.com/devhub/devhub-cms-mcp",
+      "template": null
+    },
+    {
+      "name": "DexPaprika",
+      "description": "Access real-time DEX analytics across 20+ blockchains with DexPaprika API, tracking 5M+ tokens, pools, volumes, and historical market data. Built by CoinPaprika.",
+      "category": "Other",
+      "source_url": "https://github.com/coinpaprika/dexpaprika-mcp",
+      "template": null
+    },
+    {
+      "name": "DifyWorkflow",
+      "description": "Tools to the query and execute of Dify workflows",
+      "category": "Other",
+      "source_url": "https://github.com/gotoolkits/mcp-difyworkflow-server",
+      "template": null
+    },
+    {
+      "name": "DigitalOcean MCP Server",
+      "description": "A Model Context Protocol (MCP) server that provides programmatic access to DigitalOcean's API. This server exposes tools for managing droplets, Kubernetes clusters, and container registries through the MCP interface.",
+      "category": "Other",
+      "source_url": "https://github.com/rohit-kaundal/digitalocean-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Digma",
+      "description": "A code observability MCP enabling dynamic code analysis based on OTEL/APM data to assist in code reviews, issues identification and fix, highlighting risky code etc.",
+      "category": "Other",
+      "source_url": "https://github.com/digma-ai/digma-mcp-server",
+      "template": null
+    },
+    {
+      "name": "DINO-X",
+      "description": "Advanced computer vision and object detection MCP server powered by Dino-X, enabling AI agents to analyze images, detect objects, identify keypoints, and perform visual understanding tasks.",
+      "category": "Other",
+      "source_url": "https://github.com/IDEA-Research/DINO-X-MCP",
+      "template": null
+    },
+    {
+      "name": "Django REST Framework MCP",
+      "description": "Expose Django REST Framework APIs as MCP tools for LLMs and agentic applications",
+      "category": "Other",
+      "source_url": "https://github.com/zacharypodbela/djangorestframework-mcp",
+      "template": null
+    },
+    {
+      "name": "Docker",
+      "description": "Run and manage docker containers, docker compose, and logs",
+      "category": "Other",
+      "source_url": "https://github.com/QuantGeekDev/docker-mcp",
+      "template": null
+    },
+    {
+      "name": "Dolt",
+      "description": "The official MCP server for version-controlled Dolt databases.",
+      "category": "Other",
+      "source_url": "https://github.com/dolthub/dolt-mcp",
+      "template": null
+    },
+    {
+      "name": "Drand",
+      "description": "An MCP server for fetching verifiable random numbers from the drand network.",
+      "category": "Other",
+      "source_url": "https://github.com/randa-mu/drand-mcp-server",
+      "template": null
+    },
+    {
+      "name": "DreamFactory",
+      "description": "An MCP server for securely (via RBAC) talking to on-premise and cloud MS SQL Server, MySQL, PostgreSQL databases and other data sources.",
+      "category": "Other",
+      "source_url": "https://github.com/dreamfactorysoftware/df-mcp",
+      "template": null
+    },
+    {
+      "name": "Driflyte",
+      "description": "MCP Server for Driflyte. The Driflyte MCP Server exposes tools that allow AI assistants to query and retrieve topic-specific knowledge from recursively crawled and indexed web pages.",
+      "category": "Other",
+      "source_url": "https://github.com/serkan-ozal/driflyte-mcp-server",
+      "template": null
+    },
+    {
+      "name": "DropBin",
+      "description": "Remote SSE MCP server for hosting HTML webpages and sharing content through temporary URLs without authentication",
+      "category": "Other",
+      "source_url": "https://dropbin.org/mcp",
+      "template": null
+    },
+    {
+      "name": "Druid MCP Server",
+      "description": "STDIO/SEE MCP Server for Apache Druid by iunera that provides extensive tools, resources, and prompts for managing and analyzing Druid clusters.",
+      "category": "Other",
+      "source_url": "https://github.com/iunera/druid-mcp-server",
+      "template": null
+    },
+    {
+      "name": "DynamoDB-Toolbox",
+      "description": "Leverages your Schemas and Access Patterns to interact with your DynamoDB Database using natural language.",
+      "category": "Other",
+      "source_url": "https://www.dynamodbtoolbox.com/docs/databases/actions/mcp-toolkit",
+      "template": null
+    },
+    {
+      "name": "E2B",
+      "description": "Run code in secure sandboxes hosted by E2B",
+      "category": "Other",
+      "source_url": "https://github.com/e2b-dev/mcp-server",
+      "template": null
+    },
+    {
+      "name": "ECharts",
+      "description": "Generate visual charts using ECharts with AI MCP dynamically, used for chart generation and data analysis.",
+      "category": "Other",
+      "source_url": "https://github.com/hustcc/mcp-echarts",
+      "template": null
+    },
+    {
+      "name": "EdgeOne Pages MCP",
+      "description": "An MCP service for deploying HTML content to EdgeOne Pages and obtaining a publicly accessible URL.",
+      "category": "Other",
+      "source_url": "https://github.com/TencentEdgeOne/edgeone-pages-mcp",
+      "template": null
+    },
+    {
+      "name": "EduBase",
+      "description": "Interact with EduBase, a comprehensive e-learning platform with advanced quizzing, exam management, and content organization capabilities",
+      "category": "Other",
+      "source_url": "https://github.com/EduBase/MCP",
+      "template": null
+    },
+    {
+      "name": "ELEMENT.FM",
+      "description": "Create and publish unlimited podcast shows and episodes with ELEMENT.FM",
+      "category": "Other",
+      "source_url": "https://gitlab.com/elementfm/mcp",
+      "template": null
+    },
+    {
+      "name": "ElevenLabs",
+      "description": "The official ElevenLabs MCP server",
+      "category": "Other",
+      "source_url": "https://github.com/elevenlabs/elevenlabs-mcp",
+      "template": null
+    },
+    {
+      "name": "elisp-dev-mcp",
+      "description": "elisp (Emacs Lisp) development support tools, running in Emacs.",
+      "category": "Other",
+      "source_url": "https://github.com/laurynas-biveinis/elisp-dev-mcp",
+      "template": null
+    },
+    {
+      "name": "Email",
+      "description": "This server enables users to send emails through various email providers, including Gmail, Outlook, Yahoo, Sina, Sohu, 126, 163, and QQ Mail. It also supports attaching files from specified directories, making it easy to upload attachments along with the email content.",
+      "category": "Other",
+      "source_url": "https://github.com/Shy2593666979/mcp-server-email",
+      "template": null
+    },
+    {
+      "name": "Email Send MCP",
+      "description": "A fixed one from above one. More user-friendly.",
+      "category": "Other",
+      "source_url": "https://github.com/YUHAI0/email-send-mcp",
+      "template": null
+    },
+    {
+      "name": "eSignatures",
+      "description": "Contract and template management for drafting, reviewing, and sending binding contracts.",
+      "category": "Other",
+      "source_url": "https://github.com/esignaturescom/mcp-server-esignatures",
+      "template": null
+    },
+    {
+      "name": "Everything",
+      "description": "Reference / test server with prompts, resources, and tools",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/blob/main/src/everything",
+      "template": null
+    },
+    {
+      "name": "Everything Search",
+      "description": "Fast Windows file search using Everything SDK",
+      "category": "Other",
+      "source_url": "https://github.com/mamertofabian/mcp-everything-search",
+      "template": null
+    },
+    {
+      "name": "Exa",
+      "description": "Search Engine made for AIs by Exa",
+      "category": "Other",
+      "source_url": "https://github.com/exa-labs/exa-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Exa",
+      "description": "Exa AI Search API",
+      "category": "Other",
+      "source_url": "https://github.com/theishangoswami/exa-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Excel",
+      "description": "Excel manipulation including data reading/writing, worksheet management, formatting, charts, and pivot table",
+      "category": "Other",
+      "source_url": "https://github.com/haris-musa/excel-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Facebook Ads",
+      "description": "MCP server acting as an interface to the Facebook Ads, enabling programmatic access to Facebook Ads data and management features.",
+      "category": "Other",
+      "source_url": "https://github.com/gomarble-ai/facebook-ads-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Facebook Ads Library",
+      "description": "Get any answer from the Facebook Ads Library, conduct deep research including messaging, creative testing and comparisons in seconds.",
+      "category": "Other",
+      "source_url": "https://github.com/trypeggy/facebook-ads-library-mcp",
+      "template": null
+    },
+    {
+      "name": "fast-filesystem-mcp",
+      "description": "Advanced filesystem operations with large file handling capabilities and Claude-optimized features. Provides fast file reading/writing, sequential reading for large files, directory operations, file search, and streaming writes with backup & recovery.",
+      "category": "Other",
+      "source_url": "https://github.com/efforthye/fast-filesystem-mcp",
+      "template": null
+    },
+    {
+      "name": "Fathom Analytics",
+      "description": "Access and analyze Fathom Analytics data and reports",
+      "category": "Other",
+      "source_url": "https://github.com/mackenly/mcp-fathom-analytics",
+      "template": null
+    },
+    {
+      "name": "Fetch",
+      "description": "Web content fetching and conversion for efficient LLM usage",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "template": null
+    },
+    {
+      "name": "FetchSERP",
+      "description": "All-in-One SEO & Web Intelligence Toolkit API FetchSERP",
+      "category": "Other",
+      "source_url": "https://github.com/fetchSERP/fetchserp-mcp-server-node",
+      "template": null
+    },
+    {
+      "name": "Fewsats",
+      "description": "Enable AI Agents to purchase anything in a secure way using Fewsats",
+      "category": "Other",
+      "source_url": "https://github.com/Fewsats/fewsats-mcp",
+      "template": null
+    },
+    {
+      "name": "FHIR",
+      "description": "Model Context Protocol server for Fast Healthcare Interoperability Resources (FHIR) APIs, enabling seamless integration with healthcare data through SMART-on-FHIR authentication and comprehensive FHIR operations.",
+      "category": "Other",
+      "source_url": "https://github.com/wso2/fhir-mcp-server",
+      "template": null
+    },
+    {
+      "name": "FHIR MCP",
+      "description": "MCP Server that connects AI agents to FHIR servers",
+      "category": "Other",
+      "source_url": "https://github.com/the-momentum/fhir-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Fibery",
+      "description": "Perform queries and entity operations in your Fibery workspace.",
+      "category": "Other",
+      "source_url": "https://github.com/Fibery-inc/fibery-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Files",
+      "description": "Enables agents to quickly find and edit code in a codebase with surgical precision. Find symbols, edit them everywhere.",
+      "category": "Other",
+      "source_url": "https://github.com/flesler/mcp-files",
+      "template": null
+    },
+    {
+      "name": "FileScopeMCP",
+      "description": "Analyzes your codebase identifying important files based on dependency relationships. Generates diagrams and importance scores per file, helping AI assistants understand the codebase. Automatically parses popular programming languages, Python, Lua, C, C++, Rust, Zig.",
+      "category": "Other",
+      "source_url": "https://github.com/admica/FileScopeMCP",
+      "template": null
+    },
+    {
+      "name": "Filesystem",
+      "description": "Secure file operations with configurable access controls",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "template": null
+    },
+    {
+      "name": "Financial Datasets",
+      "description": "Stock market API made for AI agents",
+      "category": "Other",
+      "source_url": "https://github.com/financial-datasets/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Find-A-Domain",
+      "description": "Domain availability checking and WHOIS lookup tools.",
+      "category": "Other",
+      "source_url": "https://findadomain.dev/mcp",
+      "template": null
+    },
+    {
+      "name": "Firecrawl",
+      "description": "Extract web data with Firecrawl",
+      "category": "Other",
+      "source_url": "https://github.com/mendableai/firecrawl-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Fireproof",
+      "description": "Immutable ledger database with live synchronization",
+      "category": "Other",
+      "source_url": "https://github.com/fireproof-storage/mcp-database-server",
+      "template": null
+    },
+    {
+      "name": "FlyonUI",
+      "description": "Build modern, production-ready UI blocks, components, and landing pages in minutes.",
+      "category": "Other",
+      "source_url": "https://github.com/themeselection/flyonui-mcp",
+      "template": null
+    },
+    {
+      "name": "ForeverVM",
+      "description": "Run Python in a code sandbox.",
+      "category": "Other",
+      "source_url": "https://github.com/jamsocket/forevervm/tree/main/javascript/mcp-server",
+      "template": null
+    },
+    {
+      "name": "FrankfurterMCP",
+      "description": "MCP server acting as an interface to the Frankfurter API for currency exchange data.",
+      "category": "Other",
+      "source_url": "https://github.com/anirbanbasu/frankfurtermcp",
+      "template": null
+    },
+    {
+      "name": "Fulcra Context",
+      "description": "Fulcra Context MCP server for accessing your personal health, workouts, sleep, location, and more, all privately. Built around Context by Fulcra.",
+      "category": "Other",
+      "source_url": "https://github.com/fulcradynamics/fulcra-context-mcp",
+      "template": null
+    },
+    {
+      "name": "Gcore Cloud",
+      "description": "Gcore's Cloud Official MCP Server",
+      "category": "Other",
+      "source_url": "https://github.com/G-Core/gcore-mcp-server",
+      "template": null
+    },
+    {
+      "name": "GDB",
+      "description": "A GDB/MI protocol server based on the MCP protocol, providing remote application debugging capabilities with AI assistants.",
+      "category": "Other",
+      "source_url": "https://github.com/pansila/mcp_server_gdb",
+      "template": null
+    },
+    {
+      "name": "Gemsuite",
+      "description": "The ultimate open-source server for advanced Gemini API interaction with MCP, intelligently selects models.",
+      "category": "Other",
+      "source_url": "https://github.com/PV-Bhat/gemsuite-mcp",
+      "template": null
+    },
+    {
+      "name": "Gentoro",
+      "description": "Gentoro generates MCP Servers based on OpenAPI specifications.",
+      "category": "Other",
+      "source_url": "https://github.com/gentoro-GT/mcp-nodejs-server",
+      "template": null
+    },
+    {
+      "name": "Git",
+      "description": "Tools to read, search, and manipulate Git repositories",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "template": null
+    },
+    {
+      "name": "Gitee",
+      "description": "Gitee API integration, repository, issue, and pull request management, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/oschina/mcp-gitee",
+      "template": null
+    },
+    {
+      "name": "GitHub",
+      "description": "GitHub's official MCP Server",
+      "category": "Development",
+      "source_url": "https://github.com/github/github-mcp-server",
+      "template": {
+        "transport": "http",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "command": null,
+        "args": [],
+        "auth_mode": "per-user"
+      }
+    },
+    {
+      "name": "GitHub Repos Manager MCP Server",
+      "description": "Token-based GitHub automation management. No Docker, Flexible configuration, 80+ tools with direct API integration.",
+      "category": "Other",
+      "source_url": "https://github.com/kurdin/github-repos-manager-mcp",
+      "template": null
+    },
+    {
+      "name": "GitKraken",
+      "description": "A CLI for interacting with GitKraken APIs. Includes an MCP server via gk mcp that not only wraps GitKraken APIs, but also Jira, GitHub, GitLab, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/gitkraken/gk-cli",
+      "template": null
+    },
+    {
+      "name": "Globalping",
+      "description": "Network access with the ability to run commands like ping, traceroute, mtr, http, dns resolve.",
+      "category": "Other",
+      "source_url": "https://github.com/jsdelivr/globalping-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Gluestack UI MCP Server",
+      "description": "An MCP server tailored for React Native–first development using Gluestack UI.",
+      "category": "Other",
+      "source_url": "https://github.com/gauravsaini/gluestack-ui-mcp-server",
+      "template": null
+    },
+    {
+      "name": "godoc-mcp-server",
+      "description": "MCP server to provide golang packages and their information from pkg.go.dev",
+      "category": "Other",
+      "source_url": "https://github.com/yikakia/godoc-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Godot MCP",
+      "description": "MCP server for interacting with the Godot game engine, providing tools for editing, running, debugging, and managing scenes in Godot projects.",
+      "category": "Other",
+      "source_url": "https://github.com/Coding-Solo/godot-mcp",
+      "template": null
+    },
+    {
+      "name": "GoLogin MCP server",
+      "description": "Manage your GoLogin browser profiles and automation directly through AI conversations!",
+      "category": "Other",
+      "source_url": "https://github.com/gologinapp/gologin-mcp",
+      "template": null
+    },
+    {
+      "name": "Google Admin MCP",
+      "description": "A Model Context Protocol (MCP) server enabling interaction with Google Admin APIs.",
+      "category": "Other",
+      "source_url": "https://github.com/securityfortech/google-admin-mcp",
+      "template": null
+    },
+    {
+      "name": "Google Ads",
+      "description": "MCP server acting as an interface to the Google Ads, enabling programmatic access to Google Ads data and management features.",
+      "category": "Other",
+      "source_url": "https://github.com/gomarble-ai/google-ads-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Google Cloud Run",
+      "description": "Official MCP Server to deploy to Google Cloud Run.",
+      "category": "Other",
+      "source_url": "https://github.com/GoogleCloudPlatform/cloud-run-mcp",
+      "template": null
+    },
+    {
+      "name": "Google Keep",
+      "description": "Read, create, update and delete Google Keep notes.",
+      "category": "Other",
+      "source_url": "https://github.com/feuerdev/keep-mcp",
+      "template": null
+    },
+    {
+      "name": "Google News",
+      "description": "Google News search capabilities with automatic topic categorization and multi-language support via SerpAPI integration.",
+      "category": "Other",
+      "source_url": "https://github.com/ChanMeng666/server-google-news",
+      "template": null
+    },
+    {
+      "name": "Google PSE/CSE",
+      "description": "A Model Context Protocol (MCP) server providing access to Google Programmable Search Engine (PSE) and Custom Search Engine (CSE).",
+      "category": "Other",
+      "source_url": "https://github.com/rendyfebry/google-pse-mcp",
+      "template": null
+    },
+    {
+      "name": "Google Search Console",
+      "description": "A Model Context Protocol (MCP) server providing access to Google Search Console.",
+      "category": "Other",
+      "source_url": "https://github.com/ahonn/mcp-server-gsc",
+      "template": null
+    },
+    {
+      "name": "gotoHuman",
+      "description": "Human-in-the-loop platform - Allow AI agents and automations to send requests for approval to your gotoHuman inbox.",
+      "category": "Other",
+      "source_url": "https://github.com/gotohuman/gotohuman-mcp-server",
+      "template": null
+    },
+    {
+      "name": "gotoolkits/wecombot",
+      "description": "🏎️ ☁️ An MCP server application that sends various types of messages to the WeCom group robot.",
+      "category": "Other",
+      "source_url": "https://github.com/gotoolkits/mcp-wecombot-server.git",
+      "template": null
+    },
+    {
+      "name": "Grafana",
+      "description": "Search dashboards, investigate incidents and query datasources in your Grafana instance",
+      "category": "Other",
+      "source_url": "https://github.com/grafana/mcp-grafana",
+      "template": null
+    },
+    {
+      "name": "Graphlit",
+      "description": "Ingest anything from Slack to Gmail to podcast feeds, in addition to web crawling, into a searchable Graphlit project.",
+      "category": "Other",
+      "source_url": "https://github.com/graphlit/graphlit-mcp-server",
+      "template": null
+    },
+    {
+      "name": "GreptimeDB",
+      "description": "Provides AI assistants with a secure and structured way to explore and analyze data in GreptimeDB.",
+      "category": "Other",
+      "source_url": "https://github.com/GreptimeTeam/greptimedb-mcp-server",
+      "template": null
+    },
+    {
+      "name": "GrowthBook",
+      "description": "Create and read feature flags, review experiments, generate flag types, search docs, and interact with GrowthBook's feature flagging and experimentation platform.",
+      "category": "Other",
+      "source_url": "https://github.com/growthbook/growthbook-mcp",
+      "template": null
+    },
+    {
+      "name": "Gru Sandbox",
+      "description": "Gru-sandbox(gbox) is an open source project that provides a self-hostable sandbox for MCP integration or other AI agent usecases.",
+      "category": "Other",
+      "source_url": "https://github.com/babelcloud/gru-sandbox",
+      "template": null
+    },
+    {
+      "name": "gx-mcp-server",
+      "description": "Expose Great Expectations data validation and",
+      "category": "Other",
+      "source_url": "https://github.com/davidf9999/gx-mcp-server",
+      "template": null
+    },
+    {
+      "name": "GXtract",
+      "description": "GXtract is a MCP server designed to integrate with VS Code and other compatible editors (documentation: sascharo.github.io/gxtract). It provides a suite of tools for interacting with the GroundX platform, enabling you to leverage its powerful document understanding capabilities directly within your development environment.",
+      "category": "Other",
+      "source_url": "https://github.com/sascharo/gxtract",
+      "template": null
+    },
+    {
+      "name": "HackMD",
+      "description": "A Model Context Protocol server for integrating HackMD's note-taking platform with AI assistants.",
+      "category": "Other",
+      "source_url": "https://github.com/yuna0x0/hackmd-mcp",
+      "template": null
+    },
+    {
+      "name": "HAL",
+      "description": "HTTP toolkit providing all 7 HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) with secret substitution, comprehensive error handling, and support for JSON, XML, HTML, and form data.",
+      "category": "Other",
+      "source_url": "https://github.com/dean/HAL",
+      "template": null
+    },
+    {
+      "name": "HAP-MCP",
+      "description": "HAP (Super Application Platform) is developed by Mingdao（ https://www.mingdao.com ）The launched APaaS platform helps you build enterprise level applications quickly without coding. This is HAP's MCP (Model Context Protocol) server, used for seamless integration of AI. It enables every zero code application built through HAP to quickly become a tool for agents.",
+      "category": "Other",
+      "source_url": "https://github.com/mingdaocloud/hap-mcp.git",
+      "template": null
+    },
+    {
+      "name": "Harness",
+      "description": "Access and interact with Harness platform data, including pipelines, repositories, logs, and artifact registries.",
+      "category": "Other",
+      "source_url": "https://github.com/harness/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Hetzner Cloud MCP Server",
+      "description": "A Model Context Protocol (MCP) server for interacting with the Hetzner Cloud API. This server allows language models to manage Hetzner Cloud resources through structured functions.",
+      "category": "Other",
+      "source_url": "https://github.com/dkruyt/mcp-hetzner",
+      "template": null
+    },
+    {
+      "name": "Hippycampus",
+      "description": "Turns any Swagger/OpenAPI REST endpoint with a yaml/json definition into an MCP Server with Langchain/Langflow integration automatically.",
+      "category": "Other",
+      "source_url": "https://github.com/cromwellian/hippycampus",
+      "template": null
+    },
+    {
+      "name": "Hive Intelligence",
+      "description": "📇 ☁️ 🏠 - Hive Intelligence: Ultimate cryptocurrency MCP for AI assistants with unified access to crypto, DeFi, and Web3 analytics. Hive's remote mcp server guide remote server.",
+      "category": "Other",
+      "source_url": "https://github.com/hive-intel/hive-crypto-mcp",
+      "template": null
+    },
+    {
+      "name": "Hologres",
+      "description": "Connect to a Hologres instance, get table metadata, query and analyze data.",
+      "category": "Other",
+      "source_url": "https://github.com/aliyun/alibabacloud-hologres-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Home Assistant",
+      "description": "Interact with Home Assistant to control smart home devices, query states, manage automations, and troubleshoot your smart home setup.",
+      "category": "Other",
+      "source_url": "https://github.com/voska/hass-mcp",
+      "template": null
+    },
+    {
+      "name": "Homebrew MCP",
+      "description": "Interact with Homebrew (the package manager for macOS and Linux) using natural language commands.",
+      "category": "Other",
+      "source_url": "https://github.com/jeannier/homebrew-mcp",
+      "template": null
+    },
+    {
+      "name": "Homey",
+      "description": "Interact with Homey to control smart home system. Supports devices, flows, and zones. Contains a few goodies for better integrations with LLMs.",
+      "category": "Other",
+      "source_url": "https://github.com/pigmej/python-homey-mcp",
+      "template": null
+    },
+    {
+      "name": "Hostinger",
+      "description": "Official Hostinger API MCP server for services managment.",
+      "category": "Other",
+      "source_url": "https://github.com/hostinger/api-mcp-server",
+      "template": null
+    },
+    {
+      "name": "HuggingFace Spaces",
+      "description": "Server for using HuggingFace Spaces, supporting Images, Audio, Text and more. Claude Desktop mode for ease-of-use.",
+      "category": "Other",
+      "source_url": "https://github.com/evalstate/mcp-hfspace",
+      "template": null
+    },
+    {
+      "name": "Hydrolix",
+      "description": "Hydrolix time-series datalake integration providing schema exploration and query capabilities to LLM-based workflows.",
+      "category": "Other",
+      "source_url": "https://github.com/hydrolix/mcp-hydrolix",
+      "template": null
+    },
+    {
+      "name": "Hyperbrowser",
+      "description": "Hyperbrowser is the next-generation platform empowering AI agents and enabling effortless, scalable browser automation.",
+      "category": "Other",
+      "source_url": "https://github.com/hyperbrowserai/mcp",
+      "template": null
+    },
+    {
+      "name": "IBM wxflows",
+      "description": "Tool platform by IBM to build, test and deploy tools for any data source",
+      "category": "Other",
+      "source_url": "https://github.com/IBM/wxflows/tree/main/examples/mcp/javascript",
+      "template": null
+    },
+    {
+      "name": "IDA Pro MCP",
+      "description": "MCP Server for automated reverse engineering with IDA Pro.",
+      "category": "Other",
+      "source_url": "https://github.com/mrexodia/ida-pro-mcp",
+      "template": null
+    },
+    {
+      "name": "ilert",
+      "description": "Interact with ilert through natural language.",
+      "category": "Other",
+      "source_url": "https://github.com/iLert/mcp-ilert",
+      "template": null
+    },
+    {
+      "name": "ImageSorcery MCP",
+      "description": "ComputerVision-based 🪄 sorcery of image recognition and editing tools for AI assistants.",
+      "category": "Other",
+      "source_url": "https://github.com/sunriseapps/imagesorcery-mcp",
+      "template": null
+    },
+    {
+      "name": "Imagician",
+      "description": "A MCP server for comprehensive image editing operations including resizing, format conversion, cropping, compression, and more based on sharp.",
+      "category": "Other",
+      "source_url": "https://github.com/flowy11/imagician",
+      "template": null
+    },
+    {
+      "name": "IMAP MCP",
+      "description": "📧 An IMAP Model Context Protocol (MCP) server to expose IMAP operations as tools for AI assistants.",
+      "category": "Other",
+      "source_url": "https://github.com/dominik1001/imap-mcp",
+      "template": null
+    },
+    {
+      "name": "Inbox Zero",
+      "description": "AI personal assistant for email Inbox Zero",
+      "category": "Other",
+      "source_url": "https://github.com/elie222/inbox-zero/tree/main/apps/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Inkeep",
+      "description": "RAG Search over your content powered by Inkeep",
+      "category": "Other",
+      "source_url": "https://github.com/inkeep/mcp-server-python",
+      "template": null
+    },
+    {
+      "name": "Inspektor Gadget MCP server",
+      "description": "Debug your Container and Kubernetes workloads with an AI interface powered by eBPF.",
+      "category": "Other",
+      "source_url": "https://github.com/inspektor-gadget/ig-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Instagram DMs",
+      "description": "Send Instagram DMs via your LLM",
+      "category": "Other",
+      "source_url": "https://github.com/trypeggy/instagram_dm_mcp",
+      "template": null
+    },
+    {
+      "name": "InstantDB",
+      "description": "Create, manage, and update applications on InstantDB, the modern Firebase.",
+      "category": "Other",
+      "source_url": "https://github.com/instantdb/instant/tree/main/client/packages/mcp",
+      "template": null
+    },
+    {
+      "name": "Integration App",
+      "description": "Interact with any other SaaS applications on behalf of your customers.",
+      "category": "Other",
+      "source_url": "https://github.com/integration-app/mcp-server",
+      "template": null
+    },
+    {
+      "name": "interactive-mcp",
+      "description": "📇 - Enables interactive LLM workflows by adding local user prompts and chat capabilities directly into the MCP loop.",
+      "category": "Other",
+      "source_url": "https://github.com/ttommyth/interactive-mcp",
+      "template": null
+    },
+    {
+      "name": "IP2Location.io",
+      "description": "IP2Location.io API integration to retrieve the geolocation information for an IP address.",
+      "category": "Other",
+      "source_url": "https://github.com/ip2location/mcp-ip2location-io",
+      "template": null
+    },
+    {
+      "name": "IPLocate",
+      "description": "Look up IP address geolocation, network information, detect proxies and VPNs, and find abuse contact details using IPLocate.io",
+      "category": "Other",
+      "source_url": "https://github.com/iplocate/mcp-server-iplocate",
+      "template": null
+    },
+    {
+      "name": "irulescan MCP",
+      "description": ":shield: MCP enabled code security analyzer for F5 iRules",
+      "category": "Other",
+      "source_url": "https://github.com/simonkowallik/irulescan",
+      "template": null
+    },
+    {
+      "name": "Israel Statistics MCP",
+      "description": "MCP server that provides programmatic access to the Israeli Central Bureau of Statistics (CBS) price indices and economic data.",
+      "category": "Other",
+      "source_url": "https://github.com/reuvenaor/israel-statistics-mcp",
+      "template": null
+    },
+    {
+      "name": "Jean Memory",
+      "description": "Premium memory consistent across all AI applications.",
+      "category": "Other",
+      "source_url": "https://github.com/jonathan-politzki/your-memory",
+      "template": null
+    },
+    {
+      "name": "JetBrains",
+      "description": "Work on your code with JetBrains IDEs",
+      "category": "Other",
+      "source_url": "https://github.com/JetBrains/mcp-jetbrains",
+      "template": null
+    },
+    {
+      "name": "Jetty.io",
+      "description": "Work on dataset metadata with MLCommons Croissant validation and creation.",
+      "category": "Other",
+      "source_url": "https://github.com/jettyio/mlcbakery/tree/main/mcp_server",
+      "template": null
+    },
+    {
+      "name": "Jina Reader",
+      "description": "Fetch the content of a remote URL as Markdown with Jina Reader.",
+      "category": "Other",
+      "source_url": "https://github.com/wong2/mcp-jina-reader",
+      "template": null
+    },
+    {
+      "name": "Jira Context MCP",
+      "description": "MCP server to provide Jira Tickets information to AI coding agents like Cursor.",
+      "category": "Other",
+      "source_url": "https://github.com/rahulthedevil/Jira-Context-MCP",
+      "template": null
+    },
+    {
+      "name": "Jira MCP Server",
+      "description": "A modular and extensible MCP server designed to interact with Jira Cloud, providing tools to query boards, issues, and user data — ideal for integrating Jira with AI agents, bots, or automation systems",
+      "category": "Other",
+      "source_url": "https://github.com/ahmetbarut/jira-mcp",
+      "template": null
+    },
+    {
+      "name": "JSON MCP",
+      "description": "MCP server empowers LLMs to interact with JSON files efficiently. With JSON MCP, you can split, merge, etc.",
+      "category": "Other",
+      "source_url": "https://github.com/VadimNastoyashchy/json-mcp",
+      "template": null
+    },
+    {
+      "name": "just-every/mcp-read-website-fast",
+      "description": "Fast, token-efficient web content extraction that converts websites to clean Markdown. Features Mozilla Readability, smart caching, polite crawling with robots.txt support, and concurrent fetching with minimal dependencies.",
+      "category": "Other",
+      "source_url": "https://github.com/just-every/mcp-read-website-fast",
+      "template": null
+    },
+    {
+      "name": "just-every/mcp-screenshot-website-fast",
+      "description": "High-quality screenshot capture optimized for Claude Vision API. Automatically tiles full pages into 1072x1072 chunks (1.15 megapixels) with configurable viewports and wait strategies for dynamic content.",
+      "category": "Other",
+      "source_url": "https://github.com/just-every/mcp-screenshot-website-fast",
+      "template": null
+    },
+    {
+      "name": "Kagi",
+      "description": "Kagi search API integration",
+      "category": "Other",
+      "source_url": "https://github.com/ac3xx/mcp-servers-kagi",
+      "template": null
+    },
+    {
+      "name": "Kagi Search",
+      "description": "Search the web using Kagi's search API",
+      "category": "Other",
+      "source_url": "https://github.com/kagisearch/kagimcp",
+      "template": null
+    },
+    {
+      "name": "Keboola",
+      "description": "Build robust data workflows, integrations, and analytics on a single intuitive platform.",
+      "category": "Other",
+      "source_url": "https://github.com/keboola/keboola-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Keycloak MCP Server",
+      "description": "designed to work with Keycloak for identity and access management, with about 40+ tools covering, Users, Realms, Clients, Roles, Groups, IDPs, Authentication. Native builds available.",
+      "category": "Other",
+      "source_url": "https://github.com/sshaaf/keycloak-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Knit MCP",
+      "description": "Connect with 10,000+ tools across HRIS, ATS, CRM, Accounting, Calendar, Meeting, Ticketing, and more categories.",
+      "category": "Other",
+      "source_url": "https://developers.getknit.dev/docs/knit-mcp-server-getting-started",
+      "template": null
+    },
+    {
+      "name": "KnowAir Weather",
+      "description": "Real-time weather and air quality via the Caiyun Weather API (meteorology + AQI, CN & US standards).",
+      "category": "Other",
+      "source_url": "https://github.com/shuowang-ai/Weather-MCP",
+      "template": null
+    },
+    {
+      "name": "Kontent.ai",
+      "description": "Create, manage, and explore your content and content model using natural language in any MCP-compatible AI tool.",
+      "category": "Other",
+      "source_url": "https://github.com/kontent-ai/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Kubernetes",
+      "description": "Connect to Kubernetes cluster and manage pods, deployments, services.",
+      "category": "Other",
+      "source_url": "https://github.com/Flux159/mcp-server-kubernetes",
+      "template": null
+    },
+    {
+      "name": "Langfuse Prompt Management",
+      "description": "Open-source tool for collaborative editing, versioning, evaluating, and releasing prompts.",
+      "category": "Other",
+      "source_url": "https://github.com/langfuse/mcp-server-langfuse",
+      "template": null
+    },
+    {
+      "name": "Language Server",
+      "description": "🏎️ - MCP Language Server gives MCP enabled clients access to semantic tools like get definition, references, rename, and diagnostics.",
+      "category": "Other",
+      "source_url": "https://github.com/isaacphi/mcp-language-server",
+      "template": null
+    },
+    {
+      "name": "Last9",
+      "description": "Seamlessly bring real-time production context—logs, metrics, and traces—into your local environment to auto-fix code faster.",
+      "category": "Other",
+      "source_url": "https://github.com/last9/last9-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Latex MCP Server",
+      "description": "MCP Server to compile latex, download/organize/read cited papers, run visualization scripts and add figures/tables to latex.",
+      "category": "Other",
+      "source_url": "https://github.com/Yeok-c/latex-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Lazy Toggl MCP",
+      "description": "Simple unofficial MCP server to track time via Toggl API",
+      "category": "Other",
+      "source_url": "https://github.com/movstox/lazy-toggl-mcp",
+      "template": null
+    },
+    {
+      "name": "libSQL by xexr",
+      "description": "MCP server for libSQL databases with comprehensive security and management tools. Supports file, local HTTP, and remote Turso databases with connection pooling, transaction support, and 6 specialized database tools.",
+      "category": "Other",
+      "source_url": "https://github.com/Xexr/mcp-libsql",
+      "template": null
+    },
+    {
+      "name": "LINE Official Account",
+      "description": "Integrates the LINE Messaging API to connect an AI Agent to the LINE Official Account.",
+      "category": "Other",
+      "source_url": "https://github.com/line/line-bot-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Linear",
+      "description": "Integrates with Linear project management systems.",
+      "category": "Other",
+      "source_url": "https://github.com/tacticlaunch/mcp-linear",
+      "template": null
+    },
+    {
+      "name": "Lingo.dev",
+      "description": "Make your AI agent speak every language on the planet, using Lingo.dev Localization Engine.",
+      "category": "Other",
+      "source_url": "https://github.com/lingodotdev/lingo.dev/blob/main/mcp.md",
+      "template": null
+    },
+    {
+      "name": "Linked API",
+      "description": "MCP server that lets AI assistants control LinkedIn accounts and retrieve real-time data with Linked API.",
+      "category": "Other",
+      "source_url": "https://github.com/Linked-API/linkedapi-mcp.git",
+      "template": null
+    },
+    {
+      "name": "llm-context",
+      "description": "Share code context with LLMs via Model Context Protocol or clipboard.",
+      "category": "Other",
+      "source_url": "https://github.com/cyberchitta/llm-context.py",
+      "template": null
+    },
+    {
+      "name": "Local History MCP",
+      "description": "MCP server for accessing VS Code/Cursor's Local History.",
+      "category": "Other",
+      "source_url": "https://github.com/xxczaki/local-history-mcp",
+      "template": null
+    },
+    {
+      "name": "Logfire",
+      "description": "Provides access to OpenTelemetry traces and metrics through Logfire.",
+      "category": "Other",
+      "source_url": "https://github.com/pydantic/logfire-mcp",
+      "template": null
+    },
+    {
+      "name": "LunchMoney",
+      "description": "MCP server for LunchMoney personal finance and budgeting tool.",
+      "category": "Other",
+      "source_url": "https://github.com/akutishevsky/lunchmoney-mcp",
+      "template": null
+    },
+    {
+      "name": "Mailgun",
+      "description": "Interact with Mailgun API.",
+      "category": "Other",
+      "source_url": "https://github.com/mailgun/mailgun-mcp-server",
+      "template": null
+    },
+    {
+      "name": "MailSandbox",
+      "description": "MailSandbox (a fork of Mailpit) is a fast, zero-dependency email testing tool & API with a web UI, SMTP server, Postmark API emulation, and MCP server for AI-assisted debugging.",
+      "category": "Other",
+      "source_url": "https://github.com/btafoya/mailsandbox",
+      "template": null
+    },
+    {
+      "name": "Mailtrap",
+      "description": "Integrates with Mailtrap Email API.",
+      "category": "Other",
+      "source_url": "https://github.com/railsware/mailtrap-mcp",
+      "template": null
+    },
+    {
+      "name": "Make",
+      "description": "Turn your Make scenarios into callable tools for AI assistants.",
+      "category": "Other",
+      "source_url": "https://github.com/integromat/make-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Mapbox",
+      "description": "Unlock geospatial intelligence through Mapbox APIs like geocoding, POI search, directions, isochrones and more.",
+      "category": "Other",
+      "source_url": "https://github.com/mapbox/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Mastra/mcp",
+      "description": "Client implementation for Mastra, providing seamless integration with MCP-compatible AI models and tools.",
+      "category": "Other",
+      "source_url": "https://github.com/mastra-ai/mastra/tree/main/packages/mcp",
+      "template": null
+    },
+    {
+      "name": "Mastra/mcp-docs-server",
+      "description": "Provides AI assistants with direct access to Mastra.ai's complete knowledge base.",
+      "category": "Other",
+      "source_url": "https://github.com/mastra-ai/mastra/tree/main/packages/mcp-docs-server",
+      "template": null
+    },
+    {
+      "name": "Maven",
+      "description": "Tools to query latest Maven dependency information",
+      "category": "Other",
+      "source_url": "https://github.com/Bigsy/maven-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Maven Tools",
+      "description": "Enhanced Maven Central integration with intelligent caching, bulk operations, and version classification",
+      "category": "Other",
+      "source_url": "https://github.com/arvindand/maven-tools-mcp",
+      "template": null
+    },
+    {
+      "name": "Maya MCP",
+      "description": "MCP server for Autodesk Maya",
+      "category": "Other",
+      "source_url": "https://github.com/PatrickPalmer/MayaMCP",
+      "template": null
+    },
+    {
+      "name": "MCP Aggregator",
+      "description": "An MCP (Model Context Protocol) aggregator that allows you to combine multiple MCP servers into a single endpoint allowing to filter specific tools.",
+      "category": "Other",
+      "source_url": "https://github.com/nazar256/combine-mcp",
+      "template": null
+    },
+    {
+      "name": "MCP Expr Lang",
+      "description": "MCP Expr-Lang provides a seamless integration between Claude AI and the powerful expr-lang expression evaluation engine.",
+      "category": "Other",
+      "source_url": "https://github.com/ivan-saorin/mcp-expr-lang",
+      "template": null
+    },
+    {
+      "name": "MCP Installer",
+      "description": "Set up MCP servers in Claude Desktop",
+      "category": "Other",
+      "source_url": "https://github.com/anaisbetts/mcp-installer",
+      "template": null
+    },
+    {
+      "name": "MCP Open Library",
+      "description": "A Model Context Protocol (MCP) server for the Open Library API that enables AI assistants to search for book and author information.",
+      "category": "Other",
+      "source_url": "https://github.com/8enSmith/mcp-open-library",
+      "template": null
+    },
+    {
+      "name": "MCP Toolbox for Databases",
+      "description": "Open source MCP server specializing in easy, fast, and secure tools for Databases.",
+      "category": "Other",
+      "source_url": "https://github.com/googleapis/genai-toolbox",
+      "template": null
+    },
+    {
+      "name": "MCP-CLI Adapter",
+      "description": "Use command line tools in a secure fashion as MCP tools.",
+      "category": "Other",
+      "source_url": "https://github.com/inercia/mcp-cli-adapter",
+      "template": null
+    },
+    {
+      "name": "mcp-k8s-go",
+      "description": "Golang-based Kubernetes MCP Server. Built to be extensible.",
+      "category": "Other",
+      "source_url": "https://github.com/strowk/mcp-k8s-go",
+      "template": null
+    },
+    {
+      "name": "MCP-SearXNG-Enhanced Web Search",
+      "description": "An enhanced MCP server for SearXNG web searching, utilizing a category-aware web-search, web-scraping, and includes a date/time retrieval tool.",
+      "category": "Other",
+      "source_url": "https://github.com/OvertliDS/mcp-searxng-enhanced",
+      "template": null
+    },
+    {
+      "name": "MCPJungle",
+      "description": "🌳 - Open-source, Self-hosted MCP server Gateway that connects your AI Agents to MCP Servers (for developers and enterprises)",
+      "category": "Other",
+      "source_url": "https://github.com/mcpjungle/MCPJungle",
+      "template": null
+    },
+    {
+      "name": "Meilisearch",
+      "description": "Interact & query with Meilisearch (Full-text & semantic search API)",
+      "category": "Other",
+      "source_url": "https://github.com/meilisearch/meilisearch-mcp",
+      "template": null
+    },
+    {
+      "name": "Memory",
+      "description": "Knowledge graph-based persistent memory system",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "template": null
+    },
+    {
+      "name": "Memory-Plus",
+      "description": "a lightweight, local RAG memory store to record, retrieve, update, delete, and visualize persistent \"memories\" across sessions—perfect for developers working with multiple AI coders (like Windsurf, Cursor, or Copilot) or anyone who wants their AI to actually remember them.",
+      "category": "Other",
+      "source_url": "https://github.com/Yuchen20/Memory-Plus",
+      "template": null
+    },
+    {
+      "name": "Mercado Libre",
+      "description": "Mercado Libre's official MCP server, offering tools to interact with our marketplace, simplifying tasks and product integration.",
+      "category": "Other",
+      "source_url": "https://mcp.mercadolibre.com",
+      "template": null
+    },
+    {
+      "name": "Mercado Pago",
+      "description": "Mercado Pago's official MCP server, offering tools to interact with our API, simplifying tasks and product integration.",
+      "category": "Other",
+      "source_url": "https://mcp.mercadopago.com",
+      "template": null
+    },
+    {
+      "name": "Mermaid",
+      "description": "Generate mermaid diagram and chart with AI MCP dynamically.",
+      "category": "Other",
+      "source_url": "https://github.com/hustcc/mcp-mermaid",
+      "template": null
+    },
+    {
+      "name": "Meta Ads Remote MCP",
+      "description": "Remote MCP server to interact with Meta Ads API - access, analyze, and manage Facebook, Instagram, and other Meta platforms advertising campaigns.",
+      "category": "Other",
+      "source_url": "https://github.com/pipeboard-co/meta-ads-mcp",
+      "template": null
+    },
+    {
+      "name": "Metoro",
+      "description": "Query and interact with kubernetes environments monitored by Metoro",
+      "category": "Other",
+      "source_url": "https://github.com/metoro-io/metoro-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Microsoft 365",
+      "description": "📇 ☁️ - MCP server that connects to the whole Microsoft 365 suite (Microsoft Office, Outlook, Excel) using Graph API (including mail, files, calendar)",
+      "category": "Other",
+      "source_url": "https://github.com/softeria/ms-365-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Microsoft Entra ID MCP Server",
+      "description": "A Python MCP server for Microsoft Entra ID (Azure AD) directory, user, group, device, sign-in, and security operations via Microsoft Graph.",
+      "category": "Other",
+      "source_url": "https://github.com/hieuttmmo/entraid-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Milvus",
+      "description": "Search, Query and interact with data in your Milvus Vector Database.",
+      "category": "Other",
+      "source_url": "https://github.com/zilliztech/mcp-server-milvus",
+      "template": null
+    },
+    {
+      "name": "Minima",
+      "description": "Local RAG (on-premises) with MCP server.",
+      "category": "Other",
+      "source_url": "https://github.com/dmayboroda/minima",
+      "template": null
+    },
+    {
+      "name": "MintMCP",
+      "description": "MCP servers for Google Calendar, Gmail, Outlook Calendar, and Outlook.",
+      "category": "Other",
+      "source_url": "https://github.com/mintmcp/servers",
+      "template": null
+    },
+    {
+      "name": "Miro",
+      "description": "Miro MCP server, exposing all functionalities available in official Miro SDK.",
+      "category": "Other",
+      "source_url": "https://github.com/k-jarzyna/mcp-miro",
+      "template": null
+    },
+    {
+      "name": "MKP",
+      "description": "Model Kontext Protocol Server for Kubernetes that allows LLM-powered applications to interact with Kubernetes clusters through native Go implementation with direct API integration and comprehensive resource management.",
+      "category": "Other",
+      "source_url": "https://github.com/StacklokLabs/mkp",
+      "template": null
+    },
+    {
+      "name": "Mongo",
+      "description": "A Model Context Protocol (MCP) server that enables LLMs to interact directly with MongoDB databases",
+      "category": "Other",
+      "source_url": "https://github.com/QuantGeekDev/mongo-mcp",
+      "template": null
+    },
+    {
+      "name": "MongoDB",
+      "description": "A Model Context Protocol Server for MongoDB",
+      "category": "Other",
+      "source_url": "https://github.com/kiliczsh/mcp-mongo-server",
+      "template": null
+    },
+    {
+      "name": "MongoDB Lens",
+      "description": "Full Featured MCP Server for MongoDB Database.",
+      "category": "Other",
+      "source_url": "https://github.com/furey/mongodb-lens",
+      "template": null
+    },
+    {
+      "name": "MotherDuck",
+      "description": "Query and analyze data with MotherDuck and local DuckDB",
+      "category": "Other",
+      "source_url": "https://github.com/motherduckdb/mcp-server-motherduck",
+      "template": null
+    },
+    {
+      "name": "Multi Chat MCP Server (Google Chat)",
+      "description": "Connect AI assistants like Cursor to Google Chat and beyond — enabling smart, extensible collaboration across chat platforms.",
+      "category": "Other",
+      "source_url": "https://github.com/siva010928/multi-chat-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Mureka",
+      "description": "generate lyrics, song and background music(instrumental)",
+      "category": "Other",
+      "source_url": "https://github.com/SkyworkAI/Mureka-mcp",
+      "template": null
+    },
+    {
+      "name": "Mux",
+      "description": "Mux is a video API for developers. With Mux's official MCP you can upload videos, create live streams, generate thumbnails, add captions, manage playback policies, dig through engagement data, monitor video performance, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/muxinc/mux-node-sdk/tree/master/packages/mcp-server",
+      "template": null
+    },
+    {
+      "name": "MySQL",
+      "description": "MySQL database integration with configurable access controls and schema inspection",
+      "category": "Other",
+      "source_url": "https://github.com/designcomputer/mysql_mcp_server",
+      "template": null
+    },
+    {
+      "name": "Nanoleaf",
+      "description": "Control Nanoleaf smart lights through MCP - turn on/off, adjust brightness, change colors, set effects, and discover devices",
+      "category": "Other",
+      "source_url": "https://github.com/srnetadmin/nanoleaf-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Nebula-Block-Data/nebulablock-mcp-server",
+      "description": "integrates with the fastmcp library to expose the full range of NebulaBlock API functionalities as accessible tools",
+      "category": "Other",
+      "source_url": "https://github.com/Nebula-Block-Data/nebulablock-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Needle",
+      "description": "Production-ready RAG out of the box to search and retrieve data from your own documents.",
+      "category": "Other",
+      "source_url": "https://github.com/needle-ai/needle-mcp",
+      "template": null
+    },
+    {
+      "name": "Neo4j",
+      "description": "Neo4j graph database server (schema + read/write-cypher) and separate graph database backed memory",
+      "category": "Other",
+      "source_url": "https://github.com/neo4j-contrib/mcp-neo4j",
+      "template": null
+    },
+    {
+      "name": "Neon",
+      "description": "Interact with the Neon serverless Postgres platform",
+      "category": "Other",
+      "source_url": "https://github.com/neondatabase/mcp-server-neon",
+      "template": null
+    },
+    {
+      "name": "Netbird",
+      "description": "List and analyze Netbird network peers, groups, policies, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/aantti/mcp-netbird",
+      "template": null
+    },
+    {
+      "name": "Nextcloud Calendar",
+      "description": "CalDAV Nectcloud calendar integration. Manage calendars, events, attendees, etc.",
+      "category": "Other",
+      "source_url": "https://github.com/Cheffromspace/mcp-nextcloud-calendar",
+      "template": null
+    },
+    {
+      "name": "Nexus",
+      "description": "Web search server that integrates Perplexity Sonar models via OpenRouter API for real-time, context-aware search with citations",
+      "category": "Other",
+      "source_url": "https://github.com/adawalli/nexus",
+      "template": null
+    },
+    {
+      "name": "Nile Postgres",
+      "description": "Manage and query databases, tenants, users, auth using LLMs",
+      "category": "Other",
+      "source_url": "https://github.com/niledatabase/nile-mcp-server",
+      "template": null
+    },
+    {
+      "name": "NocoDB",
+      "description": "Manage NocoDB server, support read and write databases",
+      "category": "Other",
+      "source_url": "https://github.com/edwinbernadus/nocodb-mcp-server",
+      "template": null
+    },
+    {
+      "name": "NodeCodeStudio",
+      "description": "Activate MCP services (Gmail, Calendar, WordPress, etc.) and run browser automation workflows via a Chrome extension with importable sequences",
+      "category": "Other",
+      "source_url": "https://nodecodestudio.com",
+      "template": null
+    },
+    {
+      "name": "Norman Finance",
+      "description": "MCP server for managing accounting and taxes with Norman Finance.",
+      "category": "Other",
+      "source_url": "https://github.com/norman-finance/norman-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Notion",
+      "description": "Integrates with Notion's API to manage personal todo list",
+      "category": "Other",
+      "source_url": "https://github.com/danhilse/notion_mcp",
+      "template": null
+    },
+    {
+      "name": "Notion",
+      "description": "Notion official MCP server",
+      "category": "Other",
+      "source_url": "https://github.com/makenotion/notion-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Notte",
+      "description": "Leverage Notte Web AI agents & cloud browser sessions for scalable browser automation & scraping workflows",
+      "category": "Other",
+      "source_url": "https://github.com/nottelabs/notte/tree/main/packages/notte-mcp",
+      "template": null
+    },
+    {
+      "name": "NPM Search",
+      "description": "Search for npm packages",
+      "category": "Other",
+      "source_url": "https://github.com/btwiuse/npm-search-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Ntfy",
+      "description": "An ntfy MCP server for sending/fetching ntfy notifications to your self-hosted ntfy server from AI Agents 📤 (supports secure token auth & more - use with npx or docker!)",
+      "category": "Other",
+      "source_url": "https://github.com/gitmotion/ntfy-me-mcp",
+      "template": null
+    },
+    {
+      "name": "Obsidian",
+      "description": "Interacting with Obsidian via REST API",
+      "category": "Other",
+      "source_url": "https://github.com/MarkusPfundstein/mcp-obsidian",
+      "template": null
+    },
+    {
+      "name": "OceanBase",
+      "description": "MCP Server for OceanBase database and its tools",
+      "category": "Other",
+      "source_url": "https://github.com/oceanbase/mcp-oceanbase",
+      "template": null
+    },
+    {
+      "name": "ocireg",
+      "description": "An SSE-based MCP server that allows LLM-powered applications to interact with OCI registries. It provides tools for retrieving information about container images, listing tags, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/StacklokLabs/ocireg-mcp",
+      "template": null
+    },
+    {
+      "name": "Octagon",
+      "description": "Deliver real-time investment research with extensive private and public market data.",
+      "category": "Other",
+      "source_url": "https://github.com/OctagonAI/octagon-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Octocode",
+      "description": "Leading AI-powered code assistant for advanced research, analysis and discovery across GitHub Repositories in large ecosystems",
+      "category": "Other",
+      "source_url": "https://github.com/bgauryy/octocode-mcp",
+      "template": null
+    },
+    {
+      "name": "OctoEverywhere For 3D Printing",
+      "description": "A 3D Printing MCP server that allows for querying for live state, webcam snapshots, and 3D printer control.",
+      "category": "Other",
+      "source_url": "https://octoeverywhere.com/mcp",
+      "template": null
+    },
+    {
+      "name": "Odoo",
+      "description": "Connect AI assistants to Odoo ERP systems for business data access and workflow automation.",
+      "category": "Other",
+      "source_url": "https://github.com/ivnvxd/mcp-server-odoo",
+      "template": null
+    },
+    {
+      "name": "OP.GG",
+      "description": "Access real-time gaming data across popular titles like League of Legends, TFT, and Valorant, offering champion analytics, esports schedules, meta compositions, and character statistics.",
+      "category": "Other",
+      "source_url": "https://github.com/opgginc/opgg-mcp",
+      "template": null
+    },
+    {
+      "name": "OpenAI",
+      "description": "Query OpenAI models directly from Claude using MCP protocol",
+      "category": "Other",
+      "source_url": "https://github.com/pierrebrunelle/mcp-server-openai",
+      "template": null
+    },
+    {
+      "name": "OpenAPI Schema Explorer",
+      "description": "Token-efficient access to OpenAPI/Swagger specs via MCP Resources",
+      "category": "Other",
+      "source_url": "https://github.com/kadykov/mcp-openapi-schema-explorer",
+      "template": null
+    },
+    {
+      "name": "Openfort",
+      "description": "Supercharge your AI assistant with plug-and-play access to authentication, project scaffolding, and smart wallet tooling.",
+      "category": "Other",
+      "source_url": "https://github.com/openfort-xyz/mcp",
+      "template": null
+    },
+    {
+      "name": "OpenMF-mifosx-self-service",
+      "description": "Access Apache Fineract self-service APIs for registration, authentication, account management, and transactions via MCP.",
+      "category": "Other",
+      "source_url": "https://github.com/openMF/mcp-mifosx-self-service",
+      "template": null
+    },
+    {
+      "name": "OSV",
+      "description": "Access the OSV (Open Source Vulnerabilities) database for vulnerability information. Query vulnerabilities by package version or commit, batch query multiple packages, and get detailed vulnerability information by ID.",
+      "category": "Other",
+      "source_url": "https://github.com/StacklokLabs/osv-mcp",
+      "template": null
+    },
+    {
+      "name": "Oxylabs",
+      "description": "Scrape websites with Oxylabs Web API, supporting dynamic rendering and parsing for structured data extraction.",
+      "category": "Other",
+      "source_url": "https://github.com/oxylabs/oxylabs-mcp",
+      "template": null
+    },
+    {
+      "name": "Package Registry Search",
+      "description": "Search and get up-to-date information about NPM, Cargo, PyPi, and NuGet packages.",
+      "category": "Other",
+      "source_url": "https://github.com/artmann/package-registry-mcp",
+      "template": null
+    },
+    {
+      "name": "PaddleOCR",
+      "description": "An MCP server that brings enterprise-grade OCR and document parsing capabilities to AI applications.",
+      "category": "Other",
+      "source_url": "https://paddlepaddle.github.io/PaddleOCR/latest/en/version3.x/deployment/mcp_server.html",
+      "template": null
+    },
+    {
+      "name": "Pandoc",
+      "description": "MCP server for seamless document format conversion using Pandoc, supporting Markdown, HTML, and plain text, with other formats like PDF, csv and docx in development.",
+      "category": "Other",
+      "source_url": "https://github.com/vivekVells/mcp-pandoc",
+      "template": null
+    },
+    {
+      "name": "Paperless-MCP",
+      "description": "An MCP server for interacting with a Paperless-NGX API server. This server provides tools for managing documents, tags, correspondents, and document types in your Paperless-NGX instance.",
+      "category": "Other",
+      "source_url": "https://github.com/baruchiro/paperless-mcp",
+      "template": null
+    },
+    {
+      "name": "PayPal",
+      "description": "The PayPal Model Context Protocol server allows you to integrate with PayPal APIs through function calling. This protocol supports various tools to interact with different PayPal services.",
+      "category": "Other",
+      "source_url": "https://github.com/paypal/agent-toolkit",
+      "template": null
+    },
+    {
+      "name": "PBS API",
+      "description": "🐍 ☁️ Access Australian Pharmaceutical Benefits Scheme data for medicine information, pricing, and availability. Built with Python and FastAPI.",
+      "category": "Other",
+      "source_url": "https://github.com/matthewdcage/pbs-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Pearch",
+      "description": "Best people search engine that reduces the time spent on talent discovery.",
+      "category": "Other",
+      "source_url": "https://github.com/Pearch-ai/mcp_pearch",
+      "template": null
+    },
+    {
+      "name": "Pearl",
+      "description": "Official MCP Server to interact with Pearl API. Connect your AI Agents with 12,000+ certified experts instantly.",
+      "category": "Other",
+      "source_url": "https://mcp.pearl.com",
+      "template": null
+    },
+    {
+      "name": "Peekaboo",
+      "description": "a macOS-only MCP server that enables AI agents to capture screenshots of applications, or the entire system.",
+      "category": "Other",
+      "source_url": "https://github.com/steipete/Peekaboo",
+      "template": null
+    },
+    {
+      "name": "Peliqan",
+      "description": "Data platform with ETL and built-in data warehouse, access all business applications (ERP, CRM, Accounting etc.) via MCP and run queries on your business data.",
+      "category": "Other",
+      "source_url": "https://github.com/Peliqan-io/mcp-server-peliqan",
+      "template": null
+    },
+    {
+      "name": "Perplexity",
+      "description": "An MCP server that connects to Perplexity's Sonar API, enabling real-time web-wide research in conversational AI.",
+      "category": "Other",
+      "source_url": "https://github.com/ppl-ai/modelcontextprotocol",
+      "template": null
+    },
+    {
+      "name": "Perplexity",
+      "description": "Interacting with Perplexity",
+      "category": "Other",
+      "source_url": "https://github.com/tanigami/mcp-server-perplexity",
+      "template": null
+    },
+    {
+      "name": "PGYER",
+      "description": "MCP Server for PGYER platform, supports uploading, querying apps, etc.",
+      "category": "Other",
+      "source_url": "https://github.com/PGYER/pgyer-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Phabricator",
+      "description": "Interacting with Phabricator API",
+      "category": "Other",
+      "source_url": "https://github.com/baba786/phabricator-mcp-server",
+      "template": null
+    },
+    {
+      "name": "PiAPI",
+      "description": "PiAPI MCP server makes user able to generate media content with Midjourney/Flux/Kling/Hunyuan/Udio/Trellis directly from Claude or any other MCP-compatible apps.",
+      "category": "Other",
+      "source_url": "https://github.com/apinetwork/piapi-mcp-server",
+      "template": null
+    },
+    {
+      "name": "PiloTY",
+      "description": "AI pilot for PTY operations that enables agents to control interactive terminals with stateful sessions, SSH connections, and background process management",
+      "category": "Other",
+      "source_url": "https://github.com/yiwenlu66/PiloTY",
+      "template": null
+    },
+    {
+      "name": "PlainSignal",
+      "description": "Official MCP server that connects to PlainSignal's API and querying realtime website analytics data in conversational AI.",
+      "category": "Other",
+      "source_url": "https://github.com/plainsignal/plainsignal-mcp",
+      "template": null
+    },
+    {
+      "name": "Plane",
+      "description": "The official Plane MCP server provides integration with Plane APIs, enabling full AI automation of Plane projects, work items, cycles and more.",
+      "category": "Other",
+      "source_url": "https://github.com/makeplane/plane-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Playwright",
+      "description": "Playwright MCP server",
+      "category": "Other",
+      "source_url": "https://github.com/microsoft/playwright-mcp",
+      "template": null
+    },
+    {
+      "name": "Playwright MCP Server",
+      "description": "An MCP server using Playwright for browser automation and webscrapping",
+      "category": "Other",
+      "source_url": "https://github.com/executeautomation/mcp-playwright",
+      "template": null
+    },
+    {
+      "name": "Plugged.in",
+      "description": "A comprehensive proxy that combines multiple MCP servers into a single MCP. It provides discovery and management of tools, prompts, resources, and templates across servers, plus a playground for debugging when building MCP servers.",
+      "category": "Other",
+      "source_url": "https://github.com/VeriTeknik/pluggedin-mcp-proxy",
+      "template": null
+    },
+    {
+      "name": "Poland KRS",
+      "description": "Access to Polish National Court Register (KRS)—the government's authoritative registry of all businesses, foundations, and other legal entities.",
+      "category": "Other",
+      "source_url": "https://github.com/pkolawa/krs-poland-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Pollinations",
+      "description": "Multimodal MCP server for generating images, audio, and text with no authentication required",
+      "category": "Other",
+      "source_url": "https://github.com/pollinations/model-context-protocol",
+      "template": null
+    },
+    {
+      "name": "Postman",
+      "description": "Postman’s remote MCP server connects AI agents, assistants, and chatbots directly to your APIs on Postman.",
+      "category": "Other",
+      "source_url": "https://github.com/postmanlabs/postman-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Powerdrill",
+      "description": "An MCP server that provides tools to interact with Powerdrill datasets, enabling smart AI data analysis and insights.",
+      "category": "Other",
+      "source_url": "https://github.com/powerdrillai/powerdrill-mcp",
+      "template": null
+    },
+    {
+      "name": "Powertool",
+      "description": "An MCP implementation that provides search functionality for the Powertools for AWS Lambda documentation across multiple runtimes.",
+      "category": "Other",
+      "source_url": "https://github.com/aws-powertools/powertools-mcp",
+      "template": null
+    },
+    {
+      "name": "Prisma Postgres",
+      "description": "Gives LLMs the ability to manage Prisma Postgres databases (e.g. spin up new databases and run migrations or queries)",
+      "category": "Other",
+      "source_url": "https://github.com/prisma/mcp",
+      "template": null
+    },
+    {
+      "name": "ProdEAI",
+      "description": "Your 24/7 production engineer that preserves context across multiple codebases Prode.ai.",
+      "category": "Other",
+      "source_url": "https://github.com/CuriousBox-AI/ProdE-mc",
+      "template": null
+    },
+    {
+      "name": "Project Manager",
+      "description": "Hierarchical task management (ideas → epics → tasks) with CLI dashboard",
+      "category": "Other",
+      "source_url": "https://github.com/croffasia/mcp-project-manager",
+      "template": null
+    },
+    {
+      "name": "Public APIs MCP",
+      "description": "Search for free APIs using MCP.",
+      "category": "Other",
+      "source_url": "https://github.com/zazencodes/public-apis-mcp",
+      "template": null
+    },
+    {
+      "name": "QA Sphere",
+      "description": "Integration with QA Sphere test management system, enabling LLMs to discover, summarize, and interact with test cases directly from AI-powered IDEs",
+      "category": "Other",
+      "source_url": "https://github.com/Hypersequent/qasphere-mcp",
+      "template": null
+    },
+    {
+      "name": "Qdrant",
+      "description": "Implement semantic memory layer on top of the Qdrant vector search engine",
+      "category": "Other",
+      "source_url": "https://github.com/qdrant/mcp-server-qdrant",
+      "template": null
+    },
+    {
+      "name": "QGIS",
+      "description": "connects QGIS Desktop to Claude AI through the MCP. This integration enables prompt-assisted project creation, layer loading, code execution, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/jjsantos01/qgis_mcp",
+      "template": null
+    },
+    {
+      "name": "QuantConnect",
+      "description": "Dockerized Python MCP server that lets LLMs like Claude or OpenAI o3 Pro autonomously create projects, backtest strategies, and deploy live-trading workflows via the QuantConnect API.",
+      "category": "Other",
+      "source_url": "https://github.com/QuantConnect/mcp-server",
+      "template": null
+    },
+    {
+      "name": "RAD Security",
+      "description": "Interact with the RAD Security platform which provides AI-powered security insights for Kubernetes and cloud environments.",
+      "category": "Other",
+      "source_url": "https://github.com/rad-security/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Ramp",
+      "description": "Interact with Ramp's Developer API to run analysis on your spend and gain insights leveraging LLMs",
+      "category": "Other",
+      "source_url": "https://github.com/ramp-public/ramp-mcp",
+      "template": null
+    },
+    {
+      "name": "Random Number",
+      "description": "Provides LLMs with essential random generation abilities, built entirely on Python's standard library.",
+      "category": "Other",
+      "source_url": "https://github.com/zazencodes/random-number-mcp",
+      "template": null
+    },
+    {
+      "name": "Raygun",
+      "description": "Interact with your crash reporting and real using monitoring data on your Raygun account",
+      "category": "Other",
+      "source_url": "https://github.com/MindscapeHQ/mcp-server-raygun",
+      "template": null
+    },
+    {
+      "name": "Reexpress",
+      "description": "Enable Similarity-Distance-Magnitude statistical verification for your search, software, and data science workflows",
+      "category": "Other",
+      "source_url": "https://github.com/ReexpressAI/reexpress_mcp_server",
+      "template": null
+    },
+    {
+      "name": "Ref",
+      "description": "Up-to-date documentation for your coding agent. Covers 1000s of public repos and sites. Built by ref.tools",
+      "category": "Other",
+      "source_url": "https://github.com/ref-tools/ref-tools-mcp",
+      "template": null
+    },
+    {
+      "name": "Reloaderoo",
+      "description": "A local MCP server for developers that mirrors your in-development MCP server, allowing seamless restarts and tool updates so you can build, test, and iterate on your MCP server within the same AI session without interruption.",
+      "category": "Other",
+      "source_url": "https://github.com/cameroncooke/reloaderoo",
+      "template": null
+    },
+    {
+      "name": "Rember",
+      "description": "Create spaced repetition flashcards in Rember to remember anything you learn in your chats",
+      "category": "Other",
+      "source_url": "https://github.com/rember/rember-mcp",
+      "template": null
+    },
+    {
+      "name": "Reminder",
+      "description": "MCP server for scheduling and triggering reminders via Slack or Telegram.",
+      "category": "Other",
+      "source_url": "https://github.com/arifszn/reminder-mcp",
+      "template": null
+    },
+    {
+      "name": "Renamify",
+      "description": "Smart, case-aware search & replace for codebases. Provides atomic renaming of symbols, files, and directories with full undo/redo. The MCP server lets AI assistants plan, preview, and apply rename operations safely, handling all naming conventions (snake_case, camelCase, PascalCase, etc.) automatically.",
+      "category": "Other",
+      "source_url": "https://docspring.github.io/renamify/mcp/overview",
+      "template": null
+    },
+    {
+      "name": "Render",
+      "description": "The official Render MCP server: spin up new services, run queries against your databases, and debug rapidly with direct access to service metrics and logs.",
+      "category": "Other",
+      "source_url": "https://render.com/docs/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Repo Map",
+      "description": "🐧 🪟 🍎 - An MCP server (and command-line tool) to provide a dynamic map of chat-related files from the repository with their function prototypes and related files in order of relevance. Based on the \"Repo Map\" functionality in Aider.chat",
+      "category": "Other",
+      "source_url": "https://github.com.mcas.ms/pdavis68/RepoMapper",
+      "template": null
+    },
+    {
+      "name": "RevenueCat",
+      "description": "Manage your In-app-purchases in RevenueCat without leaving your AI coding environment.",
+      "category": "Other",
+      "source_url": "https://www.revenuecat.com/docs/tools/mcp/overview",
+      "template": null
+    },
+    {
+      "name": "Riza",
+      "description": "Arbitrary code execution and tool-use platform for LLMs by Riza",
+      "category": "Other",
+      "source_url": "https://github.com/riza-io/riza-mcp",
+      "template": null
+    },
+    {
+      "name": "Root Signals",
+      "description": "Equip AI agents with evaluation and self-improvement capabilities with Root Signals",
+      "category": "Other",
+      "source_url": "https://github.com/root-signals/root-signals-mcp",
+      "template": null
+    },
+    {
+      "name": "Rootly-AI-Labs/Rootly-MCP-server",
+      "description": "MCP server for the incident management platform Rootly.",
+      "category": "Other",
+      "source_url": "https://github.com/Rootly-AI-Labs/Rootly-MCP-server",
+      "template": null
+    },
+    {
+      "name": "Routine",
+      "description": "MCP server to interact with Routine: calendars, tasks, notes, etc.",
+      "category": "Other",
+      "source_url": "https://github.com/routineco/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Rube",
+      "description": "Rube is a Model Context Protocol (MCP) server that connects your AI tools to 500+ apps like Gmail, Slack, GitHub, and Notion. Simply install it in your AI client, authenticate once with your apps, and start asking your AI to perform real actions like \"Send an email\" or \"Create a task.\"",
+      "category": "Other",
+      "source_url": "https://rube.composio.dev",
+      "template": null
+    },
+    {
+      "name": "run-sql-connectorx",
+      "description": "Execute SQL (PostgreSQL, MariaDB, BigQuery, MS SQL Server, RedShift, etc.) via ConnectorX and stream results to CSV/Parquet. MCP tool: run_sql.",
+      "category": "Other",
+      "source_url": "https://github.com/gigamori/mcp-run-sql-connectorx",
+      "template": null
+    },
+    {
+      "name": "Salaah MCP",
+      "description": "FastAPI and MCP service providing Islamic prayer times and other useful calculations.",
+      "category": "Other",
+      "source_url": "https://github.com/yusufk/salaah-mcp",
+      "template": null
+    },
+    {
+      "name": "Scaffold",
+      "description": "Scaffold is a Retrieval-Augmented Generation (RAG) system designed to structural understanding of large codebases. It transforms your source code into a living knowledge graph, allowing for precise, context-aware interactions that go far beyond simple file retrieval.",
+      "category": "Other",
+      "source_url": "https://github.com/Beer-Bears/scaffold",
+      "template": null
+    },
+    {
+      "name": "scan-mcp",
+      "description": "Minimal MCP server for scanner capture (ADF/duplex/page-size); typed tools; JSON Schema–validated I/O; multipage assembly; Node 22 + SANE.",
+      "category": "Other",
+      "source_url": "https://github.com/jacksenechal/scan-mcp",
+      "template": null
+    },
+    {
+      "name": "SchemaCrawler",
+      "description": "Connect to any relational database, and be able to get valid SQL, and ask questions like what does a certain column prefix mean.",
+      "category": "Other",
+      "source_url": "https://github.com/schemacrawler/SchemaCrawler-MCP-Server-Usage",
+      "template": null
+    },
+    {
+      "name": "SchemaFlow",
+      "description": "Real-time PostgreSQL & Supabase database schema access for AI-IDEs via Model Context Protocol. Provides live database context through secure SSE connections with three powerful tools: get_schema, analyze_database, and check_schema_alignment. SchemaFlow",
+      "category": "Other",
+      "source_url": "https://github.com/CryptoRadi/schemaflow-mcp-server",
+      "template": null
+    },
+    {
+      "name": "ScrapeGraphAI",
+      "description": "AI-powered web scraping library that creates scraping pipelines using natural language.- ScrapeGraphAI",
+      "category": "Other",
+      "source_url": "https://github.com/ScrapeGraphAI/Scrapegraph-ai",
+      "template": null
+    },
+    {
+      "name": "Scrapeless",
+      "description": "Integrate real-time Scrapeless Google SERP(Google Search, Google Flight, Google Map, Google Jobs....) results into your LLM applications. This server enables dynamic context retrieval for AI workflows, chatbots, and research tools.",
+      "category": "Other",
+      "source_url": "https://github.com/scrapeless-ai/scrapeless-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Scrapezy",
+      "description": "Turn websites into datasets with Scrapezy",
+      "category": "Other",
+      "source_url": "https://github.com/scrapezy/mcp",
+      "template": null
+    },
+    {
+      "name": "ScreenshotMCP",
+      "description": "Capture website screenshots including full page, elements, and device specific sizes.",
+      "category": "Other",
+      "source_url": "https://github.com/upnorthmedia/ScreenshotMCP",
+      "template": null
+    },
+    {
+      "name": "ScreenshotOne",
+      "description": "Render website screenshots with ScreenshotOne",
+      "category": "Other",
+      "source_url": "https://github.com/screenshotone/mcp",
+      "template": null
+    },
+    {
+      "name": "Screeny",
+      "description": "Privacy-first macOS MCP server that provides visual context for AI agents through window screenshots",
+      "category": "Other",
+      "source_url": "https://github.com/rohanrav/screeny",
+      "template": null
+    },
+    {
+      "name": "Search1API",
+      "description": "One API for Search, Crawling, and Sitemaps",
+      "category": "Other",
+      "source_url": "https://github.com/fatwang2/search1api-mcp",
+      "template": null
+    },
+    {
+      "name": "SearXNG",
+      "description": "A Model Context Protocol Server for SearXNG",
+      "category": "Other",
+      "source_url": "https://github.com/ihor-sokoliuk/mcp-searxng",
+      "template": null
+    },
+    {
+      "name": "Secure Fetch",
+      "description": "Secure fetch to prevent access to local resources",
+      "category": "Other",
+      "source_url": "https://github.com/appsec-innovation-labs/secure-mcp-fetch",
+      "template": null
+    },
+    {
+      "name": "Semgrep",
+      "description": "Enable AI agents to secure code with Semgrep.",
+      "category": "Other",
+      "source_url": "https://github.com/semgrep/mcp",
+      "template": null
+    },
+    {
+      "name": "Sentry",
+      "description": "Official MCP server for Sentry.",
+      "category": "Other",
+      "source_url": "https://github.com/getsentry/sentry-mcp",
+      "template": null
+    },
+    {
+      "name": "Sequential Thinking",
+      "description": "Dynamic and reflective problem-solving through thought sequences",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "template": null
+    },
+    {
+      "name": "Shadcn Registry Manager",
+      "description": "MCP server for Shadcn UI, enabling automated, remote, or containerized project management via local or remote registries.",
+      "category": "Other",
+      "source_url": "https://github.com/reuvenaor/shadcn-registry-manager",
+      "template": null
+    },
+    {
+      "name": "shadcn-ui-mcp-server",
+      "description": "A powerful and flexible MCP server designed to enhance the development experience with Shadcn UI components, providing tools for component management, documentation, and installation.",
+      "category": "Other",
+      "source_url": "https://github.com/heilgar/shadcn-ui-mcp-server",
+      "template": null
+    },
+    {
+      "name": "ShopSavvy",
+      "description": "Complete product and pricing data solution for AI assistants. Search for products by barcode/ASIN/URL, access detailed product metadata, access comprehensive pricing data from thousands of retailers, view and track price history, and more. Published as @shopsavvy/mcp-server.",
+      "category": "Other",
+      "source_url": "https://github.com/shopsavvy/shopsavvy-mcp-server",
+      "template": null
+    },
+    {
+      "name": "SingleStore",
+      "description": "Interact with the SingleStore database platform",
+      "category": "Other",
+      "source_url": "https://github.com/singlestore-labs/mcp-server-singlestore",
+      "template": null
+    },
+    {
+      "name": "Skyvern",
+      "description": "MCP Server to let Claude / your AI control the browser",
+      "category": "Other",
+      "source_url": "https://github.com/Skyvern-AI/skyvern/tree/main/integrations/mcp",
+      "template": null
+    },
+    {
+      "name": "Slack",
+      "description": "The most powerful MCP server for Slack Workspaces. This integration supports both Stdio and SSE transports, proxy settings and does not require any permissions or bots being created or approved by Workspace admins 😏.",
+      "category": "Other",
+      "source_url": "https://github.com/korotovsky/slack-mcp-server",
+      "template": null
+    },
+    {
+      "name": "SlideSpeak",
+      "description": "Create presentations and PowerPoints using AI and SlideSpeak MCP",
+      "category": "Other",
+      "source_url": "https://github.com/SlideSpeak/slidespeak-mcp",
+      "template": null
+    },
+    {
+      "name": "slite-mcp",
+      "description": "Model Context Protocol server for Slite integration. Search and retrieve notes, browse note hierarchies, and access content from your Slite workspace.",
+      "category": "Other",
+      "source_url": "https://github.com/fajarmf/slite-mcp",
+      "template": null
+    },
+    {
+      "name": "Snowflake",
+      "description": "Snowflake database integration with read/write capabilities and insight tracking",
+      "category": "Other",
+      "source_url": "https://github.com/isaacwasserman/mcp-snowflake-server",
+      "template": null
+    },
+    {
+      "name": "SonarQube",
+      "description": "Provides seamless integration with SonarQube Server or Cloud, and enables analysis of code snippets directly within the agent context",
+      "category": "Other",
+      "source_url": "https://github.com/SonarSource/sonarqube-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Sonatype MCP Server",
+      "description": "MCP for Sonatype Nexus Repository Manager and Sonatype Repository Firewall. Manage your DevSecOps practices through AI-assisted Workflows.",
+      "category": "Other",
+      "source_url": "https://github.com/brianveltman/sonatype-mcp",
+      "template": null
+    },
+    {
+      "name": "Sourcerer",
+      "description": "MCP for semantic code search & navigation that reduces token waste",
+      "category": "Other",
+      "source_url": "https://github.com/st3v3nmw/sourcerer-mcp",
+      "template": null
+    },
+    {
+      "name": "spm-mcp",
+      "description": "iOS Swift Package Manager server written in Swift",
+      "category": "Other",
+      "source_url": "https://github.com/simpleswift/spm-mcp",
+      "template": null
+    },
+    {
+      "name": "SQLite",
+      "description": "MCP server for SQLite files. Supports Datasette-compatible metadata!",
+      "category": "Other",
+      "source_url": "https://github.com/panasenco/mcp-sqlite",
+      "template": null
+    },
+    {
+      "name": "Squad AI",
+      "description": "Product‑discovery and strategy platform integration. Create, query and update opportunities, solutions, outcomes, requirements and feedback from any MCP‑aware LLM.",
+      "category": "Other",
+      "source_url": "https://github.com/the-basilisk-ai/squad-mcp",
+      "template": null
+    },
+    {
+      "name": "Square",
+      "description": "A Model Context Protocol (MCP) server for square",
+      "category": "Other",
+      "source_url": "https://github.com/square/square-mcp-server",
+      "template": null
+    },
+    {
+      "name": "StarRocks",
+      "description": "Interact with StarRocks",
+      "category": "Other",
+      "source_url": "https://github.com/StarRocks/mcp-server-starrocks",
+      "template": null
+    },
+    {
+      "name": "Storyblok",
+      "description": "Storyblok MCP server enables your AI assistants to directly access and manage your Storyblok spaces, stories, components, assets, workflows, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/Kiran1689/storyblok-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Stripe",
+      "description": "Interact with Stripe API",
+      "category": "Other",
+      "source_url": "https://github.com/stripe/agent-toolkit",
+      "template": null
+    },
+    {
+      "name": "Supabase",
+      "description": "Connects to Supabase platform for database, auth, edge functions and more.",
+      "category": "Other",
+      "source_url": "https://github.com/supabase-community/supabase-mcp",
+      "template": null
+    },
+    {
+      "name": "Supadata",
+      "description": "Official MCP server for Supadata - YouTube, TikTok, X and Web data for makers.",
+      "category": "Other",
+      "source_url": "https://github.com/supadata-ai/mcp",
+      "template": null
+    },
+    {
+      "name": "Svelte Documentation",
+      "description": "Remote server (SSE/Streamable) for the latest Svelte and SvelteKit documentation",
+      "category": "Other",
+      "source_url": "https://github.com/khromov/llmctx",
+      "template": null
+    },
+    {
+      "name": "TalentoHQ",
+      "description": "Connect to the TalentoHQ HR software via MCP. Transform your organization with the AI first HR software.",
+      "category": "Other",
+      "source_url": "https://hr.talentohq.com/mcp",
+      "template": null
+    },
+    {
+      "name": "Task Orchestrator",
+      "description": "AI-powered task orchestration and workflow automation with specialized agent roles, intelligent task decomposition, and seamless integration across Claude Desktop, Cursor IDE, Windsurf, and VS Code.",
+      "category": "Other",
+      "source_url": "https://github.com/EchoingVesper/mcp-task-orchestrator",
+      "template": null
+    },
+    {
+      "name": "Taskade",
+      "description": "Connect to the Taskade platform via MCP. Access tasks, projects, workflows, and AI agents in real-time through a unified workspace and API.",
+      "category": "Other",
+      "source_url": "https://github.com/taskade/mcp",
+      "template": null
+    },
+    {
+      "name": "Taskeract",
+      "description": "Official Taskeract MCP Server for integrating your Taskeract project tasks and load the context of your tasks into your MCP enabled app.",
+      "category": "Other",
+      "source_url": "https://github.com/Acqusys/taskeract-mcp",
+      "template": null
+    },
+    {
+      "name": "Tasks",
+      "description": "An efficient task manager. Designed to minimize tool confusion and maximize LLM budget efficiency while providing powerful search, filtering, and organization capabilities across multiple file formats (Markdown, JSON, YAML)",
+      "category": "Other",
+      "source_url": "https://github.com/flesler/mcp-tasks",
+      "template": null
+    },
+    {
+      "name": "Tavily",
+      "description": "Search engine for AI agents (search + extract) powered by Tavily",
+      "category": "Other",
+      "source_url": "https://github.com/tavily-ai/tavily-mcp",
+      "template": null
+    },
+    {
+      "name": "TeamCity",
+      "description": "MCP server for TeamCity, integrates with Claude Desktop and Cursor.",
+      "category": "Other",
+      "source_url": "https://github.com/itcaat/teamcity-mcp",
+      "template": null
+    },
+    {
+      "name": "Tencent Cloud COS MCP",
+      "description": "Quickly integrate with Tencent Cloud Storage (COS) and Data Processing (CI) capabilities powered",
+      "category": "Other",
+      "source_url": "https://github.com/Tencent/cos-mcp",
+      "template": null
+    },
+    {
+      "name": "Teradata",
+      "description": "A collection of tools for managing the platform, addressing data quality and reading and writing to Teradata Database.",
+      "category": "Other",
+      "source_url": "https://github.com/Teradata/teradata-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Terragrunt-Docs",
+      "description": "Terragrunt documentation always up to date.",
+      "category": "Other",
+      "source_url": "https://github.com/Excoriate/mcp-terragrunt-docs",
+      "template": null
+    },
+    {
+      "name": "Text-To-GraphQL",
+      "description": "MCP server for text-to-graphql, integrates with Claude Desktop and Cursor.",
+      "category": "Other",
+      "source_url": "https://github.com/Arize-ai/text-to-graphql-mcp",
+      "template": null
+    },
+    {
+      "name": "ThingsBoard",
+      "description": "The ThingsBoard MCP Server provides a natural language interface for LLMs and AI agents to interact with your ThingsBoard IoT platform.",
+      "category": "Other",
+      "source_url": "https://github.com/thingsboard/thingsboard-mcp",
+      "template": null
+    },
+    {
+      "name": "Thirdweb",
+      "description": "Read/write to over 2k blockchains, enabling data querying, contract analysis/deployment, and transaction execution, powered by Thirdweb",
+      "category": "Other",
+      "source_url": "https://github.com/thirdweb-dev/ai/tree/main/python/thirdweb-mcp",
+      "template": null
+    },
+    {
+      "name": "TikTok",
+      "description": "TikTok integration for getting post details and video subtitles",
+      "category": "Other",
+      "source_url": "https://github.com/Seym0n/tiktok-mcp",
+      "template": null
+    },
+    {
+      "name": "Time",
+      "description": "MCP server which provides utilities to work with time and dates, with natural language, multiple formats and timezone convertion capabilities.",
+      "category": "Other",
+      "source_url": "https://github.com/TheoBrigitte/mcp-time",
+      "template": null
+    },
+    {
+      "name": "Time",
+      "description": "Time and timezone conversion capabilities",
+      "category": "Other",
+      "source_url": "https://github.com/modelcontextprotocol/servers/blob/main/src/time",
+      "template": null
+    },
+    {
+      "name": "Tinybird",
+      "description": "Interact with Tinybird serverless ClickHouse platform",
+      "category": "Other",
+      "source_url": "https://github.com/tinybirdco/mcp-tinybird",
+      "template": null
+    },
+    {
+      "name": "Tldv",
+      "description": "Connect your AI agents to Google-Meet, Zoom & Microsoft Teams through tl;dv",
+      "category": "Other",
+      "source_url": "https://gitlab.com/tldv/tldv-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Tmux",
+      "description": "Interact with your Tmux sessions, windows and pane, execute commands in tmux panes and retrieve result.",
+      "category": "Other",
+      "source_url": "https://github.com/nickgnd/tmux-mcp",
+      "template": null
+    },
+    {
+      "name": "Todoist",
+      "description": "Full implementation of Todoist Rest API for MCP server",
+      "category": "Other",
+      "source_url": "https://github.com/stanislavlysenko0912/todoist-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Token Metrics",
+      "description": "Token Metrics integration for fetching real-time crypto market data, trading signals, price predictions, and advanced analytics.",
+      "category": "Other",
+      "source_url": "https://github.com/token-metrics/mcp",
+      "template": null
+    },
+    {
+      "name": "TrackMage",
+      "description": "Shipment tracking api and logistics management capabilities through the [TrackMage API] (https://trackmage.com/)",
+      "category": "Other",
+      "source_url": "https://github.com/trackmage/trackmage-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Trade Agent",
+      "description": "Execute stock and crypto trades via Trade Agent",
+      "category": "Other",
+      "source_url": "https://github.com/Trade-Agent/trade-agent-mcp",
+      "template": null
+    },
+    {
+      "name": "Trello",
+      "description": "Trello integration for working with boards, lists in boards and cards in lists.",
+      "category": "Other",
+      "source_url": "https://github.com/m0xai/trello-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Trello MCP",
+      "description": "Trello Desktop MCP server that enables Claude Desktop to interact with Trello boards, cards, lists, and team members through natural language commands.",
+      "category": "Other",
+      "source_url": "https://github.com/kocakli/Trello-Desktop-MCP",
+      "template": null
+    },
+    {
+      "name": "Trino MCP Server",
+      "description": "A Go implementation of a Model Context Protocol (MCP) server for Trino, enabling LLM models to query distributed SQL databases through standardized tools.",
+      "category": "Other",
+      "source_url": "https://github.com/tuannvm/mcp-trino",
+      "template": null
+    },
+    {
+      "name": "Twelve Data",
+      "description": "Interact with Twelve Data APIs to access real-time and historical financial market data for your AI agents.",
+      "category": "Other",
+      "source_url": "https://github.com/twelvedata/mcp",
+      "template": null
+    },
+    {
+      "name": "Twilio",
+      "description": "Interact with Twilio APIs to send messages, manage phone numbers, configure your account, and more.",
+      "category": "Other",
+      "source_url": "https://github.com/twilio-labs/mcp",
+      "template": null
+    },
+    {
+      "name": "UnifAI",
+      "description": "Dynamically search and call tools using UnifAI Network",
+      "category": "Other",
+      "source_url": "https://github.com/unifai-network/unifai-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Unified Diff MCP Server",
+      "description": "Beautiful HTML and PNG diff visualization using diff2html, designed for filesystem edit_file dry-run output with high-performance Bun runtime.",
+      "category": "Other",
+      "source_url": "https://github.com/gorosun/unified-diff-mcp",
+      "template": null
+    },
+    {
+      "name": "Unity3d Game Engine",
+      "description": "MCP Server to control and interact with Unity3d Game Engine for game development",
+      "category": "Other",
+      "source_url": "https://github.com/CoderGamester/mcp-unity",
+      "template": null
+    },
+    {
+      "name": "Unstructured",
+      "description": "Set up and interact with your unstructured data processing workflows in Unstructured Platform",
+      "category": "Other",
+      "source_url": "https://github.com/Unstructured-IO/UNS-MCP",
+      "template": null
+    },
+    {
+      "name": "urlDNA",
+      "description": "Dynamically scan and analyze potentially malicious URLs using the urlDNA",
+      "category": "Other",
+      "source_url": "https://github.com/urldna/mcp",
+      "template": null
+    },
+    {
+      "name": "User Feedback",
+      "description": "Simple MCP Server to enable a human-in-the-loop workflow in tools like Cline and Cursor.",
+      "category": "Other",
+      "source_url": "https://github.com/mrexodia/user-feedback-mcp",
+      "template": null
+    },
+    {
+      "name": "User Prompt MCP",
+      "description": "An MCP server for Cursor that enables requesting user input during generation process.",
+      "category": "Other",
+      "source_url": "https://github.com/nazar256/user-prompt-mcp",
+      "template": null
+    },
+    {
+      "name": "Vectorize",
+      "description": "Vectorize MCP server for advanced retrieval, Private Deep Research, Anything-to-Markdown file extraction and text chunking.",
+      "category": "Other",
+      "source_url": "https://github.com/vectorize-io/vectorize-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Vega-Lite",
+      "description": "Generate visualizations from fetched data using the VegaLite format and renderer.",
+      "category": "Other",
+      "source_url": "https://github.com/isaacwasserman/mcp-vegalite-server",
+      "template": null
+    },
+    {
+      "name": "Verodat",
+      "description": "Interact with Verodat AI Ready Data platform",
+      "category": "Other",
+      "source_url": "https://github.com/Verodat/verodat-mcp-server",
+      "template": null
+    },
+    {
+      "name": "VeyraX",
+      "description": "Single tool to control all 100+ API integrations, and UI components",
+      "category": "Other",
+      "source_url": "https://github.com/VeyraX/veyrax-mcp",
+      "template": null
+    },
+    {
+      "name": "Vibe Check",
+      "description": "The definitive Vibe Coder's sanity check MCP server: Prevents cascading errors by calling a \"Vibe-check\" agent to ensure alignment and prevent scope creep",
+      "category": "Other",
+      "source_url": "https://github.com/PV-Bhat/vibe-check-mcp-server",
+      "template": null
+    },
+    {
+      "name": "VideoDB",
+      "description": "Server for advanced AI-driven video editing, semantic search, multilingual transcription, generative media, voice cloning, and content moderation.",
+      "category": "Other",
+      "source_url": "https://github.com/video-db/agent-toolkit/tree/main/modelcontextprotocol",
+      "template": null
+    },
+    {
+      "name": "VISO TRUST",
+      "description": "Access and manage your VISO TRUST third-party risk program directly through your AI assistant.",
+      "category": "Other",
+      "source_url": "https://github.com/visotrust/viso-mcp-server",
+      "template": null
+    },
+    {
+      "name": "VpunaAiSearch",
+      "description": "Connect to Vpuna AI Search Service, a developer first platform for semantic search, summarization, and contextual chat. Each project dynamically exposes its own Remote HTTP MCP server, enabling real-time context injection from structured and unstructured data.",
+      "category": "Other",
+      "source_url": "https://github.com/vpuna/vpuna-ai-search",
+      "template": null
+    },
+    {
+      "name": "Wassenger",
+      "description": "Wassenger MCP server to chat, send messages and automate WhatsApp from any AI model client (free trial available).",
+      "category": "Other",
+      "source_url": "https://github.com/wassengerhq/mcp-wassenger",
+      "template": null
+    },
+    {
+      "name": "WayStation",
+      "description": "A universal remote MCP server that connects to popular productivity tools such as Notion, Monday, AirTable, and many more.",
+      "category": "Other",
+      "source_url": "https://waystation.ai/connect/mcp-server",
+      "template": null
+    },
+    {
+      "name": "Weather",
+      "description": "Accurate weather forecasts via the AccuWeather API (free tier available).",
+      "category": "Other",
+      "source_url": "https://github.com/TimLukaHorstmann/mcp-weather",
+      "template": null
+    },
+    {
+      "name": "Web Search MCP",
+      "description": "A server that provides local, full web search, summaries and page extration for use with Local LLMs.",
+      "category": "Other",
+      "source_url": "https://github.com/mrkrsl/web-search-mcp",
+      "template": null
+    },
+    {
+      "name": "WebDataSource",
+      "description": "Web Crawler for AI Agents. Supercharge your AI agents with an MCP-ready web crawler that delivers real-time insights from the web and your private knowledge bases.",
+      "category": "Other",
+      "source_url": "https://webdatasource.com/releases/latest/mcp/index.html",
+      "template": null
+    },
+    {
+      "name": "Webex",
+      "description": "A Model Context Protocol (MCP) server that provides AI assistants with comprehensive access to Cisco Webex messaging capabilities.",
+      "category": "Other",
+      "source_url": "https://github.com/Kashyap-AI-ML-Solutions/webex-messaging-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Webflow",
+      "description": "Interact with Webflow APIs to list and edit your site and CMS data.",
+      "category": "Other",
+      "source_url": "https://github.com/webflow/mcp-server",
+      "template": null
+    },
+    {
+      "name": "WebScraping.AI",
+      "description": "Interact with WebScraping.AI for web data extraction and scraping.",
+      "category": "Other",
+      "source_url": "https://github.com/webscraping-ai/webscraping-ai-mcp-server",
+      "template": null
+    },
+    {
+      "name": "WebSearch-MCP",
+      "description": "Self-hosted Websearch API",
+      "category": "Other",
+      "source_url": "https://github.com/mnhlt/WebSearch-MCP",
+      "template": null
+    },
+    {
+      "name": "Website Snapshot",
+      "description": "A MCP server that provides comprehensive website snapshot capabilities using Playwright. This server enables LLMs to capture and analyze web pages through structured accessibility snapshots, network monitoring, and console message collection.",
+      "category": "Other",
+      "source_url": "https://github.com/gustavo-meilus/mcp-web-snapshot",
+      "template": null
+    },
+    {
+      "name": "weibaohui/k8m",
+      "description": "Provides multi-cluster Kubernetes management and operations using MCP, featuring a management interface, logging, and nearly 50 built-in tools covering common DevOps and development scenarios. Supports both standard and CRD resources.",
+      "category": "Other",
+      "source_url": "https://github.com/weibaohui/k8m",
+      "template": null
+    },
+    {
+      "name": "weibaohui/kom",
+      "description": "Provides multi-cluster Kubernetes management and operations using MCP, It can be integrated as an SDK into your own project and includes nearly 50 built-in tools covering common DevOps and development scenarios. Supports both standard and CRD resources.",
+      "category": "Other",
+      "source_url": "https://github.com/weibaohui/kom",
+      "template": null
+    },
+    {
+      "name": "Whois MCP",
+      "description": "MCP server that performs whois lookup against domain, IP, ASN and TLD.",
+      "category": "Other",
+      "source_url": "https://github.com/bharathvaj-ganesan/whois-mcp",
+      "template": null
+    },
+    {
+      "name": "Willi MaKo Knowledge Service",
+      "description": "A knowledge service for Germany's complex Energy Market Communications (MaKo) regulations.",
+      "category": "Other",
+      "source_url": "https://mcp.stromhaltig.de",
+      "template": null
+    },
+    {
+      "name": "Windows CLI",
+      "description": "MCP server for secure command-line interactions on Windows systems, enabling controlled access to PowerShell, CMD, and Git Bash shells.",
+      "category": "Other",
+      "source_url": "https://github.com/SimonB97/win-cli-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Windows Control",
+      "description": "Programmatic control over Windows system operations including mouse, keyboard, window management, and screen capture using nut.js.",
+      "category": "Other",
+      "source_url": "https://github.com/Cheffromspace/nutjs-windows-control",
+      "template": null
+    },
+    {
+      "name": "Windsor",
+      "description": "Windsor MCP (Model Context Protocol) enables your LLM to query, explore, and analyze your full-stack business data integrated into Windsor.ai with zero SQL writing or custom scripting.",
+      "category": "Other",
+      "source_url": "https://github.com/windsor-ai/windsor_mcp",
+      "template": null
+    },
+    {
+      "name": "Winston AI",
+      "description": "AI detector MCP server with industry leading accuracy rates in detecting use of AI in text and images. The Winston AI MCP server also offers a robust plagiarism checker to help maintain integrity.",
+      "category": "Other",
+      "source_url": "https://github.com/gowinston-ai/winston-ai-mcp-server",
+      "template": null
+    },
+    {
+      "name": "X (Twitter)",
+      "description": "Enhanced MCP server for Twitter/X with OAuth 2.0 support, v2 API media uploads, smart v1.1 fallbacks, and comprehensive rate limiting. Post tweets with text/media, search, and delete tweets programmatically.",
+      "category": "Other",
+      "source_url": "https://github.com/mbelinky/x-mcp-server",
+      "template": null
+    },
+    {
+      "name": "xcodebuild",
+      "description": "🍎 Build iOS Xcode workspace/project and feed back errors to llm.",
+      "category": "Other",
+      "source_url": "https://github.com/ShenghaiWang/xcodebuild",
+      "template": null
+    },
+    {
+      "name": "XcodeBuildMCP",
+      "description": " Popular MCP server that enables AI agents to scaffold, build, run and test iOS, macOS, visionOS and watchOS apps or simulators and wired and wireless devices. It has powerful UI-automation capabilities like controlling the simulator, capturing run-time logs, as well as taking screenshots and viewing the accessibility hierarchy.",
+      "category": "Other",
+      "source_url": "https://github.com/cameroncooke/xcodebuildmcp",
+      "template": null
+    },
+    {
+      "name": "xcsimctl",
+      "description": "🍎 Manage Xcode simulators.",
+      "category": "Other",
+      "source_url": "https://github.com/nzrsky/simctl-mcp-server",
+      "template": null
+    },
+    {
+      "name": "xctools",
+      "description": "🍎 MCP server for Xcode's xctrace, xcrun, xcodebuild.",
+      "category": "Other",
+      "source_url": "https://github.com/nzrsky/xctools-mcp-server",
+      "template": null
+    },
+    {
+      "name": "Xero",
+      "description": "Interact with the accounting data in your business using our official MCP server",
+      "category": "Other",
+      "source_url": "https://github.com/XeroAPI/xero-mcp-server",
+      "template": null
+    },
+    {
+      "name": "XRAY",
+      "description": "Progressive code-intelligence server: lets AI assistants map structure, fuzzy-find symbols, and assess change-impact across Python, JS/TS, and Go codebases (powered by ast-grep)",
+      "category": "Other",
+      "source_url": "https://github.com/srijanshukla18/xray",
+      "template": null
+    },
+    {
+      "name": "YepCode",
+      "description": "Execute any LLM-generated code in the YepCode secure and scalable sandbox environment and create your own MCP tools using JavaScript or Python, with full support for NPM and PyPI packages",
+      "category": "Other",
+      "source_url": "https://github.com/yepcode/mcp-server-js",
+      "template": null
+    },
+    {
+      "name": "YouTube",
+      "description": "Fetch YouTube subtitles",
+      "category": "Other",
+      "source_url": "https://github.com/anaisbetts/mcp-youtube",
+      "template": null
+    },
+    {
+      "name": "Yuga Planner",
+      "description": "AI Task schedule planning with LLamaIndex and Timefold: breaks down a task description and schedules it around an existing calendar",
+      "category": "Other",
+      "source_url": "https://github.com/blackopsrepl/yuga-planner",
+      "template": null
+    },
+    {
+      "name": "Zapier",
+      "description": "Connect your AI Agents to 8,000 apps instantly.",
+      "category": "Other",
+      "source_url": "https://zapier.com/mcp",
+      "template": null
+    },
+    {
+      "name": "Zenable",
+      "description": "Clean up sloppy AI code and prevent vulnerabilities",
+      "category": "Other",
+      "source_url": "https://docs.zenable.io/integrations/mcp/getting-started",
+      "template": null
+    },
+    {
+      "name": "ZenML",
+      "description": "Interact with your MLOps and LLMOps pipelines through your ZenML MCP server",
+      "category": "Other",
+      "source_url": "https://github.com/zenml-io/mcp-zenml",
+      "template": null
+    },
+    {
+      "name": "🧲 Magg 🧲",
+      "description": "A meta-MCP server that acts as a universal hub, allowing LLMs to autonomously discover, install, and orchestrate multiple MCP servers - essentially giving AI assistants the power to extend their own capabilities on-demand.",
+      "category": "Other",
+      "source_url": "https://github.com/sitbon/magg",
+      "template": null
+    }
+  ]
+}

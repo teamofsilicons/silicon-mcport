@@ -5,7 +5,8 @@ mod store;
 use args::*;
 use clap::Parser;
 use mcport_client::{
-    ApiError, Client, ConnectionInput, ConnectionUpdate, RequestContext, Session, ToolPolicy,
+    ApiError, Client, ConnectionInput, ConnectionUpdate, DirectoryEntry, DirectoryInput,
+    DirectoryUpdate, RequestContext, Session, ToolPolicy,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -261,6 +262,102 @@ async fn run(cli: Cli) -> Result<Value> {
     }
 }
 
+#[derive(Default)]
+struct ConnectionDraft {
+    name: String,
+    description: Option<String>,
+    transport: Option<Transport>,
+    endpoint: Option<String>,
+    host: Option<String>,
+    command: Option<String>,
+    arguments: Vec<String>,
+    clear_args: bool,
+    auth: Option<AuthMode>,
+    visibility: Option<Visibility>,
+}
+
+impl ConnectionDraft {
+    fn resolve(self, entry: Option<&DirectoryEntry>) -> Result<ConnectionInput> {
+        let template = entry.and_then(|entry| entry.template.as_ref());
+        let transport = self
+            .transport
+            .map(Transport::value)
+            .or_else(|| template.map(|template| template.transport.as_str()))
+            .ok_or_else(|| CliError::Input("This directory entry has no connection template. Supply --transport and an endpoint or local process configuration.".into()))?;
+        if !matches!(transport, "http" | "stdio") {
+            return Err(CliError::Input("Directory template has an unsupported transport. Choose --transport http or stdio explicitly.".into()));
+        }
+        let auth = self
+            .auth
+            .map(AuthMode::value)
+            .or_else(|| template.map(|template| template.auth_mode.as_str()))
+            .unwrap_or("none");
+        if !matches!(auth, "none" | "per-user" | "shared") {
+            return Err(CliError::Input("Directory template has an unsupported account mode. Choose --auth none, per-user or shared explicitly.".into()));
+        }
+        let endpoint = self.endpoint.or_else(|| {
+            template
+                .filter(|template| template.transport == transport && transport == "http")
+                .and_then(|template| template.url.clone())
+        });
+        let arguments = if self.clear_args {
+            vec![]
+        } else if !self.arguments.is_empty() {
+            self.arguments
+        } else {
+            template
+                .filter(|template| template.transport == transport && transport == "stdio")
+                .map(|template| template.args.clone())
+                .unwrap_or_default()
+        };
+        if transport == "http" {
+            if endpoint.as_deref().is_none_or(|url| url.trim().is_empty()) {
+                return Err(CliError::Input("HTTP connections require --url <mcp-url>. Use --host <host> for local-only endpoints.".into()));
+            }
+            if self.command.is_some() || !arguments.is_empty() {
+                return Err(CliError::Input(
+                    "--command and --arg apply only to stdio connections.".into(),
+                ));
+            }
+        } else {
+            if self.host.is_none() || self.command.is_none() {
+                return Err(CliError::Input("stdio connections require --host <registered-host> and an explicit --command <absolute-executable-path>, including when using a directory template. First run mcport host new <name> on that machine.".into()));
+            }
+            if endpoint.is_some() {
+                return Err(CliError::Input(
+                    "--url applies only to HTTP connections.".into(),
+                ));
+            }
+            if self
+                .command
+                .as_ref()
+                .is_some_and(|command| !std::path::Path::new(command).is_absolute())
+            {
+                return Err(CliError::Input("--command must be an absolute executable path; MCPort never runs it through a shell.".into()));
+            }
+        }
+        Ok(ConnectionInput {
+            name: self.name,
+            description: self.description.unwrap_or_else(|| {
+                entry
+                    .map(|entry| entry.description.clone())
+                    .unwrap_or_default()
+            }),
+            transport: transport.into(),
+            url: endpoint,
+            host_id: self.host,
+            command: self.command,
+            args: arguments,
+            auth_mode: auth.into(),
+            visibility: self
+                .visibility
+                .map(Visibility::value)
+                .unwrap_or(if auth == "none" { "org" } else { "invited" })
+                .into(),
+        })
+    }
+}
+
 async fn dispatch(
     client: &Client,
     ctx: &RequestContext,
@@ -270,6 +367,11 @@ async fn dispatch(
 ) -> Result<Value> {
     let operation = match &command {
         Command::Logout => "logout",
+        Command::Directory(DirectoryCommand::Ls { .. }) => "directory.list",
+        Command::Directory(DirectoryCommand::Show { .. }) => "directory.read",
+        Command::Directory(DirectoryCommand::New { .. }) => "directory.create",
+        Command::Directory(DirectoryCommand::Set { .. }) => "directory.update",
+        Command::Directory(DirectoryCommand::Rm { .. }) => "directory.delete",
         Command::Connection(ConnectionCommand::New { .. } | ConnectionCommand::Register { .. }) => {
             "connection.create"
         }
@@ -328,6 +430,35 @@ async fn dispatch_inner(
                 .remove_active()?;
             Ok(response)
         }
+        Command::Directory(command) => match command {
+            DirectoryCommand::Ls { search } => {
+                value(client.directory(ctx, search.as_deref()).await?)
+            }
+            DirectoryCommand::Show { entry } => value(client.directory_entry(ctx, &entry).await?),
+            DirectoryCommand::New { input } => {
+                let input: DirectoryInput = serde_json::from_value(input_object(&input)?)?;
+                value(client.create_directory_entry(ctx, &input).await?)
+            }
+            DirectoryCommand::Set { entry, input } => {
+                let input: DirectoryInput = serde_json::from_value(input_object(&input)?)?;
+                let current = client.directory_entry(ctx, &entry).await?;
+                value(
+                    client
+                        .update_directory_entry(
+                            ctx,
+                            &current.id,
+                            &DirectoryUpdate {
+                                input,
+                                version: current.version,
+                            },
+                        )
+                        .await?,
+                )
+            }
+            DirectoryCommand::Rm { entry } => {
+                Ok(client.delete_directory_entry(ctx, &entry).await?)
+            }
+        },
         Command::Connection(command) => match command {
             ConnectionCommand::Register {
                 connection,
@@ -382,29 +513,47 @@ async fn dispatch_inner(
             ConnectionCommand::New {
                 name,
                 description,
+                from,
                 transport,
                 endpoint,
                 host,
                 command,
                 arguments,
+                clear_args,
                 environment,
                 auth,
                 visibility,
+                dry_run,
             } => {
-                match transport {
-                    Transport::Http if endpoint.is_none() => return Err(CliError::Input("HTTP connections require --url <mcp-url>. Use --host <host> for local-only endpoints.".into())),
-                    Transport::Stdio if host.is_none() || command.is_none() => return Err(CliError::Input("stdio connections require --host <registered-host> and --command <absolute-executable-path>. First run mcport host new <name> on that machine.".into())),
-                    _ => {}
-                }
-                if matches!(transport, Transport::Http)
-                    && (command.is_some() || !arguments.is_empty() || !environment.is_empty())
-                {
+                let entry = match from {
+                    Some(id) => Some(client.directory_entry(ctx, &id).await?),
+                    None => None,
+                };
+                let draft = ConnectionDraft {
+                    name,
+                    description,
+                    transport,
+                    endpoint,
+                    host,
+                    command,
+                    arguments,
+                    clear_args,
+                    auth,
+                    visibility,
+                };
+                let mut input = draft.resolve(entry.as_ref())?;
+                if input.transport != "stdio" && !environment.is_empty() {
                     return Err(CliError::Input(
-                        "--command, --arg and --env apply only to stdio connections.".into(),
+                        "--env applies only to stdio connections.".into(),
                     ));
                 }
                 let env = parse_environment(environment)?;
-                let host_record = match &host {
+                if dry_run {
+                    return Ok(
+                        json!({"dry_run":true,"connection":input,"directory":entry.as_ref().map(|entry|json!({"id":entry.id,"name":entry.name,"source":entry.source,"source_url":entry.source_url,"source_revision":entry.source_revision})),"local_environment_keys":env.keys().collect::<Vec<_>>() }),
+                    );
+                }
+                let host_record = match &input.host_id {
                     Some(id) => Some(client.host(ctx, id).await?),
                     None => None,
                 };
@@ -419,22 +568,7 @@ async fn dispatch_inner(
                 } else {
                     None
                 };
-                if let Some(command) = &command
-                    && !std::path::Path::new(command).is_absolute()
-                {
-                    return Err(CliError::Input("--command must be an absolute executable path; MCPort never runs it through a shell.".into()));
-                }
-                let input = ConnectionInput {
-                    name,
-                    description,
-                    transport: transport.value().into(),
-                    url: endpoint.clone(),
-                    host_id: host_record.map(|h| h.id),
-                    command: command.clone(),
-                    args: arguments.clone(),
-                    auth_mode: auth.value().into(),
-                    visibility: visibility.value().into(),
-                };
+                input.host_id = host_record.map(|h| h.id);
                 let created = client.create_connection(ctx, &input).await?;
                 if let Some(path) = local_path {
                     let _registry_lock = local::registry_lock(&path)?;
@@ -817,6 +951,271 @@ fn parse_environment(entries: Vec<String>) -> Result<BTreeMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn directory_fixture() -> DirectoryEntry {
+        serde_json::from_value(json!({"id":"abc","name":"Docs","description":"Suggested provider","category":"Documentation","source":"org","source_url":"https://provider.example","source_revision":null,"owner_id":"c:owner","org_id":"tos","environment":"test-one","can_manage":true,"template":{"transport":"http","url":"https://provider.example/mcp","command":null,"args":[],"auth_mode":"per-user"},"version":4,"created_at":1,"updated_at":2})).unwrap()
+    }
+
+    #[test]
+    fn template_overrides_control_endpoint_auth_visibility_and_process_arguments() {
+        let mut entry = directory_fixture();
+        let inherited = ConnectionDraft {
+            name: "notes".into(),
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert_eq!(
+            inherited.url.as_deref(),
+            Some("https://provider.example/mcp")
+        );
+        assert_eq!(inherited.auth_mode, "per-user");
+        assert_eq!(inherited.visibility, "invited");
+        assert_eq!(inherited.description, "Suggested provider");
+        let explicit = ConnectionDraft {
+            name: "docs".into(),
+            description: Some(String::new()),
+            endpoint: Some("https://alternate.example/mcp".into()),
+            auth: Some(AuthMode::None),
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert_eq!(
+            explicit.url.as_deref(),
+            Some("https://alternate.example/mcp")
+        );
+        assert_eq!(explicit.visibility, "org");
+        assert!(explicit.description.is_empty());
+        let legacy = ConnectionDraft {
+            name: "legacy".into(),
+            visibility: Some(Visibility::Private),
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert_eq!(legacy.visibility, "private"); // Server preserves owner-only semantics.
+
+        let executable = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        entry.template = Some(mcport_client::DirectoryTemplate {
+            transport: "stdio".into(),
+            url: None,
+            command: Some(executable.clone()),
+            args: vec!["suggested".into()],
+            auth_mode: "shared".into(),
+        });
+        let missing = ConnectionDraft {
+            name: "files".into(),
+            host: Some("laptop".into()),
+            ..Default::default()
+        }
+        .resolve(Some(&entry));
+        assert!(
+            missing
+                .unwrap_err()
+                .to_string()
+                .contains("explicit --command")
+        );
+        let explicit = ConnectionDraft {
+            name: "files".into(),
+            host: Some("laptop".into()),
+            command: Some(executable.clone()),
+            arguments: vec!["chosen".into()],
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert_eq!(explicit.args, ["chosen"]);
+        assert_eq!(explicit.visibility, "invited");
+        let cleared = ConnectionDraft {
+            name: "files".into(),
+            host: Some("laptop".into()),
+            command: Some(executable),
+            clear_args: true,
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert!(cleared.args.is_empty());
+        let http_override = ConnectionDraft {
+            name: "remote".into(),
+            transport: Some(Transport::Http),
+            endpoint: Some("https://other.example/mcp".into()),
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert!(http_override.command.is_none() && http_override.args.is_empty());
+    }
+
+    #[test]
+    fn setup_requires_complete_configuration_and_hides_legacy_visibility() {
+        let entry = directory_fixture();
+        let manual = ConnectionDraft {
+            name: "missing".into(),
+            transport: Some(Transport::Http),
+            ..Default::default()
+        }
+        .resolve(None);
+        assert!(manual.unwrap_err().to_string().contains("--url"));
+        let local = ConnectionDraft {
+            name: "missing".into(),
+            transport: Some(Transport::Stdio),
+            command: Some("relative-server".into()),
+            host: Some("laptop".into()),
+            ..Default::default()
+        }
+        .resolve(None);
+        assert!(
+            local
+                .unwrap_err()
+                .to_string()
+                .contains("absolute executable")
+        );
+        assert!(
+            ConnectionDraft {
+                name: "bad-http".into(),
+                arguments: vec!["unexpected".into()],
+                ..Default::default()
+            }
+            .resolve(Some(&entry))
+            .is_err()
+        );
+        assert!(Cli::try_parse_from(["mcport", "connection", "new", "incomplete"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "mcport",
+                "connection",
+                "new",
+                "docs",
+                "--from",
+                "abc",
+                "--dry-run"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "mcport",
+                "connection",
+                "new",
+                "docs",
+                "--from",
+                "abc",
+                "--arg",
+                "x",
+                "--clear-args"
+            ])
+            .is_err()
+        );
+        use clap::CommandFactory;
+        let mut cli = Cli::command();
+        let help = cli
+            .find_subcommand_mut("connection")
+            .unwrap()
+            .find_subcommand_mut("new")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(!help.contains("private"));
+        assert!(help.contains("org") && help.contains("invited") && help.contains("--dry-run"));
+    }
+
+    #[tokio::test]
+    async fn directory_edit_uses_current_version_and_template_preview_does_not_create() {
+        use axum::{
+            Json, Router,
+            body::Bytes,
+            extract::State,
+            http::{Method, Uri},
+        };
+        use std::sync::{Arc, Mutex};
+        type CapturedRequests = Arc<Mutex<Vec<(String, String, Value)>>>;
+        async fn request(
+            State(requests): State<CapturedRequests>,
+            method: Method,
+            uri: Uri,
+            body: Bytes,
+        ) -> Json<Value> {
+            let body = if body.is_empty() {
+                Value::Null
+            } else {
+                serde_json::from_slice(&body).unwrap()
+            };
+            requests
+                .lock()
+                .unwrap()
+                .push((method.to_string(), uri.path().into(), body));
+            Json(json!({"data":directory_fixture()}))
+        }
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = Client::new(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        let app = Router::new().fallback(request).with_state(requests.clone());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::at(directory.path().into()).unwrap();
+        let session = StoredSession {
+            principal_id: "c:owner".into(),
+            org_id: "tos".into(),
+            access_token: "fixture".into(),
+            refresh_token: None,
+            expires_at: None,
+            identity: Value::Null,
+        };
+        let ctx = RequestContext::authenticated("fixture").testing("test-one");
+        let file = directory.path().join("entry.json");
+        std::fs::write(&file, r#"{"name":"Edited","category":"Docs"}"#).unwrap();
+        dispatch_inner(
+            &client,
+            &ctx,
+            &store,
+            &session,
+            Command::Directory(DirectoryCommand::Set {
+                entry: "abc".into(),
+                input: format!("@{}", file.display()),
+            }),
+        )
+        .await
+        .unwrap();
+        let preview = Cli::try_parse_from([
+            "mcport",
+            "connection",
+            "new",
+            "suggested",
+            "--from",
+            "abc",
+            "--auth",
+            "none",
+            "--dry-run",
+        ])
+        .unwrap();
+        let output = dispatch_inner(&client, &ctx, &store, &session, preview.command)
+            .await
+            .unwrap();
+        assert_eq!(output["dry_run"], true);
+        assert_eq!(output["connection"]["visibility"], "org");
+        assert_eq!(output["connection"]["url"], "https://provider.example/mcp");
+        assert_eq!(output["directory"]["id"], "abc");
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[1].0, "PUT");
+        assert_eq!(requests[1].2["version"], 4);
+        assert_eq!(requests[1].2["input"]["name"], "Edited");
+        assert!(
+            requests
+                .iter()
+                .all(|(_, path, _)| path == "/api/v1/directory/abc")
+        );
+        assert!(!store.directory.exists());
+        server.abort();
+    }
+
     #[test]
     fn all_documented_grammars_parse() {
         let cases = [

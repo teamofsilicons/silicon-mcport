@@ -1,0 +1,28 @@
+{
+  "https://github.com/cloudflare/mcp-server-cloudflare": {
+    "category": "Documentation",
+    "evidence_url": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/",
+    "note": "Cloudflare documentation endpoint only; other Cloudflare services require separate configuration.",
+    "template": {
+      "transport": "http",
+      "url": "https://docs.mcp.cloudflare.com/mcp",
+      "command": null,
+      "args": [],
+      "auth_mode": "none"
+    },
+    "name": "Cloudflare Documentation",
+    "description": "Search the official Cloudflare reference documentation. This template does not access or administer a Cloudflare account."
+  },
+  "https://github.com/github/github-mcp-server": {
+    "category": "Development",
+    "evidence_url": "https://github.com/github/github-mcp-server#remote-github-mcp-server",
+    "note": "Official remote endpoint. Each user connects their own PAT through the provider account flow; OAuth requires a provider-registered application and must not be assumed available.",
+    "template": {
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "command": null,
+      "args": [],
+      "auth_mode": "per-user"
+    }
+  }
+}

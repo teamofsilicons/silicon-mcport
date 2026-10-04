@@ -26,6 +26,7 @@ from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent))
 from fixtures import TEST_ID, TEST_KEY
+import directory_journey
 
 
 def free_port():
@@ -231,6 +232,7 @@ class Journey:
         for role in ("owner", "silicon", "stranger", "crossorg"):
             self.login(role)
             self.check("IAM " + role + " login", self.cli(role, "login", "status")["authenticated"])
+        directory_journey.run(self, request)
         self.cli("owner", "connection", "new", "public", "--transport", "http", "--url", self.provider + "/mcp/public", "--auth", "none", "--visibility", "private")
         self.check("Ordinary org member creates a connection")
         self.check("Private connection hidden from another org member", not self.cli("stranger", "connection", "ls"))
@@ -399,6 +401,7 @@ class Journey:
         self.check("Carbon and Silicon IDs cannot log in using a world UUID; no IAM exchange occurs", before == after)
         self.login("owner", test=TEST_ID)
         self.check("Test session cannot see production connections", self.cli("owner", "connection", "ls", test=TEST_ID) == [])
+        directory_test_id = directory_journey.test_environment(self)
         self.cli("owner", "connection", "new", "test-only", "--transport", "http", "--url", self.provider + "/mcp/public", "--visibility", "private", test=TEST_ID)
         self.cli("owner", "tool", "call", "test-only", "echo", "--input", '{"message":"isolated"}', test=TEST_ID)
         self.check("Provisioned test credentials run against isolated connections")
@@ -416,6 +419,7 @@ class Journey:
         self.check("Lifecycle replay returns completed receipt", replay["state"] == "completed")
         self.login("owner", test=TEST_ID)
         self.check("Clean removes test data and invalidates prior generation", self.cli("owner", "connection", "ls", test=TEST_ID) == [])
+        directory_journey.after_clean(self, directory_test_id)
         self.check("Test clean leaves production intact", len(self.cli("owner", "connection", "ls")) >= 5)
         self.cli("owner", "config", "set", "telemetry", "false")
         self.check("Telemetry can be explicitly disabled", self.cli("owner", "config", "show")["telemetry"] is False)

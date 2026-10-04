@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Page = "connections" | "hosts" | "activity" | "settings" | "help";
+export type Page =
+  "connections" | "directory" | "hosts" | "activity" | "settings" | "help";
 export type ConnectionTab =
   "tools" | "account" | "access" | "resources" | "settings";
 export type Route = {
@@ -11,6 +12,7 @@ export type Route = {
 };
 const pages = new Set<Page>([
   "connections",
+  "directory",
   "hosts",
   "activity",
   "settings",

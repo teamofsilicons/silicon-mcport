@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity as ActivityIcon,
   ArrowRight,
   Box,
+  BookOpen,
   ChevronDown,
   Cloud,
   Command,
@@ -29,7 +37,7 @@ import {
   saveSession,
   recordWebEvent,
 } from "./lib/api";
-import type { Connection, Discovery, Session } from "./lib/api";
+import type { Connection, DirectoryEntry, Discovery, Session } from "./lib/api";
 import {
   Button,
   Dialog,
@@ -43,11 +51,15 @@ import {
   Status,
 } from "./ui";
 import { ConnectionDetail, CreateConnection } from "./Connections";
+const DirectoryPage = lazy(() =>
+  import("./Directory").then((module) => ({ default: module.DirectoryPage })),
+);
 import { ActivityPage, HelpPage, HostsPage, SettingsPage } from "./Pages";
 import { useRoute } from "./lib/routing";
 import type { Page } from "./lib/routing";
 const nav = [
   { id: "connections", label: "Connections", icon: LayoutGrid },
+  { id: "directory", label: "Directory", icon: BookOpen },
   { id: "hosts", label: "Hosts", icon: Monitor },
   { id: "activity", label: "Activity", icon: ActivityIcon },
 ] as const;
@@ -64,6 +76,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Connection | null>(null);
   const [create, setCreate] = useState(false);
+  const [chooseSetup, setChooseSetup] = useState(false);
+  const [directoryEntry, setDirectoryEntry] = useState<DirectoryEntry | null>(
+    null,
+  );
   const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState("");
   const [logoutBusy, setLogoutBusy] = useState(false);
@@ -169,6 +185,11 @@ export default function App() {
     recordWebEvent("navigation", "render", "success");
     setSelected(null);
     setMenu(false);
+  };
+  const startConnection = (entry: DirectoryEntry | null = null) => {
+    setDirectoryEntry(entry);
+    setChooseSetup(false);
+    setCreate(true);
   };
   const login = (s: Session) => {
     saveSession(s);
@@ -379,11 +400,20 @@ export default function App() {
                 loading={loading}
                 error={error}
                 onRefresh={reload}
-                onCreate={() => setCreate(true)}
+                onCreate={() => setChooseSetup(true)}
                 onSelect={selectConnection}
                 onHelp={() => navigate("help")}
               />
             ))}
+          {page === "directory" && (
+            <Suspense fallback={<Loading />}>
+              <DirectoryPage
+                onUse={startConnection}
+                onCustom={() => startConnection()}
+                notify={notify}
+              />
+            </Suspense>
+          )}
           {page === "hosts" && <HostsPage />}
           {page === "activity" && (
             <ActivityPage
@@ -405,8 +435,46 @@ export default function App() {
           <span>Your tools. Your people. Connected.</span>
         </footer>
       </div>
+      <Dialog open={chooseSetup} onOpenChange={setChooseSetup}>
+        <DialogContent
+          className="wide-dialog"
+          title="Add a connection"
+          description="Start with a directory entry or configure your own MCP endpoint."
+        >
+          <div className="choice-grid setup-choices">
+            <button
+              className="choice"
+              onClick={() => {
+                setChooseSetup(false);
+                navigate("directory");
+              }}
+            >
+              <BookOpen size={25} />
+              <strong>Browse the directory</strong>
+              <span>
+                Community MCPs from mcpservers.org and your organization’s
+                templates.
+              </span>
+              <span className="setup-choice-link">
+                Find an MCP <ArrowRight size={15} />
+              </span>
+            </button>
+            <button className="choice" onClick={() => startConnection()}>
+              <Globe size={25} />
+              <strong>Custom endpoint</strong>
+              <span>
+                Set up a cloud endpoint, local HTTP server or a stdio process.
+              </span>
+              <span className="setup-choice-link">
+                Configure manually <ArrowRight size={15} />
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <CreateConnection
         open={create}
+        entry={directoryEntry}
         onClose={() => setCreate(false)}
         onCreated={(c) => {
           setCreate(false);
@@ -655,10 +723,7 @@ function Welcome({
         <article>
           <Users size={20} />
           <h3>Share intentionally</h3>
-          <p>
-            Keep it private, open it to your organization, or invite specific
-            people.
-          </p>
+          <p>Open it to your organization or invite specific people.</p>
         </article>
         <article>
           <Terminal size={20} />
@@ -904,9 +969,9 @@ function Catalog({
                   )}
                   {
                     {
-                      private: "Private",
+                      private: "Invite only",
                       org: "Organization",
-                      invited: "Invited people",
+                      invited: "Invite only",
                     }[c.visibility]
                   }
                 </span>

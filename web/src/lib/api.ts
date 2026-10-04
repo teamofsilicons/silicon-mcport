@@ -52,6 +52,32 @@ export type ConnectionInput = Pick<
   "name" | "description" | "transport" | "auth_mode" | "visibility" | "args"
 > &
   Partial<Pick<Connection, "url" | "host_id" | "command">>;
+export type DirectoryTemplate = {
+  transport: Connection["transport"];
+  url: string | null;
+  command: string | null;
+  args: string[];
+  auth_mode: Connection["auth_mode"];
+};
+export type DirectoryInput = {
+  name: string;
+  description: string;
+  category: string;
+  source_url: string | null;
+  template: DirectoryTemplate | null;
+};
+export type DirectoryEntry = DirectoryInput & {
+  id: string;
+  source: "community" | "org";
+  owner_id: string;
+  org_id: string;
+  environment: string;
+  can_manage: boolean;
+  source_revision: string | null;
+  version: number;
+  created_at: number;
+  updated_at: number;
+};
 export type Host = {
   id: string;
   name: string;
@@ -379,6 +405,25 @@ export const api = {
       expires_at: number;
     }>("/auth/status"),
   logout: () => request<void>("/auth/logout", "POST"),
+  directory: (query = "") =>
+    request<DirectoryEntry[]>(
+      `/directory${query ? `?q=${encodeURIComponent(query)}` : ""}`,
+    ),
+  directoryEntry: (entry: string) =>
+    request<DirectoryEntry>(`/directory/${id(entry)}`),
+  createDirectoryEntry: (input: DirectoryInput) =>
+    request<DirectoryEntry>("/directory", "POST", input),
+  updateDirectoryEntry: (
+    entry: string,
+    input: DirectoryInput,
+    version: number,
+  ) =>
+    request<DirectoryEntry>(`/directory/${id(entry)}`, "PUT", {
+      input,
+      version,
+    }),
+  deleteDirectoryEntry: (entry: string) =>
+    request<{ deleted: boolean }>(`/directory/${id(entry)}`, "DELETE"),
   connections: () => request<Connection[]>("/connections"),
   connection: (connection: string) =>
     request<Connection>(`/connections/${id(connection)}`),

@@ -23,6 +23,13 @@ import {
   Wrench,
 } from "lucide-react";
 import { api, message } from "./lib/api";
+import {
+  changeAuthentication,
+  changeTransport,
+  connectionFromDirectory,
+  isAbsoluteCommand,
+  sourceLink,
+} from "./lib/directory";
 import { McpResult } from "./McpResult";
 import type {
   Access,
@@ -30,6 +37,7 @@ import type {
   CallResult,
   Connection,
   ConnectionInput,
+  DirectoryEntry,
   Host,
   Policy,
   Tool,
@@ -56,21 +64,19 @@ export function CreateConnection({
   open,
   onClose,
   onCreated,
+  entry,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (c: Connection) => void;
+  entry?: DirectoryEntry | null;
 }) {
   const [step, setStep] = useState(0);
   const [location, setLocation] = useState<"cloud" | "local">("cloud");
-  const [data, setData] = useState<ConnectionInput>({
-    name: "",
-    description: "",
-    transport: "http",
-    auth_mode: "none",
-    visibility: "private",
-    args: [],
-  });
+  const [data, setData] = useState<ConnectionInput>(() =>
+    connectionFromDirectory(),
+  );
+  const [visibilityChosen, setVisibilityChosen] = useState(false);
   const [args, setArgs] = useState("");
   const [hosts, setHosts] = useState<Host[]>([]);
   const [error, setError] = useState("");
@@ -81,26 +87,28 @@ export function CreateConnection({
     if (open) {
       setStep(0);
       setError("");
-      setData({
-        name: "",
-        description: "",
-        transport: "http",
-        auth_mode: "none",
-        visibility: "private",
-        args: [],
-      });
-      setLocation("cloud");
-      setArgs("");
+      const initial = connectionFromDirectory(entry);
+      setData(initial);
+      setVisibilityChosen(false);
+      setLocation(
+        initial.transport === "stdio" || initial.url?.startsWith("http:")
+          ? "local"
+          : "cloud",
+      );
+      setArgs(initial.args.join("\n"));
+      setHosts([]);
       api
         .hosts()
         .then(setHosts)
         .catch((e) => setError(message(e)));
     }
-  }, [open]);
+  }, [open, entry]);
   function next() {
     setError("");
-    if (step === 0 && !data.name.trim()) {
-      setError("Give this connection a name.");
+    if (step === 0 && !/^[a-zA-Z0-9_-]{1,80}$/.test(data.name.trim())) {
+      setError(
+        "Use 1–80 letters, numbers, hyphens or underscores for the connection name.",
+      );
       return;
     }
     if (step === 1) {
@@ -124,7 +132,7 @@ export function CreateConnection({
           setError("Enter a complete HTTP or HTTPS MCP endpoint.");
           return;
         }
-      } else if (!data.command?.trim()) {
+      } else if (!isAbsoluteCommand(data.command?.trim() || "")) {
         setError("Enter the absolute path to the MCP executable on your host.");
         return;
       }
@@ -164,6 +172,29 @@ export function CreateConnection({
         title="New connection"
         description="Make an MCP available in your workspace. You can change access later."
       >
+        {entry && (
+          <div className="directory-selection">
+            <strong>From the directory: {entry.name}</strong>
+            <span>
+              {entry.source === "community"
+                ? "Community entry · mcpservers.org"
+                : "Organization entry"}
+            </span>
+            {sourceLink(entry.source_url) && (
+              <a
+                href={sourceLink(entry.source_url)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {entry.source_url} <ExternalLink size={13} />
+              </a>
+            )}
+            <p>
+              Review the endpoint and setup below before creating a connection.
+              Selecting a template does not run an MCP tool.
+            </p>
+          </div>
+        )}
         <div className="wizard-steps">
           {["Basics", "Endpoint", "Account & access"].map((s, i) => (
             <span
@@ -192,7 +223,7 @@ export function CreateConnection({
                 onChange={(e) => patch({ name: e.target.value })}
                 placeholder="e.g. design-workspace"
                 description="A short, memorable name you can also use in the CLI."
-                maxLength={100}
+                maxLength={80}
               />
               <Textarea
                 label="Description (optional)"
@@ -208,7 +239,11 @@ export function CreateConnection({
                   className={`choice ${location === "cloud" ? "selected" : ""}`}
                   onClick={() => {
                     setLocation("cloud");
-                    patch({ transport: "http", host_id: undefined });
+                    setData((d) => ({
+                      ...changeTransport(d, "http"),
+                      host_id: undefined,
+                    }));
+                    setArgs("");
                   }}
                 >
                   <Cloud size={23} />
@@ -259,9 +294,10 @@ export function CreateConnection({
                   <Select
                     label="Transport"
                     value={data.transport}
-                    onChange={(v) =>
-                      patch({ transport: v as "http" | "stdio" })
-                    }
+                    onChange={(v) => {
+                      setData((d) => changeTransport(d, v as "http" | "stdio"));
+                      if (v === "http") setArgs("");
+                    }}
                   >
                     <option value="http">Local HTTP</option>
                     <option value="stdio">stdio process</option>
@@ -312,7 +348,13 @@ export function CreateConnection({
                 label="Provider authentication"
                 value={data.auth_mode}
                 onChange={(v) =>
-                  patch({ auth_mode: v as Connection["auth_mode"] })
+                  setData((d) =>
+                    changeAuthentication(
+                      d,
+                      v as Connection["auth_mode"],
+                      visibilityChosen,
+                    ),
+                  )
                 }
               >
                 <option value="none">No authentication</option>
@@ -331,14 +373,19 @@ export function CreateConnection({
               <Select
                 label="Who can use this connection?"
                 value={data.visibility}
-                onChange={(v) =>
-                  patch({ visibility: v as Connection["visibility"] })
-                }
+                onChange={(v) => {
+                  setVisibilityChosen(true);
+                  patch({ visibility: v as Connection["visibility"] });
+                }}
               >
-                <option value="private">Only me</option>
-                <option value="invited">People I invite</option>
+                <option value="invited">Invite only</option>
                 <option value="org">Everyone in my organization</option>
               </Select>
+              <p className="field-help">
+                {data.visibility === "org"
+                  ? "Everyone in your organization can use this connection, subject to its tool and provider account permissions."
+                  : "Only you can use this connection until you invite people. Directory membership does not grant connection access."}
+              </p>
               <div className="review-summary">
                 <span>
                   {location === "cloud" ? (
@@ -436,9 +483,9 @@ export function ConnectionDetail({
           )}
           {
             {
-              private: "Private",
+              private: "Invite only",
               org: "Organization-wide",
-              invited: "Invited people",
+              invited: "Invite only",
             }[c.visibility]
           }
         </span>
@@ -1146,9 +1193,9 @@ function ConnectionAccess({
           <strong>
             {
               {
-                private: "Only the owner",
+                private: "Invite only",
                 org: "Everyone in your organization",
-                invited: "Selected people and Silicons",
+                invited: "Invite only — selected people and Silicons",
               }[c.visibility]
             }
           </strong>
@@ -1161,15 +1208,6 @@ function ConnectionAccess({
         </Notice>
       ) : (
         <>
-          {c.visibility === "private" && (
-            <div className="notice-block">
-              <Lock size={17} />
-              <p>
-                This connection is private. Change visibility to “People I
-                invite” to make invitations usable.
-              </p>
-            </div>
-          )}
           {c.visibility === "org" && (
             <Notice>
               All organization members already have access. Removing an
@@ -1345,7 +1383,9 @@ function ConnectionSettings({
 }) {
   const [name, setName] = useState(c.name);
   const [description, setDescription] = useState(c.description);
-  const [visibility, setVisibility] = useState(c.visibility);
+  const [visibility, setVisibility] = useState<Connection["visibility"]>(
+    c.visibility === "private" ? "invited" : c.visibility,
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -1417,8 +1457,7 @@ function ConnectionSettings({
             value={visibility}
             onChange={(v) => setVisibility(v as Connection["visibility"])}
           >
-            <option value="private">Only me</option>
-            <option value="invited">People I invite</option>
+            <option value="invited">Invite only</option>
             <option value="org">Everyone in the organization</option>
           </Select>
         )}

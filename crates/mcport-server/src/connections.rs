@@ -396,6 +396,21 @@ fn validate_name(name: &str) -> Result<()> {
     }
     Ok(())
 }
+fn new_visibility(auth_mode: &str, requested: &str) -> Result<String> {
+    match requested {
+        "" => Ok(if auth_mode == "none" {
+            "org"
+        } else {
+            "invited"
+        }
+        .into()),
+        // The old CLI explicitly sends private. A new connection has no invites,
+        // so retaining its owner-only access is exactly invite-only with no grants.
+        "private" | "invited" => Ok("invited".into()),
+        "org" => Ok("org".into()),
+        _ => Err(Error::bad("Choose org or invited visibility.")),
+    }
+}
 pub async fn list(State(app): State<App>, headers: HeaderMap) -> Result<Json<Value>> {
     let a = auth::authenticate(&app, &headers).await?;
     let mut out = Vec::new();
@@ -424,9 +439,9 @@ pub async fn create(
     auth::csrf(&app, &headers)?;
     let a = auth::authenticate(&app, &headers).await?;
     validate_name(&input.name)?;
+    let visibility = new_visibility(&input.auth_mode, &input.visibility)?;
     if !matches!(input.transport.as_str(), "http" | "stdio")
         || !matches!(input.auth_mode.as_str(), "none" | "per-user" | "shared")
-        || !matches!(input.visibility.as_str(), "private" | "org" | "invited")
     {
         return Err(Error::bad(
             "Choose a supported transport, authentication mode and visibility.",
@@ -490,7 +505,7 @@ pub async fn create(
         command: input.command,
         args: input.args,
         auth_mode: input.auth_mode,
-        visibility: input.visibility,
+        visibility,
         status: "ready".into(),
         can_manage: true,
         account: None,
@@ -550,16 +565,23 @@ pub async fn update(
     }
     c.updated_at = now();
     c.version += 1;
-    app.store.put(
-        "connection",
-        &c.id,
-        a.env(),
-        &c.org_id,
-        &c.owner_id,
-        Some(&c.name),
-        &c,
-        Some(previous),
-    )?;
+    if c.visibility == "private" {
+        // A legacy owner-only reset must revoke existing invitations before the
+        // row adopts the new invite-only representation.
+        c.visibility = "invited".into();
+        app.store.put_connection_reset_grants(&c, previous)?;
+    } else {
+        app.store.put(
+            "connection",
+            &c.id,
+            a.env(),
+            &c.org_id,
+            &c.owner_id,
+            Some(&c.name),
+            &c,
+            Some(previous),
+        )?;
+    }
     crate::execution::invalidate_connection(&app, &c.id)?;
     Ok(Json(json!({"data":view(&app,c,&a)?})))
 }

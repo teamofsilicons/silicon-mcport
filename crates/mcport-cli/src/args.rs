@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-const LINKS: &str = "Repository: https://github.com/teamofsilicons/silicon-mcport\nDocumentation: https://github.com/teamofsilicons/silicon-mcport/tree/main/docs\nRust package (publication pending): https://crates.io/crates/mcport-client\n\nExample: mcport iam --json\nThen obtain an app-bound SLT from IAM and run mcport login <app-bound-slt>.\nFresh profiles use https://backend.mcport.teamofsilicons.com; config set backend selects another deployment.\nRelated: mcport docs, mcport config set --help, mcport connection --help, mcport tool --help\nApplication login uses IAM; account connect handles upstream MCP authorization.";
+const LINKS: &str = "Repository: https://github.com/teamofsilicons/silicon-mcport\nDocumentation: https://github.com/teamofsilicons/silicon-mcport/tree/main/docs\nRust package: https://crates.io/crates/mcport-client\n\nExample: mcport iam --json\nThen obtain an app-bound SLT from IAM and run mcport login <app-bound-slt>.\nFresh profiles use https://backend.mcport.teamofsilicons.com; config set backend selects another deployment.\nRelated: mcport docs, mcport directory --help, mcport connection --help, mcport tool --help\nApplication login uses IAM; account connect handles upstream MCP authorization.";
 
 #[derive(Debug, Parser)]
 #[command(name = "mcport", version, about = "Configure MCP connections and use their tools from any authorized machine", long_about = None, after_help = LINKS, propagate_version = true)]
@@ -51,6 +51,12 @@ pub enum Command {
         after_help = "Example: mcport session ls --json\nSelect an existing identity with session use; sign in a new identity with login.\nRelated: mcport session use --help, mcport login --help"
     )]
     Session(SessionCommand),
+    /// Browse MCP references and manage your organization's directory entries.
+    #[command(
+        subcommand,
+        after_help = "Example: mcport directory ls --search files\nReview an entry with directory show before using connection new --from. Directory entries contain no credentials.\nRelated: mcport directory new --help, mcport connection new --help"
+    )]
+    Directory(DirectoryCommand),
     /// Configure, inspect and share saved MCP connections.
     #[command(
         subcommand,
@@ -191,12 +197,61 @@ pub enum AuthMode {
 }
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Visibility {
-    /// Limit access to the connection owner.
+    #[value(hide = true)]
     Private,
     /// Allow eligible identities in the connection's organization.
     Org,
     /// Allow the owner and explicitly invited principals.
     Invited,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DirectoryCommand {
+    /// List community references and entries in the selected organization.
+    #[command(
+        after_help = "Example: mcport directory ls --search database --json\nRelated: mcport directory show --help, mcport directory new --help"
+    )]
+    Ls {
+        /// Search names, descriptions and categories.
+        #[arg(long)]
+        search: Option<String>,
+    },
+    /// Review an entry's source and optional connection template.
+    #[command(
+        after_help = "Example: mcport directory show <entry-id>\nAn entry is a setup suggestion; verify its source and executable before use.\nRelated: mcport directory ls, mcport connection new --help"
+    )]
+    Show {
+        /// Exact entry ID returned by directory ls.
+        entry: String,
+    },
+    /// Add an organization directory entry owned by the current identity.
+    #[command(
+        after_help = "Example: mcport directory new --input @entry.json\nInput: {\"name\":\"Team docs\",\"description\":\"Search team documentation\",\"category\":\"Documentation\",\"source_url\":\"https://provider.example\",\"template\":{\"transport\":\"http\",\"url\":\"https://provider.example/mcp\",\"auth_mode\":\"per-user\"}}\nDo not include tokens, headers or environment credentials.\nRelated: mcport directory show --help, mcport directory set --help"
+    )]
+    New {
+        /// Complete entry object as inline JSON, @file, or - for stdin.
+        #[arg(long)]
+        input: String,
+    },
+    /// Replace an owned directory entry using its current version.
+    #[command(
+        after_help = "Example: mcport directory set <entry-id> --input @entry.json\nUses the same complete input object as directory new. Community entries are read-only.\nRelated: mcport directory new --help, mcport directory show --help, mcport directory rm --help"
+    )]
+    Set {
+        /// Exact ID of an entry owned by the selected identity.
+        entry: String,
+        /// Replacement entry object as inline JSON, @file, or - for stdin.
+        #[arg(long)]
+        input: String,
+    },
+    /// Delete an owned directory entry without deleting existing connections.
+    #[command(
+        after_help = "Example: mcport directory rm <entry-id>\nRelated: mcport directory show --help, mcport connection ls"
+    )]
+    Rm {
+        /// Exact ID of an entry owned by the selected identity.
+        entry: String,
+    },
 }
 
 impl Transport {
@@ -241,17 +296,20 @@ pub enum ConnectionCommand {
     },
     /// Create a remote or host-local MCP connection.
     #[command(
-        after_help = "Example: mcport connection new docs --transport http --url https://provider.example/mcp --auth none\nLocal stdio: mcport connection new files --host laptop --transport stdio --command /absolute/path/to/server --arg /absolute/path/to/config\nLocal connections created here are also registered on their host.\nRelated: mcport host new --help, mcport account connect --help, mcport access new --help, mcport tool ls --help"
+        after_help = "Example: mcport connection new docs --transport http --url https://provider.example/mcp --auth none\nTemplate review: mcport connection new docs --from <entry-id> --dry-run\nLocal stdio: mcport connection new files --host laptop --transport stdio --command /absolute/path/to/server --arg /absolute/path/to/config\nFlags override directory defaults; local connections require a registered host and are registered only when created. Template stdio requires an explicit absolute --command. Default access is org for auth none, invited otherwise.\nRelated: mcport directory show --help, mcport host new --help, mcport account connect --help, mcport access new --help"
     )]
     New {
         /// Connection name to use in later commands.
         name: String,
         /// Optional description displayed with the connection.
-        #[arg(long, default_value = "")]
-        description: String,
-        /// HTTP endpoint or local process transport.
-        #[arg(long, value_enum)]
-        transport: Transport,
+        #[arg(long)]
+        description: Option<String>,
+        /// Directory entry ID to use as setup defaults; inspect it with directory show.
+        #[arg(long)]
+        from: Option<String>,
+        /// HTTP endpoint or local process transport; required without --from.
+        #[arg(long, value_enum, required_unless_present = "from")]
+        transport: Option<Transport>,
         /// MCP endpoint URL (not the MCPort backend).
         #[arg(long = "url")]
         endpoint: Option<String>,
@@ -261,18 +319,24 @@ pub enum ConnectionCommand {
         /// Executable to launch on the registered host; never interpreted by a shell.
         #[arg(long)]
         command: Option<String>,
-        /// One process argument; repeat for multiple arguments.
+        /// One process argument; repeat. Supplying any --arg replaces all template arguments.
         #[arg(long = "arg", allow_hyphen_values = true)]
         arguments: Vec<String>,
+        /// Discard all suggested process arguments from the directory template.
+        #[arg(long, conflicts_with = "arguments")]
+        clear_args: bool,
         /// Process environment entry KEY=VALUE. Do not place secrets in shell history.
         #[arg(long = "env")]
         environment: Vec<String>,
-        /// Provider account mode; shared and per-user accounts connect separately.
-        #[arg(long, value_enum, default_value = "none")]
-        auth: AuthMode,
-        /// Who may access the connection, subject to its tool restrictions.
-        #[arg(long, value_enum, default_value = "private")]
-        visibility: Visibility,
+        /// Provider account mode; inherits template mode, otherwise none.
+        #[arg(long, value_enum)]
+        auth: Option<AuthMode>,
+        /// Access mode; defaults to org without authentication, invited otherwise.
+        #[arg(long, value_enum)]
+        visibility: Option<Visibility>,
+        /// Print resolved configuration for review without creating or registering a connection.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// List connections currently visible to the selected identity.
     #[command(

@@ -20,7 +20,7 @@ State lives beneath `${SILICON_HOME:-~}/.mcport/dir`. To choose an existing home
 
 ```sh
 mcport connection new docs --transport http \
-  --url https://docs.mcp.cloudflare.com/mcp --auth none --visibility private
+  --url https://docs.mcp.cloudflare.com/mcp --auth none
 mcport tool ls docs --json
 mcport tool show docs search_cloudflare_documentation --json
 mcport tool call docs search_cloudflare_documentation \
@@ -30,6 +30,47 @@ cat query.json | mcport tool call docs search_cloudflare_documentation --input -
 ```
 
 The saved connection supplies endpoint and account. Each call supplies the discovered tool name and JSON matching its input schema. Tool-level failures preserve the original `isError` result and exit nonzero. The result retains text, structured content, media and resource references.
+
+No-auth connections default to **Everyone in the org**. Connections with `--auth shared` or `--auth per-user` default to **Invite only**, which means just their owner until someone is invited. Set `--visibility org` or `--visibility invited` explicitly to choose a different audience. These defaults apply to new connections; existing org connections keep their audience.
+
+## Find or add a directory entry
+
+Use a custom endpoint as above, or search the bundled public directory and your organization's entries:
+
+```sh
+mcport directory ls --search github --json
+mcport directory show <entry-id> --json
+mcport connection new work --from <entry-id> --dry-run --json
+mcport connection new work --from <entry-id>
+```
+
+The community list comes from the MIT-licensed [Awesome MCP Servers repository](https://github.com/wong2/awesome-mcp-servers) associated with [mcpservers.org](https://mcpservers.org/). It is a bundled snapshot, not a live mirror of the website. Each entry includes its source and revision. Reviewed templates prefill available settings; entries containing only discovery metadata require an endpoint or local command from the linked setup instructions. Select a registered host for local MCPs and explicitly provide its absolute executable path for stdio. `--from` never installs a package or interprets shell snippets.
+
+Any org member can add an org-visible template. Save this as `entry.json`, replacing the example endpoint:
+
+```json
+{
+  "name": "team-docs",
+  "description": "Our documentation MCP",
+  "category": "Documentation",
+  "source_url": "https://example.com/setup",
+  "template": {
+    "transport": "http",
+    "url": "https://mcp.example.com/mcp",
+    "command": null,
+    "args": [],
+    "auth_mode": "none"
+  }
+}
+```
+
+```sh
+mcport directory new --input @entry.json --json
+mcport directory set <entry-id> --input @entry.json --json
+mcport directory rm <entry-id>
+```
+
+Only the entry's creator can edit or remove it. Entries are reusable descriptions, not configured accounts: adding one does not create a connection, grant use of someone's account, or publish to the external directory. Editing or removing an entry leaves existing connections unchanged. Credentials belong in `account connect` or protected local host configuration, never in directory fields.
 
 ## Choose whose provider account runs
 
@@ -44,6 +85,8 @@ OAuth prints a consent URL. Review the account and sharing mode there, authorize
 
 Shared accounts are configured by the connection owner. Per-user accounts are configured separately by each caller. Local accounts must be configured or disconnected on the execution host.
 
+Another person can finish a provider consent step by opening the returned MCPort authorization link in their browser within ten minutes. The confirmation page identifies the initiating MCPort account, and the provider grant stays attached to that initiator. This does not transfer connection ownership or local setup. To connect the completing person's own per-user MCPort grant instead, invite them and have them start their own `account connect`.
+
 ## Share deliberately
 
 ```sh
@@ -54,7 +97,7 @@ mcport tool set work write_item --principal 'si:researcher' --enabled false
 mcport access rm work --principal 'si:researcher'
 ```
 
-Use the actual tool/principal IDs. Invited users must be members of the connection's organization. Use permission does not include editing, sharing or deleting. A personal allow never overrides a connection-wide deny. `--visibility org` grants use to current members; `private` limits use to the owner.
+Use the actual tool/principal IDs. Invited users must be members of the connection's organization. Use permission does not include editing, sharing or deleting. A personal allow never overrides a connection-wide deny. `--visibility org` grants use to current members; `--visibility invited` grants use only to the owner and invited members. Remove every invitation to return to owner-only use.
 
 ## Use a local MCP from another machine
 
