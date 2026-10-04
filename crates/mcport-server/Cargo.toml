@@ -25,6 +25,7 @@ rand = "0.9"
 uuid = { version = "1", features = ["v4", "serde"] }
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 subtle = "2"

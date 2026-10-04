@@ -10,6 +10,7 @@ mod operations;
 mod public_ids;
 mod state;
 mod store;
+mod tls;
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State},
@@ -124,6 +125,7 @@ fn router(app: App) -> Router {
 }
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tls::initialize()?;
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
