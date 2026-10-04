@@ -28,7 +28,7 @@ Copy `deploy/environment.example` into a protected service environment file and 
 | `MCPORT_MASTER_KEY` | Optional 32-byte key as 64 hex characters; otherwise generated once in the data directory |
 | `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION` | Separate IAM signing secret and version |
 | `MCPORT_LIFECYCLE_SECRET` | Dedicated Honeycomb participant service token, at least 32 characters |
-| `MCPORT_TEST_APP_SECRETS` | JSON map from test environment UUID to its imported application secret |
+| `MCPORT_TEST_APP_SECRETS` | Protected JSON map from test UUID to that environment's imported app secret; loaded at startup and may be supplied after import |
 | `MCPORT_ALLOWED_UPSTREAM_ORIGINS` | Explicit operator-only exceptions for controlled private HTTP origins |
 | `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Bug-report delivery configuration |
 | `MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL` | Space Station production table key and service |
@@ -37,6 +37,8 @@ Copy `deploy/environment.example` into a protected service environment file and 
 Use HTTPS at the reverse proxy, preserve multiple Set-Cookie headers, and pass only trusted forwarding metadata. Restrict the control-plane service token to Honeycomb. Health responds at `/health`; health does not verify IAM/provider workflows.
 
 Do not reuse a master key across unrelated deployments or lose it during an upgrade. Database and encryption-key backup/restore must be tested together. The current backend is a single-instance service; a multi-instance deployment requires transactional distributed session/lease coordination.
+
+A configured test secret overrides the same environment's stored secret, which permits explicit credential rotation. Without an entry, only that environment's stored secret is eligible; production credentials are never a fallback. The map cannot provision or reactivate an environment, change its generation, or bypass IAM's live test-context verification. Invalid maps fail startup without printing values. Leave the variable unset or use `{}` when unused. Keep entries current after reimport or credential rotation; restarting loads changes, and a rejected configured credential does not fall back to an older one. See [isolated acceptance setup](../deploy/testing.md) for the prepared-world and app-owned attachment sequence.
 
 ## Honeycomb and releases
 

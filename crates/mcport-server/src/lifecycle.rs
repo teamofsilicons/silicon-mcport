@@ -200,16 +200,10 @@ pub async fn apply(
                 }
             })
         });
-    let app_secret = previous
-        .as_ref()
-        .map(|e| e.app_secret.clone())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            std::env::var("MCPORT_TEST_APP_SECRETS")
-                .ok()
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .and_then(|v| v[&environment].as_str().map(str::to_owned))
-        })
+    let app_secret = app
+        .configured_test_secret(&environment)
+        .cloned()
+        .or_else(|| previous.as_ref().map(|e| e.app_secret.clone()))
         .unwrap_or_default();
     let mut env = Environment {
         id: environment.clone(),
@@ -483,6 +477,8 @@ mod tests {
         let mut config = Config::from_env();
         config.data_dir = dir.path().into();
         config.app_id = "mcport".into();
+        config.app_secret = "fixture-production-credential".into();
+        config.test_app_secrets = "{}".into();
         config.lifecycle_secret = Some(SERVICE.into());
         config.webhook_secret = Some(WEBHOOK.into());
         (App::new(config).unwrap(), dir)
@@ -517,6 +513,101 @@ mod tests {
                 receipt: json!({"operation_id":body["operation_id"],"environment_id":ENV,"state":"pending"}),
                 org:"tos".into(), action:body["action"].as_str().unwrap().into(), phase:phase.into(),
                 control_revision:body["environment_revision"].as_i64().unwrap() }, None).unwrap();
+    }
+
+    fn with_test_secret(app: &App, secret: &str) -> App {
+        let mut config = (*app.config).clone();
+        config.test_app_secrets = json!({ENV: secret}).to_string();
+        App::new(config).unwrap()
+    }
+
+    #[tokio::test]
+    async fn configured_test_credential_after_import_preserves_receipt_and_fences() {
+        let (app, _dir) = fixture();
+        let import = request("import", 1, 1);
+        let receipt = run(&app, &import).await.unwrap();
+        let original = app.environment(ENV).unwrap();
+        assert!(original.app_secret.is_empty());
+        assert_eq!(
+            auth::iam(&app, &original).await.err().unwrap().1.code,
+            "application_not_configured"
+        );
+
+        let restarted = with_test_secret(&app, "fresh-test-credential");
+        let selected = restarted.environment(ENV).unwrap();
+        assert_eq!(selected.app_secret, "fresh-test-credential");
+        assert_eq!(selected.generation, original.generation);
+        assert_eq!(selected.control_revision, original.control_revision);
+        assert_eq!(selected.iam_key, original.iam_key);
+        assert_eq!(run(&restarted, &import).await.unwrap(), receipt);
+        // Resolving configuration never mutates a receipt or secretly persists it.
+        assert!(
+            restarted
+                .store
+                .get::<Environment>("environment", ENV)
+                .unwrap()
+                .unwrap()
+                .app_secret
+                .is_empty()
+        );
+        let removed = App::new((*app.config).clone()).unwrap();
+        assert!(removed.environment(ENV).unwrap().app_secret.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_configuration_never_provisions_or_reactivates_an_environment() {
+        let (app, _dir) = fixture();
+        let configured = with_test_secret(&app, "test-credential");
+        assert_eq!(
+            configured.environment(ENV).err().unwrap().1.code,
+            "test_environment_unavailable"
+        );
+        run(&configured, &request("import", 1, 1)).await.unwrap();
+        let selected = configured.environment(ENV).unwrap();
+        run(&configured, &request("disable", 2, 1)).await.unwrap();
+        let restarted = with_test_secret(&configured, "replacement-test-credential");
+        assert_eq!(
+            restarted.environment(ENV).err().unwrap().1.code,
+            "test_environment_disabled"
+        );
+        assert!(restarted.assert_environment(&selected).is_err());
+        run(&restarted, &request("purge", 3, 1)).await.unwrap();
+        assert!(
+            with_test_secret(&restarted, "test-credential")
+                .environment(ENV)
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_test_rotation_is_explicit_and_production_stays_separate() {
+        let (app, _dir) = fixture();
+        let configured = with_test_secret(&app, "original-test-credential");
+        run(&configured, &request("import", 1, 1)).await.unwrap();
+        let rotated = with_test_secret(&configured, "rotated-test-credential");
+        assert_eq!(
+            rotated.environment(ENV).unwrap().app_secret,
+            "rotated-test-credential"
+        );
+        assert_eq!(
+            rotated.environment("production").unwrap().app_secret,
+            "fixture-production-credential"
+        );
+        let mut config = (*rotated.config).clone();
+        config.test_app_secrets = "{}".into();
+        // Without an override, only this plane's persisted credential is eligible.
+        let stored = App::new(config).unwrap();
+        assert_eq!(
+            stored.environment(ENV).unwrap().app_secret,
+            "original-test-credential"
+        );
+        let stale = rotated.environment(ENV).unwrap();
+        run(&rotated, &request("clean", 2, 2)).await.unwrap();
+        assert_eq!(rotated.environment(ENV).unwrap().generation, 2);
+        assert_eq!(
+            rotated.assert_environment(&stale).err().unwrap().1.code,
+            "environment_changed"
+        );
     }
 
     #[tokio::test]

@@ -45,6 +45,7 @@ pub struct Config {
     pub upstream_origins: HashSet<String>,
     pub webhook_secret: Option<String>,
     pub lifecycle_secret: Option<String>,
+    pub test_app_secrets: String,
     pub postmark_token: Option<String>,
     pub postmark_from: String,
 }
@@ -67,6 +68,7 @@ impl Config {
                 .collect(),
             webhook_secret: std::env::var("MCPORT_WEBHOOK_SECRET").ok(),
             lifecycle_secret: std::env::var("MCPORT_LIFECYCLE_SECRET").ok(),
+            test_app_secrets: env("MCPORT_TEST_APP_SECRETS", "{}"),
             postmark_token: std::env::var("POSTMARK_SERVER_TOKEN").ok(),
             postmark_from: env("MCPORT_REPORT_FROM", "mcport@teamofsilicons.com"),
         }
@@ -91,9 +93,11 @@ pub struct App {
     pub locks: Arc<Mutex<HashMap<String, Weak<AsyncMutex<()>>>>>,
     pub active: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub jobs: Arc<Notify>,
+    test_app_secrets: Arc<HashMap<String, String>>,
 }
 impl App {
     pub fn new(config: Config) -> Result<Self> {
+        let test_app_secrets = parse_test_app_secrets(&config)?;
         std::fs::create_dir_all(&config.data_dir)?;
         #[cfg(unix)]
         {
@@ -131,7 +135,11 @@ impl App {
             locks: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(Mutex::new(HashMap::new())),
             jobs: Arc::new(Notify::new()),
+            test_app_secrets: Arc::new(test_app_secrets),
         })
+    }
+    pub fn configured_test_secret(&self, environment: &str) -> Option<&String> {
+        self.test_app_secrets.get(environment)
     }
     pub fn lock(&self, key: &str) -> Arc<AsyncMutex<()>> {
         let mut locks = self.locks.lock().unwrap_or_else(|e| e.into_inner());
@@ -156,7 +164,7 @@ impl App {
                 iam_key: None,
             });
         }
-        let e = self
+        let mut e = self
             .store
             .get::<Environment>("environment", name)?
             .ok_or_else(|| {
@@ -174,6 +182,13 @@ impl App {
                 "This testing environment is not active.",
                 "Wait for Honeycomb to complete its lifecycle operation.",
             ));
+        }
+        // Honeycomb returns the app-owned test credential after participants finish
+        // importing. Configuration can therefore arrive after the durable receipt.
+        // It changes credentials only: provisioning and lifecycle fences stay intact,
+        // and auth::iam verifies the selected credential against IAM before use.
+        if let Some(secret) = self.configured_test_secret(name) {
+            e.app_secret.clone_from(secret);
         }
         Ok(e)
     }
@@ -201,5 +216,64 @@ impl App {
             ));
         }
         Ok(())
+    }
+}
+
+fn parse_test_app_secrets(config: &Config) -> Result<HashMap<String, String>> {
+    let invalid = || {
+        Error::new(
+            500,
+            "invalid_test_credentials_configuration",
+            "MCPORT_TEST_APP_SECRETS must map test environment UUIDs to their own nonempty credentials.",
+            "Correct the protected runtime configuration and restart MCPort. Never use a production application credential.",
+        )
+    };
+    if config.test_app_secrets.len() > 1024 * 1024 {
+        return Err(invalid());
+    }
+    let secrets: HashMap<String, String> =
+        serde_json::from_str(&config.test_app_secrets).map_err(|_| invalid())?;
+    if secrets.len() > 1024
+        || secrets.iter().any(|(environment, secret)| {
+            uuid::Uuid::parse_str(environment).map_or(true, |id| {
+                id.is_nil() || id.hyphenated().to_string() != *environment
+            }) || secret.is_empty()
+                || secret.len() > 2048
+                || secret.trim() != secret
+                || secret.chars().any(char::is_control)
+                || secret == &config.app_secret
+        })
+    {
+        return Err(invalid());
+    }
+    Ok(secrets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_credential_configuration_rejects_production_and_malformed_entries() {
+        let mut config = Config::from_env();
+        config.app_secret = "production-secret".into();
+        const ENV: &str = "11111111-1111-4111-8111-111111111111";
+        for raw in [
+            json!({"production": "test-secret"}).to_string(),
+            json!({ENV: "production-secret"}).to_string(),
+            json!({ENV: ""}).to_string(),
+            json!({ENV: "secret\n"}).to_string(),
+            json!({"00000000-0000-0000-0000-000000000000": "test-secret"}).to_string(),
+            "{private-credential-invalid-json".into(),
+        ] {
+            config.test_app_secrets = raw;
+            let error = parse_test_app_secrets(&config).unwrap_err();
+            assert_eq!(error.1.code, "invalid_test_credentials_configuration");
+            assert!(!error.1.message.contains("private-credential"));
+            assert!(!error.1.message.contains("production-secret"));
+        }
+        config.test_app_secrets = json!({ENV: "test-secret"}).to_string();
+        assert_eq!(parse_test_app_secrets(&config).unwrap()[ENV], "test-secret");
     }
 }

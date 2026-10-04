@@ -50,6 +50,14 @@ Never use fixture values or copy another application's credentials. Preserve the
 master key with its database across every upgrade. A fresh deployment must begin
 with an empty data directory.
 
+For isolated acceptance, follow [testing setup](testing.md). Honeycomb may return
+MCPort's test credential after participant import completes. Install it in the
+protected `MCPORT_TEST_APP_SECRETS` map and restart; no repeated import or root-key
+rotation is required. The explicit map takes precedence over a stored test secret,
+so update it when rotating credentials. It cannot enable an inactive environment;
+IAM verifies the selected credential before login. Production never supplies a
+fallback credential for testing.
+
 The service binds `127.0.0.1:4380`, serves both the API and `web/dist` from the
 active release, and retains state under `/var/lib/mcport`. Adapt
 `Caddyfile.example` to the selected hostname, validate it with `caddy validate`,

@@ -29,7 +29,7 @@ nonsecret app/bind/data/IAM/origin values; omit unused optional entries:
 |---|---|
 | `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION` | Matching IAM/Honeycomb webhook registration at backend `/webhooks/iam`; use its independent signing secret, version defaults to1 |
 | `MCPORT_LIFECYCLE_SECRET` | Dedicated ≥32-character service token matching Honeycomb testing participant registration |
-| `MCPORT_TEST_APP_SECRETS` | JSON string mapping imported test UUIDs to test application secrets, configured before import |
+| `MCPORT_TEST_APP_SECRETS` | JSON string mapping imported test UUIDs to their own test application secrets; may be installed after app-owned attachment completes. Restart to load changes; explicit entries override stored test secrets. See [testing setup](../testing.md). |
 | `MCPORT_TELEMETRY_KEY`, `MCPORT_TEST_TELEMETRY_KEYS` | Production Space Station table key and JSON string of separate testing keys |
 | `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Live report delivery and verified sender; sender defaults to `mcport@teamofsilicons.com` |
 | `MCPORT_MASTER_KEY` | Optional 64 hex characters, preserved for this deployment's lifetime |
