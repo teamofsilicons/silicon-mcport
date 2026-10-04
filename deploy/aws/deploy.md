@@ -2,15 +2,20 @@
 
 Provisioned host: `i-0bf2c2f54fce6cfca`, region `us-east-1`, operator profile
 `silicon-production`, Elastic IP `100.57.137.244`. Artifact bucket:
-`silicon-mcport-production-artifacts-ezytfdmvjxeg`. SSM/cloud-init bootstrap passed;
-this is infrastructure evidence, not application deployment evidence.
+`silicon-mcport-production-artifacts-ezytfdmvjxeg`. On October 4, 2026 the native
+backend `3400f4e2e70f0bfbc26409b8f6e56884c2efbc37` was installed through SSM and
+passed exact-revision private/public health plus real provider calls. The cutover
+preserved runtime secrets, encryption keys and the telemetry spool; its queued
+events were acknowledged after a new browser call.
 
 Backend: `https://backend.mcport.teamofsilicons.com`; frontend:
-`https://mcport.teamofsilicons.com` on Vercel. At preparation time DNS changes were
-blocked by Namecheap rejecting the request IP; its API was not confirmed disabled. Resolve that before enabling
-Caddy or using the native installer's `--apply`: the installer requires genuine
-public HTTPS health with the exact candidate revision. Do not substitute an IP,
-disable TLS verification or rewrite local hosts to bypass that gate.
+`https://mcport.teamofsilicons.com` on Vercel. Namecheap access was enabled and the
+operator IP allowlisted. Only `mcport` → `76.76.21.21` and `backend.mcport` →
+`100.57.137.244` were added; all 102 earlier records and mail mode were preserved.
+Caddy is active with a valid certificate, and both public origins passed normal
+TLS verification. Future installations must also pass genuine public HTTPS
+health with the exact candidate revision; do not substitute an IP, disable TLS
+verification or rewrite local hosts to bypass that gate.
 
 ## Runtime secret
 
@@ -105,6 +110,17 @@ start Caddy and confirm a valid certificate for the exact backend hostname.
 Obtain a native backend candidate for the final reviewed implementation revision;
 the earlier `1f334d9` candidate does not contain subsequent compact-ID changes.
 Set these nonsecret values to that verified candidate before running:
+
+If telemetry has run, its SDK can leave a Unix `daemon.sock` under
+`/var/lib/mcport/telemetry/<table-key-hash>/`. The current installer deliberately
+rejects special files during state backup. Before an upgrade, take the install
+lock, stop MCPort and verify an inactive service with `MainPID=0`. Confirm the
+exact socket is owned by the MCPort service user, then unlink only that socket.
+Preserve every spool, cursor, lock, database, key and runtime file. Release the
+operator lock immediately before invoking the installer's own locked apply.
+If preparation or installation fails before a healthy cutover, restart and
+verify the previous release. Never remove sockets from a running service or use
+a recursive cleanup. The SDK recreates its IPC socket after a new event.
 
 ```sh
 caddy validate --config /etc/caddy/Caddyfile

@@ -50,14 +50,13 @@ Create the test Carbon and `tos` before attaching the private application. Norma
 test signup accepts `000000` and sends no email or SMS. For example:
 
 ```sh
-iam --test "$ENV_ID" --json signup --email mcport-qa@example.test \
-  --carbon-id mcportqa --display-name 'MCPort QA' --timezone Etc/UTC
+iam --test "$ENV_ID" --no-org --json signup --email mcport-qa@example.test \
+  --carbon-id c:mcportqa --display-name 'MCPort QA' --timezone Etc/UTC
 # Resume the returned signup session using its session ID:
-iam --test "$ENV_ID" --json signup --session-id "$SESSION_ID" \
-  --email-code 000000 --carbon-id mcportqa \
-  --display-name 'MCPort QA' --timezone Etc/UTC
-iam --test "$ENV_ID" org create tos --name 'MCPort acceptance'
-iam --test "$ENV_ID" --org tos silicon create mcportqa \
+iam --test "$ENV_ID" --no-org --json signup --session-id "$SESSION_ID" \
+  --email-code 000000
+iam --test "$ENV_ID" --no-org org create tos --name 'MCPort acceptance'
+iam --test "$ENV_ID" --org tos silicon create si:mcportqa \
   --display-name 'MCPort QA Silicon' --job-description 'Exercise isolated MCPort access'
 ```
 

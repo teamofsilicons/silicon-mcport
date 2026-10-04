@@ -1,25 +1,31 @@
 # Release readiness — observed 2026-10-04
 
-The previous native candidates below verify `1f334d9d45f24a89bd4f4775a02d8e1d80f7c2ce`. Subsequent compact-ID, hosted CLI-default and Vercel changes have passed local checks and require fresh native candidates. The public repository, AWS host and private Honeycomb registration now exist; application cutover and live acceptance are still in progress.
+The website, AWS backend and installed `mcport` CLI are live. Real cloud, local HTTP and local stdio calls passed, including a genuine IAM Silicon on AWS using a Carbon's local Mac MCP and losing access after revocation. All six Rust packages are published at `0.1.0`. Honeycomb distribution remains private; the remaining provider and publication gates are listed below.
 
 ## Current external state
 
 | Check | Observed result |
 |---|---|
-| Checkout | Reviewed source is committed and pushed through `1f334d9d45f24a89bd4f4775a02d8e1d80f7c2ce`; `origin` is HTTPS. The current development, backend and six-platform runs all target that exact revision. |
+| Deployed revisions | Frontend and six-platform CLI: `7d96ca6bf2a8025d7b98206df4d29a4394a208c0`. Backend: `3400f4e2e70f0bfbc26409b8f6e56884c2efbc37`. The later backend fixes do not change published client/CLI behavior. |
 | GitHub repository | `teamofsilicons/silicon-mcport` is `PUBLIC`, as requested. Tracked content and prior Git blobs were checked for credentials before changing visibility. |
 | GitHub identity/capability | `saket1225` is the active CLI identity; organization membership is active/admin, and GraphQL reports `viewerCanCreateRepositories: true`. Existing token scopes include `repo` and `workflow`. No token values were printed. |
-| Organization Actions policy | Reading the Actions policy returned 403 because the token lacks `admin:org`. Repository creation capability is verified; organization Actions policy/budget is not. This does not establish that running Actions is blocked. |
 | Honeycomb CLI/context | Installed `honeycomb 0.6.1`; selected backend is `https://backend.honeycomb.teamofsilicons.com`, home `/Users/codanium`, production context. |
 | Live Honeycomb authority | `c:saket` is authenticated with `tos:org_owner`. Organization inventory was checked before creating `mcport`; registration is accepted, configuration revision1, IAM revision7, state `active`, visibility `private`. One-time credentials were captured in protected operator storage. |
-| Direct IAM CLI | Production login is authenticated as `c:saket`. MCPort app-bound Carbon/Silicon login still needs live verification after deployment. |
-| Development checks | [Run 37162702968](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37162702968) passed at `1f334d9`: 82 Rust tests, strict Clippy/formatting, 24 web tests/build, 16 packaging tests, 3 fixture tests and 64 actual-binary E2E assertions. |
-| Backend candidate | [Run 37162713767](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37162713767) passed at `1f334d9`: native AL2023 ARM64 tests/build, exact-revision startup/shutdown smoke and website assembly. Downloaded archive SHA-256 `b136ca4082f0fe2f44e744a4828755c7796706f4cab377dd6af56dc774e9d8a4`, all 14 file checksums, build provenance and read-only installer validation passed (`apply: false`). Receipt: `.local/backend-candidate-1f334d9/verification.json`. It has not been deployed. |
-| Six-platform candidate | [Run 37162712569](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37162712569) passed all six native jobs and final assembly at `1f334d9`. The downloaded archive passed its checksum and installed official Honeycomb 0.6.1 validation (`valid: true`, no errors). Fresh Honeycomb installation and public release remain unverified. |
+| Live IAM login | Fresh production CLI and normal website login authenticated `c:saket` in `tos`. Genuine isolated IAM SLTs authenticated Carbon `c:mcportqa` on the Mac and Silicon `si:mcportqa` on AWS. Public login rejects actor IDs; a test session cannot authenticate in production. |
+| Development checks | [Run 37183030713](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37183030713) passed at `3400f4e`, including 66 actual-binary E2E assertions, 49 server tests, formatting and strict Clippy. The local restart suite passed all 13 checks. |
+| Backend candidate and deployment | [Run 37183064039](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37183064039) passed native AL2023 ARM64 build/tests and exact-revision startup/shutdown smoke at `3400f4e`. Archive SHA-256 `3a4782e6b7ef65ee9cbbf0a142fe0e4ae6a3620531de4e402d295aac04526c6b`; all 14 payload hashes, provenance and installer validation passed. Installed through SSM; private/public HTTPS health and real IAM/provider calls passed. |
+| Six-platform package | [Run 37178993483](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37178993483) passed all six native jobs and assembly at `7d96ca6`. Official Honeycomb 0.6.1 validation passed. Private release `0.1.0` is installed as the normal `mcport` command; installed macOS ARM64 bytes match CI. Public approval remains pending. |
+| Rust publication | `mcport-core`, `mcport-mcp`, `mcport-api`, `mcport-daemon`, `mcport-client` and `mcport-cli` version `0.1.0` are available in the registry and sparse index. Downloaded archives match the audited source and checksums. docs.rs pages remain unverified. |
+| Space Station | Live table `tos.mcport` received 14 events: backend7, CLI2, daemon1, web4. Calls `cIJ`, `oHG`, `0GD` and `CFA` each matched two correlation records. The spool has 14 acknowledged and zero pending; no fresh TLS panic or delivery warning. Test-world and other non-production counts are zero. |
+| Recovery | A complete stopped-state backup was uploaded to encrypted, versioned private S3, downloaded and restored into an isolated directory. Database integrity, allocator/replay ledgers and all 25 encrypted records passed using the matching restored key. The restored service was not started. |
 
-AWS stack `silicon-mcport-production` is complete; ARM64 instance `i-0bf2c2f54fce6cfca` has passed SSM/cloud-init checks and uses Elastic IP `100.57.137.244`. Its dedicated runtime secret is in Secrets Manager. Vercel project `silicon-mcport` is linked, with the production backend origin configured and `mcport.teamofsilicons.com` attached. See [cutover instructions](../deploy/aws/deploy.md). Infrastructure readiness does not prove application behavior.
+AWS stack `silicon-mcport-production` is complete; ARM64 instance `i-0bf2c2f54fce6cfca` uses Elastic IP `100.57.137.244`, encrypted storage, SSM and no SSH ingress. MCPort binds only to loopback behind Caddy. The [backend](https://backend.mcport.teamofsilicons.com/health) and [Vercel website](https://mcport.teamofsilicons.com) both passed normal TLS verification. DNS added only the two MCPort records; all 102 existing Namecheap records and mail mode were preserved and compared after the change. Vercel API responses are private/no-store; deep links, asset cache headers and missing-asset 404s passed. See [deployment instructions](../deploy/aws/deploy.md).
 
-Current local gates passed: 92 Rust tests plus2 doctests, strict workspace Clippy/formatting,16 packaging tests,3 fixture tests,30 web tests/build and65 actual-binary E2E assertions. Manual compact-ID checks preserved all9 legacy connections, exercised delete/nonreuse and keyed replay across restart, and confirmed that replay did not repeat the provider action. Protected receipt: `.local/e2e/compact-ids/proof.json`.
+Live manual proof covers Cloudflare discovery/search, file/stdin input and idempotent replay, verified structured-result download, production browser execution, official filesystem write/read, global-deny precedence and a shared local HTTP account. Final production calls with the installed CLI are `cIJ` (cloud) and `oHG` (local); the website completed `CFA` after the final backend update. In the genuine isolated IAM world, the AWS Silicon called the Mac's shared account (`2LS`), wrote/read an actual Mac file (`EKP`/`QJM`), then lost both execution and previous-result access when revoked. Local HTTP authentication uses a controlled provider. See [manual verification](testing/manual.md) for evidence and boundaries.
+
+Honeycomb's backend participant registry includes MCPort and its dedicated lifecycle secret. App-owned attachment completed for test world `7157c709-82fc-4ae7-9199-dfc417e1a52e`; its own IAM application secret is installed only in that world's map. Production credentials are never a fallback. Credential receipts remain in protected ignored storage.
+
+Manual compact-ID checks preserved all 9 legacy connections, exercised delete/nonreuse and keyed replay across restart, and confirmed that replay did not repeat the provider action. Protected receipt: `.local/e2e/compact-ids/proof.json`.
 
 ## Reproducing the six native CI results
 
@@ -39,7 +45,7 @@ gh run download <run-id> --repo teamofsilicons/silicon-mcport \
 
 The repository is public. Native workflow dispatch alone does not tag, upload to Honeycomb, publish crates, or deploy a backend.
 
-Each native job tests and executes the produced CLI before staging it. Assembly requires all six archives, checks binary CPU/format, hashes and permissions again, and emits `mcport-honeycomb.tar.gz`. The final job installs the published official `silicon-honeycomb-cli` version 0.6.1 and runs `honeycomb validate` before uploading the candidate. Older Linux/glibc compatibility is not established by Ubuntu 24.04 runs.
+Each native job tests and executes the produced CLI before staging it. Assembly requires all six archives, checks binary CPU/format, hashes and permissions again, and emits `mcport-honeycomb.tar.gz`. The final job installs the published official `silicon-honeycomb-cli` version 0.6.1 and runs `honeycomb validate` before uploading the candidate. The initial Linux package requires glibc 2.39. The exact ARM64 binary was rejected by the AL2023/glibc 2.34 loader; use a compatible userland such as Ubuntu 24.04. This limitation applies to the CLI package, not the separately built native AL2023 backend.
 
 ## Correct Honeycomb artifact contract
 
@@ -47,7 +53,7 @@ Each native job tests and executes the produced CLI before staging it. Assembly 
 
 The existing MCPort manifest fields match the contract: `format_version: 1`, optional identity `app_id: mcport`, version `0.1.0`, command mapping `mcport: main`, and six canonical Honeycomb target names, each with its own executable path. The daemon is embedded in the CLI binary.
 
-Native handoff ZIPs are intermediate artifacts only. Final packaging uses deterministic tar/gzip, puts provenance outside the archive, and enforces Honeycomb's 512 MiB compressed / 2 GiB expanded limits. The downloaded current-revision archive has SHA-256 `c02422bfaf2b243404433b95702f3eb8937aabb28c40627e88d81f740d4b5752`, matching its supplied checksum; official Honeycomb 0.6.1 accepted all six targets. Its macOS ARM64 executable exactly matches the CI binary manually tested from a fresh home. Receipt: `.local/release-candidate-1f334d9/proof.json`; see [manual verification](testing/manual.md).
+Native handoff ZIPs are intermediate artifacts only. Final packaging uses deterministic tar/gzip, puts provenance outside the archive, and enforces Honeycomb's 512 MiB compressed / 2 GiB expanded limits. The uploaded `7d96ca6` archive has SHA-256 `b2c1ba2678f2a22bc3f661534c668e889fd9f4bac35fcaa1cd335261fc53c594`. Its installed macOS ARM64 executable has SHA-256 `a88d08395c0c692361f69b713903cc22bf5b1c5dc0c49a44468746dea93afca1`, exactly matching CI and the manually tested candidate. Receipts: `.local/release-candidate-7d96ca6/proof.json`, `.local/deploy/honeycomb/private-release-upload.json`, `.local/deploy/honeycomb/normal-install.json` and `.local/live-manual/receipts/final-production-proof.json`.
 
 To repeat the downloaded candidate checks:
 
@@ -89,7 +95,7 @@ After real IAM/backend/client verification and accepted configuration:
 honeycomb --idempotency-key <stable-upload-key> releases upload mcport \
   mcport-honeycomb.tar.gz --channel prod --revision <current-app-revision>
 honeycomb releases list mcport --channel prod --include-private --json
-honeycomb install 'mcport@0.1.0'
+honeycomb install mcport --version 0.1.0
 mcport iam --json
 mcport login '<fresh MCPort-app-bound SLT>'
 mcport login status --json
@@ -104,8 +110,15 @@ Gateway CRUD, IAM SLT sessions, tools/resources/prompts/completions, tool policy
 
 Bundled offline documentation is available as `mcport docs [usage|development]`, including stable JSON topic/content output. Command help includes purposes, input/flag descriptions, examples and related commands. Pending-call recovery names the real `mcport activity show <call-id>` command.
 
-Daemon completion events do reach Space Station through `execution::finish → record_execution` with source `daemon`; this preserves the invocation's opted-out flag and current environment/generation checks. Its local tracing logs alone were not that telemetry path. Actual production Space Station delivery requires configured table keys and live verification.
+Daemon completion events reach Space Station through `execution::finish → record_execution` with source `daemon`; this preserves the invocation's opted-out flag and current environment/generation checks. Production delivery from all four sources was verified at watermark14 after fixing startup's competing Rustls providers. Query proof: `.local/deploy/spacestation/verification/final-3400f4e/proof.json`; runtime/spool proof: `.local/deploy/aws/install-3400f4e2e70f0bfbc26409b8f6e56884c2efbc37/telemetry-recovery.json`. No raw provider arguments, results or credentials were queried or printed.
 
 Application login uses IAM Carbon/Silicon sessions in authorized organization contexts. The user explicitly excluded MCPort API keys. Upstream provider credentials remain separate connection configuration; IAM application-verification keys do not grant user or connection permissions.
 
-The current CLI source defaults to `https://backend.mcport.teamofsilicons.com`; explicit `--backend`, `MCPORT_URL` and saved configuration still override it. Fresh-profile precedence and real loopback discovery tests passed. The new native release must include this change. Published repository/docs/crates links and production Postmark delivery are not proven by local tests. The authoritative [ready-application guide](https://docs.honeycomb.teamofsilicons.com/guides/team-of-silicons-ready-applications/) requires the real discovery → installation → first useful command journey, both identity types and approval completion; those external release gates remain open.
+The installed CLI defaults to `https://backend.mcport.teamofsilicons.com`; explicit `--backend`, `MCPORT_URL` and saved configuration still override it. Fresh-profile precedence and production discovery passed. MCPort does not issue application API keys.
+
+## Remaining acceptance gates
+
+- Configure and verify production Postmark report delivery with a verified sender. Provider access is pending; no report email has been sent.
+- Complete Honeycomb publication approval. The private release is installed and reviewable; no reviewer request has been sent. Rust package publication is complete, while docs.rs rendering remains unverified.
+- A useful Figma design read still requires an accessible file and appropriate Dev Mode entitlement. Six-tool discovery and permission-error forwarding passed; no successful design read is claimed.
+- Real provider OAuth consent and manual installation on every native target remain unverified. Controlled shared/per-user OAuth checks and all six native CI execution checks passed; manual journeys cover macOS ARM64 and Linux ARM64 with Ubuntu24 userland.

@@ -53,6 +53,8 @@ The website includes actual MIT-licensed [Arc UI](https://uiarc.dev/) components
 
 ## Distribution status
 
-This checkout has verified development candidates: all six native CLI targets passed CI tests and executable smoke checks, the combined archive passed official Honeycomb validation, and an AL2023 ARM64 backend candidate passed its build and startup/shutdown checks. The CI-produced Mac CLI was manually exercised through all three MCP transports. See [release readiness](docs/release-readiness.md) for exact revisions and evidence.
+The [website](https://mcport.teamofsilicons.com) and AWS backend are live. All six native CLI targets passed CI tests and executable smoke checks; the combined archive passed official Honeycomb validation and is installed privately as `mcport`. Real cloud, local HTTP and local stdio calls passed, including an IAM Silicon on AWS using a Carbon's local Mac MCP, writing/reading an actual file, and losing access immediately after revocation. See [release readiness](docs/release-readiness.md) for exact revisions, evidence and remaining acceptance gates.
 
-Honeycomb registration, hosted backend configuration, public repository/docs URLs, registry publication, fresh Honeycomb installation and production approvals remain unverified. The candidates have not been deployed or publicly released.
+The six Rust packages are published at `0.1.0`, including the [CLI](https://crates.io/crates/mcport-cli/0.1.0) and [client library](https://crates.io/crates/mcport-client/0.1.0). Registry downloads and source checksums were verified; docs.rs rendering is still pending verification.
+
+The initial Linux CLI binaries require glibc 2.39 (for example, Ubuntu 24.04); they do not run natively on Amazon Linux 2023/glibc 2.34. The native AWS backend is built separately for AL2023 ARM64. macOS and Windows packages are also available in the validated six-target archive. Honeycomb public approval and provider-specific readiness are tracked separately from public GitHub visibility.
