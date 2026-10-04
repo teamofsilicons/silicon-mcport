@@ -133,12 +133,40 @@ def validate_runtime_locations(path):
         raise ValueError("Runtime must explicitly set the service's fixed MCPORT_DATA_DIR and MCPORT_BIND")
 
 
-def validate_state_tree(path):
-    if path.is_symlink() or not path.is_dir():
+def validate_state_tree(path, telemetry_uid=None):
+    if not stat.S_ISDIR(path.lstat().st_mode):
         raise ValueError("State directory must not be a symlink")
+    sockets = []
     for item in path.rglob("*"):
-        if item.is_symlink() or not (item.is_file() or item.is_dir()):
-            raise ValueError("State backup refuses symlinks and special files")
+        info = item.lstat()
+        if stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode):
+            continue
+        parts = item.relative_to(path).parts
+        if (stat.S_ISSOCK(info.st_mode) and telemetry_uid is not None and info.st_uid == telemetry_uid
+                and len(parts) == 3 and parts[0] == "telemetry"
+                and re.fullmatch(r"[0-9a-f]{64}", parts[1]) and parts[2] == "daemon.sock"):
+            sockets.append((item, info))
+        else:
+            raise ValueError("State backup refuses symlinks, unexpected special files and untrusted telemetry sockets")
+    return sockets
+
+
+def service_stopped():
+    state = command("systemctl", "show", "mcport.service", "--property=ActiveState", "--value", check=False).stdout.decode().strip()
+    pid = command("systemctl", "show", "mcport.service", "--property=MainPID", "--value", check=False).stdout.decode().strip()
+    return state in {"inactive", "failed"} and pid == "0"
+
+
+def remove_stopped_telemetry_sockets(path, telemetry_uid):
+    # Called only inside apply's install lock, after stopping the service. Validate
+    # the entire tree first so an unrelated unsafe entry cannot cause partial cleanup.
+    if not service_stopped():
+        raise RuntimeError("Backend stop could not be confirmed; telemetry sockets were not removed")
+    for item, expected in validate_state_tree(path, telemetry_uid):
+        current = item.lstat()
+        if (current.st_mode, current.st_uid, current.st_dev, current.st_ino) != (expected.st_mode, expected.st_uid, expected.st_dev, expected.st_ino):
+            raise RuntimeError("Telemetry socket changed during stopped-state cleanup")
+        item.unlink()
 
 
 def root_directory(path, private=False):
@@ -193,7 +221,7 @@ def apply(metadata, members, public_health_url):
     account = pwd.getpwnam("mcport")
     regular_private(RUNTIME)
     validate_runtime_locations(RUNTIME)
-    validate_state_tree(DATA)
+    validate_state_tree(DATA, account.pw_uid)
     if DATA.stat().st_uid != account.pw_uid or stat.S_IMODE(DATA.stat().st_mode) & 0o077:
         raise ValueError("/var/lib/mcport must be owned by mcport with mode 0700")
     for parent in (PREFIX, PREFIX / "releases", BACKUPS):
@@ -215,10 +243,10 @@ def apply(metadata, members, public_health_url):
         raise ValueError("Immutable release already exists; select another revision")
     with (PREFIX / "install.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        install_release(metadata, members, public_health_url, release, previous)
+        install_release(metadata, members, public_health_url, release, previous, account.pw_uid)
 
 
-def install_release(metadata, members, public_health_url, release, previous):
+def install_release(metadata, members, public_health_url, release, previous, telemetry_uid=None):
     current = PREFIX / "current"
     staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=PREFIX / "releases"))
     try:
@@ -248,11 +276,11 @@ def install_release(metadata, members, public_health_url, release, previous):
     backup.mkdir(mode=0o700)
     if UNIT.exists() or service_state not in {"", "inactive", "failed"}:
         command("systemctl", "stop", "mcport.service")
-    service_state = command("systemctl", "show", "mcport.service", "--property=ActiveState", "--value", check=False).stdout.decode().strip()
-    if service_state not in {"", "inactive", "failed"}:
+    if not service_stopped():
         raise RuntimeError("Backend is still running; no state backup or switch performed")
     switched = False
     try:
+        remove_stopped_telemetry_sockets(DATA, telemetry_uid)
         validate_state_tree(DATA)
         shutil.copytree(DATA, backup / "data")
         shutil.copy2(RUNTIME, backup / "runtime.env")
@@ -280,8 +308,7 @@ def install_release(metadata, members, public_health_url, release, previous):
     except Exception:
         if switched:
             command("systemctl", "stop", "mcport.service", check=False)
-            state = command("systemctl", "show", "mcport.service", "--property=ActiveState", "--value", check=False).stdout.decode().strip()
-            if state not in {"inactive", "failed"}:
+            if not service_stopped():
                 raise RuntimeError("Cutover failed and service stop could not be confirmed. Candidate link/unit retained. Do not restore data while a writer may be running; inspect systemd and backup " + str(backup))
             if previous:
                 replace_link(current, previous)
