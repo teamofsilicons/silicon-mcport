@@ -3,6 +3,8 @@ name = "mcport-daemon"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository.workspace = true
+documentation.workspace = true
 description = "Outbound local MCP host connector for Silicon MCPort"
 
 [dependencies]

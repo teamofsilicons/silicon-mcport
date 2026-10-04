@@ -7,6 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/teamofsilicons/silicon-mcport"
+documentation = "https://github.com/teamofsilicons/silicon-mcport/tree/main/docs"
 
 [profile.release]
 lto = "thin"
