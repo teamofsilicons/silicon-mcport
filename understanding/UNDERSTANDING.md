@@ -215,7 +215,7 @@ The last command requires a separately configured `docs` connection in that test
 
 `mcport report "<report-message>" [--pr "<pr-link>"]` submits a bug report. Reports without a PR are valid; show the repository link and invite the caller to reproduce, patch and submit a PR. MCPort is open source, so provide enough information for Carbons and Silicons to investigate and contribute.
 
-For each submitted report, the backend uses Postmark to email `saketdev12@gmail.com`, `shubhastro2@gmails.com` and `bugs@teamofsilicons.com`. Include the report and optional PR without attaching credentials or unrelated private data.
+For each submitted report, the backend uses Postmark to email both report maintainers at their approved Gmail addresses. Include the report and optional PR without attaching credentials or unrelated private data.
 
 # Docs
 

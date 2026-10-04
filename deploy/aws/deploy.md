@@ -3,12 +3,19 @@
 Provisioned host: `i-0bf2c2f54fce6cfca`, region `us-east-1`, operator profile
 `silicon-production`, Elastic IP `100.57.137.244`. Artifact bucket:
 `silicon-mcport-production-artifacts-ezytfdmvjxeg`. On October 4, 2026 the native
-backend `66c6e0c3775f46a65827ce0cabc8945cfe0e5b2b` was installed through SSM and
+backend `29fe5b50e4625cda2d3964ed243afe5cba3422f3` was installed through SSM and
 passed exact-revision private/public health plus real provider calls. The cutover
-preserved runtime secrets, encryption keys and the telemetry spool; its queued
-events were acknowledged after fresh calls through all three MCP transports.
+preserved runtime secrets, encryption keys and the telemetry spool. The preceding
+`66c6e0c` upgrade verified all three transports and acknowledged telemetry; the
+latest server-only update corrects report recipients and acceptance terminology.
 The new installer handled the existing telemetry socket automatically; no manual
 pre-stop or socket removal was needed.
+
+Postmark is configured using the operator-approved sender
+`silicon@teamofsilicons.com`. Its credential remains in Secrets Manager and the
+protected backend environment. Reports target the two approved Gmail recipients;
+provider API acceptance is recorded as `delivery_accepted`, separately from
+recipient delivery evidence.
 
 Backend: `https://backend.mcport.teamofsilicons.com`; frontend:
 `https://mcport.teamofsilicons.com` on Vercel. Namecheap access was enabled and the

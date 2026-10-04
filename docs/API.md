@@ -105,7 +105,7 @@ Connector methods use a host bearer token, never a user session. Its host ID and
 
 - GET/PATCH `/settings` → `{telemetry:boolean}`; default true, scoped by actor/organization/environment. PATCH accepts that same shape.
 - POST `/telemetry` `{source,operation,step,outcome,progress?,correlation_id?,duration_ms?}` → `{recorded:boolean}`. Sources are `web`, `cli`, `daemon`, `backend`, or `rust-client`. Operations and steps use fixed allowlists, progress is 0–1, correlation IDs are UUIDs, and duration is bounded. No arbitrary tool input, result, credential or free-text event payload is accepted. Opt-out and absent environment-specific delivery configuration return `recorded:false`.
-- POST `/reports` `{message,pr?:string}` → `{id,status,delivery_detail,repository_url}`. Explicit user text only; never automatic credentials/logs. A production durable outbox reports `delivery_pending` or `delivery_failed`, not a false sent acknowledgement. Testing reports return `test_recorded` and never enter production mail delivery.
+- POST `/reports` `{message,pr?:string}` → `{id,status,delivery_detail,repository_url}`. Explicit user text only; never automatic credentials/logs. A production durable outbox reports `delivery_pending` or `delivery_failed`. Successful Postmark acceptance becomes terminal `delivery_accepted`; this confirms provider acceptance, not delivery to each inbox. Testing reports return `test_recorded` and never enter production mail delivery.
 
 ## Honeycomb control plane
 
