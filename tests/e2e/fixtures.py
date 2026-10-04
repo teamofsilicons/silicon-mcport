@@ -49,7 +49,7 @@ class Fixtures:
     def mint_slt(self, role, environment="production"):
         if role not in ACTORS or environment not in ("production", TEST_ID):
             raise ValueError("Unknown fixture role or environment")
-        slt = "slt_fixture_" + role + "_" + uuid.uuid4().hex
+        slt = "oac_" + secrets.token_urlsafe(32)
         self.slts[slt] = {"actor": ACTORS[role].copy(), "environment": environment, "expires": time.time() + 300}
         return slt
 

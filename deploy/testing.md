@@ -62,8 +62,7 @@ iam --test "$ENV_ID" --org tos silicon create mcportqa \
 ```
 
 Capture the Silicon creation response privately: it returns its credential once.
-Use one reachable organization for each actor because MCPort's test actor-ID login
-does not supply an explicit IAM organization selector. Creating `tos` first also
+Select `tos` when each actor obtains its MCPort SLT through IAM. Creating `tos` first
 preserves a login-capable test owner: automatic app import into an empty world
 would otherwise create the owning organization with a suspended fixture owner.
 
@@ -114,14 +113,17 @@ retain it until a later lifecycle operation has persisted that credential. Remov
 an override does not revoke a credential previously stored in the same world.
 Retire the world through Honeycomb to disable testing access.
 
-In separate fresh MCPort homes, verify both identities with test-issued SLTs or
-the verified test-only actor shortcut:
+Authenticate each test actor directly with IAM in this world and obtain an
+app-bound MCPort SLT selecting `tos`. In separate fresh MCPort homes, verify both
+identities using those issued codes. A world UUID only selects the environment;
+MCPort rejects identity selectors such as `c:mcportqa` and `si:mcportqa` as login
+credentials, even in testing:
 
 ```sh
-mcport --test "$ENV_ID" login c:mcportqa
+mcport --test "$ENV_ID" login "$CARBON_MCPORT_SLT"
 mcport --test "$ENV_ID" login status --json
 # In the Silicon's separate home:
-mcport --test "$ENV_ID" login si:mcportqa
+mcport --test "$ENV_ID" login "$SILICON_MCPORT_SLT"
 mcport --test "$ENV_ID" login status --json
 ```
 

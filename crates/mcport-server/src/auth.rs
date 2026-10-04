@@ -378,19 +378,25 @@ pub struct LoginInput {
     pub identity_kind: Option<String>,
 }
 pub async fn login_inner(app: &App, headers: &HeaderMap, input: LoginInput) -> Result<Session> {
-    if input.slt.is_empty() || input.slt.len() > 8192 {
-        return Err(Error::bad("Provide an app-bound short-lived token."));
+    // IAM's test plane also accepts actor selectors when its privileged client
+    // submits a non-code value. Public callers possess neither that authority nor
+    // the test root key: a world UUID and identity must never become a session.
+    let issued_code = input.slt.strip_prefix("oac_").is_some_and(|code| {
+        code.len() == 43
+            && code
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    });
+    if !issued_code {
+        return Err(Error::new(
+            400,
+            "invalid_login_token",
+            "MCPort login requires an IAM-issued app-bound short-lived token.",
+            "Obtain a new MCPort SLT from IAM for this account, organization and environment. Identity and test environment IDs are not login credentials.",
+        ));
     }
     let env = app.environment(&environment_header(headers)?)?;
-    // IAM permits reusable actor IDs only in verified test environments.
-    // Actual SLTs remain single-use even while IAM caches an idempotent exchange.
-    let test_actor =
-        env.id != "production" && (input.slt.starts_with("c:") || input.slt.starts_with("si:"));
-    let exchange_key = if test_actor {
-        id()
-    } else {
-        hash(&format!("{}:{}", env.id, input.slt))
-    };
+    let exchange_key = hash(&format!("{}:{}", env.id, input.slt));
     let lock = app.lock(&format!("login-exchange:{exchange_key}"));
     let _guard = lock.lock().await;
     if let Some(exchange) = app
@@ -468,23 +474,21 @@ pub async fn login_inner(app: &App, headers: &HeaderMap, input: LoginInput) -> R
         actor,
         environment: env.id.clone(),
     };
-    if !test_actor {
-        app.store.put(
-            "login_exchange",
-            &exchange_key,
-            &env.id,
-            &s.actor.org_id,
-            &s.actor.principal_id,
-            None,
-            &LoginExchange {
-                family: s.family,
-                generation: s.generation,
-                expires_at: now() + 30,
-                session: session.clone(),
-            },
-            Some(0),
-        )?;
-    }
+    app.store.put(
+        "login_exchange",
+        &exchange_key,
+        &env.id,
+        &s.actor.org_id,
+        &s.actor.principal_id,
+        None,
+        &LoginExchange {
+            family: s.family,
+            generation: s.generation,
+            expires_at: now() + 30,
+            session: session.clone(),
+        },
+        Some(0),
+    )?;
     Ok(session)
 }
 fn save_refresh(app: &App, token: &str, s: &StoredSession) -> Result<()> {
@@ -857,6 +861,7 @@ mod tests {
     #[derive(Default)]
     struct IamFixture {
         active: AtomicBool,
+        requests: AtomicUsize,
         exchanges: AtomicUsize,
         block_refresh: AtomicBool,
         refresh_started: Notify,
@@ -872,6 +877,7 @@ mod tests {
         headers: HeaderMap,
         body: String,
     ) -> Json<Value> {
+        fixture.requests.fetch_add(1, Ordering::SeqCst);
         assert!(
             headers
                 .get(header::AUTHORIZATION)
@@ -880,9 +886,18 @@ mod tests {
                 .unwrap()
                 .starts_with("Basic ")
         );
-        if uri.path().ends_with("/oauth/introspect") {
+        let testing = headers.get("x-testing-environment-key").is_some();
+        if uri.path().ends_with("/application/testing-context") {
+            assert!(testing);
+            Json(
+                json!({"environment_id":TEST_ENV,"application":{"app_id":"mcport","base_url":"http://127.0.0.1:4380","app_scope":{"iam":["self.identity.read"],"external":[]},"webhook_scope":[],"testing_idle_days":30}}),
+            )
+        } else if uri.path().ends_with("/oauth/introspect") {
             let mut result = introspection();
             result["active"] = json!(fixture.active.load(Ordering::SeqCst));
+            if testing {
+                result["authorization"]["testing_environment_id"] = json!(TEST_ENV);
+            }
             Json(result)
         } else if uri.path().ends_with("/app-auth/tokens") {
             fixture.exchanges.fetch_add(1, Ordering::SeqCst);
@@ -913,6 +928,7 @@ mod tests {
         let mut config = crate::state::Config::from_env();
         config.app_id = "mcport".into();
         config.app_secret = "fixture-app-secret".into();
+        config.test_app_secrets = "{}".into();
         config.data_dir = directory.path().into();
         config.iam_url = format!("http://{}", listener.local_addr().unwrap());
         config.iam_web_url = "https://iam.example".into();
@@ -932,17 +948,135 @@ mod tests {
         );
         headers
     }
+    const TEST_ENV: &str = "11111111-1111-4111-8111-111111111111";
+    fn issued_slt(label: &str) -> String {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        format!(
+            "oac_{}",
+            URL_SAFE_NO_PAD.encode(hex::decode(hash(label)).unwrap())
+        )
+    }
+    fn provision_test_world(app: &App) {
+        app.store
+            .put(
+                "environment",
+                TEST_ENV,
+                TEST_ENV,
+                "tos",
+                "",
+                None,
+                &Environment {
+                    id: TEST_ENV.into(),
+                    state: "active".into(),
+                    generation: 1,
+                    control_revision: 1,
+                    app_secret: "fixture-test-secret".into(),
+                    iam_key: Some("0123456789abcdefghijklmnopqrstuv".into()),
+                },
+                None,
+            )
+            .unwrap();
+    }
     async fn sign_in(app: &App, slt: &str) -> Session {
         login_inner(
             app,
             &HeaderMap::new(),
             LoginInput {
-                slt: slt.into(),
+                slt: issued_slt(slt),
                 identity_kind: Some("carbon".into()),
             },
         )
         .await
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn public_login_rejects_actor_ids_before_iam_or_session_creation() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+        let (app, _directory, iam, task) = fixture().await;
+        provision_test_world(&app);
+        for environment in [None, Some(TEST_ENV)] {
+            for selector in [
+                "c:alice",
+                "si:worker",
+                " c:alice",
+                "c:alice[tos]",
+                TEST_ENV,
+                "oac_not-a-code",
+            ] {
+                let mut request = Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header("content-type", "application/json");
+                if let Some(environment) = environment {
+                    request = request.header("X-MCPort-Test", environment);
+                }
+                let response = crate::router(app.clone())
+                    .oneshot(
+                        request
+                            .body(Body::from(json!({"slt":selector}).to_string()))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), 400);
+                let body: Value =
+                    serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap())
+                        .unwrap();
+                assert_eq!(body["error"]["code"], "invalid_login_token");
+            }
+        }
+        assert_eq!(iam.requests.load(Ordering::SeqCst), 0);
+        assert_eq!(iam.exchanges.load(Ordering::SeqCst), 0);
+        assert!(
+            app.store
+                .list::<StoredSession>("session", None)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            app.store
+                .list::<LoginExchange>("login_exchange", None)
+                .unwrap()
+                .is_empty()
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn issued_test_slt_still_uses_iam_and_creates_only_a_test_session() {
+        let (app, _directory, iam, task) = fixture().await;
+        provision_test_world(&app);
+        let mut headers = HeaderMap::new();
+        headers.insert("X-MCPort-Test", TEST_ENV.parse().unwrap());
+        let session = login_inner(
+            &app,
+            &headers,
+            LoginInput {
+                slt: issued_slt("test-issued-code"),
+                identity_kind: Some("carbon".into()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(session.environment, TEST_ENV);
+        assert_eq!(session.actor.principal_id, "c:alice");
+        assert_eq!(iam.exchanges.load(Ordering::SeqCst), 1);
+        assert!(
+            app.store
+                .list::<StoredSession>("session", Some("production"))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            app.store
+                .list::<StoredSession>("session", Some(TEST_ENV))
+                .unwrap()
+                .len(),
+            1
+        );
+        task.abort();
     }
 
     #[tokio::test]
@@ -1003,7 +1137,7 @@ mod tests {
                 &app,
                 &HeaderMap::new(),
                 LoginInput {
-                    slt: "single-use-code".into(),
+                    slt: issued_slt("single-use-code"),
                     identity_kind: None
                 }
             )
@@ -1130,7 +1264,7 @@ mod tests {
                 headers.clone(),
                 Json(BrowserComplete {
                     state: state.clone(),
-                    slt: "browser-code".into()
+                    slt: issued_slt("browser-code")
                 })
             ),
             browser_complete(
@@ -1138,7 +1272,7 @@ mod tests {
                 headers.clone(),
                 Json(BrowserComplete {
                     state,
-                    slt: "browser-code".into()
+                    slt: issued_slt("browser-code")
                 })
             )
         );

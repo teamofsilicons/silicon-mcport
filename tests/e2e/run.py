@@ -327,6 +327,14 @@ class Journey:
         self.check("IAM revocation checked live on existing gateway session")
         request(self.provider + "/fixture/revoke", {"principal_id": "si:researcher", "revoked": False})
         self.lifecycle("prepare", 1)
+        before = request(self.provider + "/fixture/stats")["requests"]
+        for environment in (None, TEST_ID):
+            for actor in ("c:owner", "si:researcher"):
+                denied = request(self.backend + "/api/v1/auth/login", {"slt": actor},
+                    headers={"X-MCPort-Test": environment} if environment else {}, expected=400)
+                assert denied["error"]["code"] == "invalid_login_token"
+        after = request(self.provider + "/fixture/stats")["requests"]
+        self.check("Carbon and Silicon IDs cannot log in using a world UUID; no IAM exchange occurs", before == after)
         self.login("owner", test=TEST_ID)
         self.check("Test session cannot see production connections", self.cli("owner", "connection", "ls", test=TEST_ID) == [])
         self.cli("owner", "connection", "new", "test-only", "--transport", "http", "--url", self.provider + "/mcp/public", "--visibility", "private", test=TEST_ID)
