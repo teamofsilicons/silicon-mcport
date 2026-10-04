@@ -1,7 +1,7 @@
 use crate::{
     auth::{self, Auth},
     error::{Error, Result},
-    state::{App, hash, id, now},
+    state::{App, hash, now},
 };
 use axum::{
     Json,
@@ -73,7 +73,9 @@ pub fn allowed_tool(app: &App, c: &Connection, a: &Auth, name: &str) -> Result<b
     Ok(!global.is_some_and(|p| !p.policy.enabled) && !personal.is_some_and(|p| !p.policy.enabled))
 }
 pub fn resolve(app: &App, a: &Auth, name: &str, manage: bool) -> Result<Connection> {
-    let mut candidates = if let Some(c) = app.store.get::<Connection>("connection", name)? {
+    let mut candidates = if let Some(c) = app.store.get::<Connection>("connection", name)?
+        && can_use(app, &c, a)?
+    {
         vec![c]
     } else {
         app.store
@@ -97,6 +99,137 @@ pub fn resolve(app: &App, a: &Auth, name: &str, manage: bool) -> Result<Connecti
     }
     Ok(c)
 }
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+
+    #[test]
+    fn accessible_exact_ids_win_and_hidden_ids_do_not_shadow_authorized_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = crate::state::Config::from_env();
+        config.data_dir = dir.path().into();
+        let app = App::new(config).unwrap();
+        let a = Auth {
+            session: serde_json::from_value(json!({
+                "key":"session","family":"family",
+                "actor":{"principal_id":"c:alice","identity_kind":"carbon","org_id":"tos","display_name":"Alice"},
+                "environment":"production","generation":0,"control_revision":0,
+                "iam_access":"fixture","iam_refresh":"fixture","iam_expires":0,"expires_at":0,"refresh_key":null,
+            })).unwrap(),
+        };
+        let template: Connection = serde_json::from_value(json!({
+            "id":"template","name":"template","description":"","org_id":"tos","owner_id":"c:alice",
+            "environment":"production","transport":"http","url":"https://mcp.example/mcp","host_id":null,
+            "command":null,"args":[],"auth_mode":"none","visibility":"private","status":"ready","can_manage":true,
+            "account":null,"created_at":0,"updated_at":0,"version":1,
+        })).unwrap();
+        let put = |c: &Connection| {
+            app.store
+                .put(
+                    "connection",
+                    &c.id,
+                    &c.environment,
+                    &c.org_id,
+                    &c.owner_id,
+                    Some(&c.name),
+                    c,
+                    Some(0),
+                )
+                .unwrap();
+            let h = crate::hosts::HostRecord {
+                host: Host {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    owner_id: c.owner_id.clone(),
+                    org_id: c.org_id.clone(),
+                    environment: c.environment.clone(),
+                    online: false,
+                    last_seen: None,
+                    created_at: 0,
+                },
+                token_hash: "fixture".into(),
+                generation: 0,
+                last_seen: 0,
+                registered: vec![],
+                capabilities: Default::default(),
+            };
+            app.store
+                .put(
+                    "host",
+                    &c.id,
+                    &c.environment,
+                    &c.org_id,
+                    &c.owner_id,
+                    Some(&c.name),
+                    &h,
+                    Some(0),
+                )
+                .unwrap();
+        };
+        for (index, (env, org, owner)) in [
+            ("production", "tos", "c:someone-else"),
+            ("production", "other-org", "c:alice"),
+            ("testing", "tos", "c:alice"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let selector = format!("aB{index}");
+            let hidden = Connection {
+                id: selector.clone(),
+                name: format!("hidden-{index}"),
+                environment: env.into(),
+                org_id: org.into(),
+                owner_id: owner.into(),
+                ..template.clone()
+            };
+            let authorized = Connection {
+                // A legacy UUID remains directly addressable after the upgrade.
+                id: uuid::Uuid::new_v4().to_string(),
+                name: selector.clone(),
+                ..template.clone()
+            };
+            put(&hidden);
+            put(&authorized);
+            assert_eq!(
+                resolve(&app, &a, &selector, false).unwrap().id,
+                authorized.id
+            );
+            assert_eq!(
+                resolve(&app, &a, &authorized.id, true).unwrap().id,
+                authorized.id
+            );
+            assert_eq!(
+                crate::hosts::resolve(&app, &a, &selector).unwrap().host.id,
+                authorized.id
+            );
+        }
+        let exact = Connection {
+            id: "c9Z".into(),
+            name: "exact-id".into(),
+            ..template.clone()
+        };
+        let named = Connection {
+            id: "b8Y".into(),
+            name: exact.id.clone(),
+            ..template
+        };
+        put(&exact);
+        put(&named);
+        assert_eq!(resolve(&app, &a, "c9Z", true).unwrap().id, exact.id);
+        assert_eq!(resolve(&app, &a, "b8Y", true).unwrap().id, named.id);
+        assert_eq!(
+            crate::hosts::resolve(&app, &a, "c9Z").unwrap().host.id,
+            exact.id
+        );
+        assert_eq!(
+            crate::hosts::resolve(&app, &a, "b8Y").unwrap().host.id,
+            named.id
+        );
+    }
+}
+
 pub fn account_status(app: &App, c: &Connection, a: &Auth) -> Result<AccountStatus> {
     if c.auth_mode == "none" {
         return Ok(AccountStatus {
@@ -344,8 +477,8 @@ pub async fn create(
     if let Some(host_id) = &host {
         crate::hosts::resolve(&app, &a, host_id)?;
     }
-    let c = Connection {
-        id: id(),
+    let mut c = Connection {
+        id: String::new(),
         name: input.name,
         description: input.description,
         org_id: a.actor().org_id.clone(),
@@ -365,15 +498,18 @@ pub async fn create(
         updated_at: now(),
         version: 1,
     };
-    app.store.put(
+    let name = c.name.clone();
+    let (c, _) = app.store.create_public(
         "connection",
-        &c.id,
         a.env(),
-        &c.org_id,
-        &c.owner_id,
-        Some(&c.name),
-        &c,
-        Some(0),
+        &a.actor().org_id,
+        &a.actor().principal_id,
+        Some(&name),
+        None,
+        |id| {
+            c.id = id;
+            c
+        },
     )?;
     Ok(Json(json!({"data":view(&app,c,&a)?})))
 }

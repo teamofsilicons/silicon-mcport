@@ -23,3 +23,5 @@ The main flows are connection discovery/search; a three-step connection wizard; 
 Manual release checks must exercise these flows with real backend state and IAM identities. Automated adapter tests cover cookie/identity boundaries, envelope failures, unknown-outcome handling, tool pagination, and refresh serialization; they do not replace manual browser/CLI verification or real-provider testing.
 
 Connection sections and call details have stable URLs; browser back/forward and refresh restore the selected view. Activity opens the full caller-owned invocation, not just its summary. Result files use authenticated bounded downloads, including the active testing environment, with current server permission checks. Safe images/audio can be previewed; SVG/HTML remain downloads. Local result links copied by the daemon are shown as execution-host files.
+
+Vercel deployment uses the explicit build-time `MCPORT_BACKEND_ORIGIN` with `npm run build:vercel`. It produces static Build Output API files and a same-origin `/api` proxy. See [Vercel setup and required origins](../deploy/vercel.md); no backend or deployment domain is selected by the repository.

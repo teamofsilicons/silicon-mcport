@@ -25,6 +25,7 @@ Open `http://127.0.0.1:4381`. Use Carbon login and the fixture IAM consent page.
 For a CLI session, use a fixture SLT printed by the launcher (or obtain a real app-bound SLT from IAM when using a configured deployment):
 
 ```sh
+export MCPORT_URL=http://127.0.0.1:4380
 target/debug/mcport iam --json
 target/debug/mcport login '<app-bound-slt>'
 target/debug/mcport connection new docs --transport http \

@@ -2,7 +2,7 @@
 use crate::{
     auth::{self, Auth},
     error::{Error, Result},
-    state::{App, hash, id, now},
+    state::{App, hash, now},
 };
 use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
@@ -151,8 +151,8 @@ pub async fn report(
         .as_ref()
         .is_some_and(|token| !token.is_empty());
     let testing = auth.env() != "production";
-    let report = Report {
-        id: id(),
+    let mut report = Report {
+        id: String::new(),
         environment: auth.env().into(),
         org_id: auth.actor().org_id.clone(),
         owner_id: auth.actor().principal_id.clone(),
@@ -180,15 +180,17 @@ pub async fn report(
         next_attempt_at: now(),
         created_at: now(),
     };
-    app.store.put(
+    let (report, _) = app.store.create_public(
         "report",
-        &report.id,
-        &report.environment,
-        &report.org_id,
-        &report.owner_id,
+        auth.env(),
+        &auth.actor().org_id,
+        &auth.actor().principal_id,
         None,
-        &report,
-        Some(0),
+        None,
+        |id| {
+            report.id = id;
+            report
+        },
     )?;
     Ok(Json(
         json!({"data":{"id":report.id,"status":report.status,"delivery_detail":report.failure_reason,"repository_url":REPOSITORY}}),

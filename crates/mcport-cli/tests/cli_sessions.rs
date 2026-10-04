@@ -81,6 +81,110 @@ fn output_json(output: Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+fn fresh_command(home: &std::path::Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mcport"));
+    command
+        .env("SILICON_HOME", home)
+        .env_remove("MCPORT_URL")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
+#[test]
+fn fresh_profile_uses_production_and_preserves_backend_override_precedence() {
+    let home = tempfile::tempdir().unwrap();
+    let show = ["config", "show", "--json"];
+    let production = output_json(fresh_command(home.path(), &show).output().unwrap());
+    assert_eq!(
+        production["backend_url"],
+        "https://backend.mcport.teamofsilicons.com"
+    );
+    output_json(
+        fresh_command(
+            home.path(),
+            &[
+                "config",
+                "set",
+                "backend",
+                "http://127.0.0.1:4380",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    let saved = output_json(fresh_command(home.path(), &show).output().unwrap());
+    assert_eq!(saved["backend_url"], "http://127.0.0.1:4380");
+    let environment = output_json(
+        fresh_command(home.path(), &show)
+            .env("MCPORT_URL", "http://127.0.0.1:4382")
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(environment["backend_url"], "http://127.0.0.1:4382");
+    let flag = output_json(
+        fresh_command(
+            home.path(),
+            &[
+                "--backend",
+                "http://127.0.0.1:4383",
+                "config",
+                "show",
+                "--json",
+            ],
+        )
+        .env("MCPORT_URL", "http://127.0.0.1:4382")
+        .output()
+        .unwrap(),
+    );
+    assert_eq!(flag["backend_url"], "http://127.0.0.1:4383");
+    assert_eq!(
+        output_json(fresh_command(home.path(), &show).output().unwrap())["backend_url"],
+        "http://127.0.0.1:4380",
+        "Temporary overrides must not replace the saved development backend"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn saved_and_explicit_backends_still_route_discovery_to_local_fixtures() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backend = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/api/v1/iam",
+        get(|| async { Json(json!({"data":{"app_id":"local-fixture"}})) }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let home = tempfile::tempdir().unwrap();
+    output_json(
+        fresh_command(
+            home.path(),
+            &["config", "set", "backend", &backend, "--json"],
+        )
+        .output()
+        .unwrap(),
+    );
+    for output in [
+        fresh_command(home.path(), &["iam", "--json"])
+            .output()
+            .unwrap(),
+        command(home.path(), &backend, &["iam", "--json"])
+            .output()
+            .unwrap(),
+        command(
+            home.path(),
+            "http://127.0.0.1:1",
+            &["--backend", &backend, "iam", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ] {
+        assert_eq!(output_json(output)["app_id"], "local-fixture");
+    }
+    server.abort();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_cli_refresh_rotates_once_and_test_context_has_no_production_session() {
     let fixture = Fixture::default();

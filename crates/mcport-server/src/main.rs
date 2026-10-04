@@ -7,6 +7,7 @@ mod hosts;
 mod lifecycle;
 mod oauth;
 mod operations;
+mod public_ids;
 mod state;
 mod store;
 use axum::{

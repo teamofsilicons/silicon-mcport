@@ -20,6 +20,8 @@ The repository/package URLs are distribution metadata; check their availability 
 
 Run `cargo run -p mcport-server` from the repository root to serve port 4380. `npm run dev --prefix web` serves port 4381 and proxies `/api`. Production `web/dist` is served by the gateway. The server requires a registered IAM application credential; development without live credentials uses `python3 tests/e2e/serve.py`, whose printed tokens are fixture-only.
 
+The CLI's fresh-profile default is `https://backend.mcport.teamofsilicons.com`. Point development commands at the local service explicitly, for example `MCPORT_URL=http://127.0.0.1:4380 mcport iam --json`. The automated fixture journey supplies its own backend override and temporary home.
+
 ## Configuration and isolation
 
 Use `deploy/environment.example` as the backend configuration reference. Keep the IAM application secret, separate webhook and lifecycle secrets, encryption key, Postmark token and Space Station keys outside repositories and client packages. The backend stores encrypted record bodies; database backups and their encryption key must be recovered together.

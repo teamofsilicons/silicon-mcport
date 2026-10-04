@@ -351,6 +351,14 @@ class Journey:
         self.check("Telemetry can be explicitly disabled", self.cli("owner", "config", "show")["telemetry"] is False)
         report = self.cli("owner", "report", "Fixture production-plane report with no mail configuration", expected=False)
         self.check("Missing Postmark configuration is not silent success", report["status"] == "delivery_failed" and bool(report["id"]))
+        database = (self.directory / "server" / "mcport.sqlite").as_uri() + "?mode=ro"
+        with sqlite3.connect(database, uri=True) as connection:
+            resources = connection.execute("SELECT kind,id FROM records WHERE kind IN ('connection','host','call','report')").fetchall()
+        self.check("All public resource creation paths use globally unique three-character base62 IDs", {
+            kind for kind, _ in resources
+        } == {"connection", "host", "call", "report"} and all(
+            re.fullmatch(r"[a-z0-9A-Z]{3}", identifier) for _, identifier in resources
+        ) and len({identifier for _, identifier in resources}) == len(resources))
 
     def close(self):
         for role in list(self.homes):

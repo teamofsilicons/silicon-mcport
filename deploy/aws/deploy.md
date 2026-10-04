@@ -1,0 +1,129 @@
+# Production staging and cutover
+
+Provisioned host: `i-0bf2c2f54fce6cfca`, region `us-east-1`, operator profile
+`silicon-production`, Elastic IP `100.57.137.244`. Artifact bucket:
+`silicon-mcport-production-artifacts-ezytfdmvjxeg`. SSM/cloud-init bootstrap passed;
+this is infrastructure evidence, not application deployment evidence.
+
+Backend: `https://backend.mcport.teamofsilicons.com`; frontend:
+`https://mcport.teamofsilicons.com` on Vercel. At preparation time DNS changes were
+blocked by Namecheap rejecting the request IP; its API was not confirmed disabled. Resolve that before enabling
+Caddy or using the native installer's `--apply`: the installer requires genuine
+public HTTPS health with the exact candidate revision. Do not substitute an IP,
+disable TLS verification or rewrite local hosts to bypass that gate.
+
+## Runtime secret
+
+Actual production IAM login requires a registered/accepted `mcport` application,
+its backend-only `MCPORT_APP_SECRET`, the correct IAM URLs and exact application
+origins. Register frontend `/auth/callback` for Carbon/Silicon browser login.
+Provider OAuth uses backend `/oauth/callback` and `/oauth/client-metadata.json`.
+Application secrets never belong in Vercel or a `VITE_*` setting.
+
+Store a JSON object in Secrets Manager secret `silicon-mcport/production-runtime`
+using its AWS-managed encryption key. Its only mandatory entry for IAM login is
+`MCPORT_APP_SECRET`, with the real issued secret as a string. The helper fixes the
+nonsecret app/bind/data/IAM/origin values; omit unused optional entries:
+
+| Optional key | When needed |
+|---|---|
+| `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION` | Matching IAM/Honeycomb webhook registration at backend `/webhooks/iam`; use its independent signing secret, version defaults to1 |
+| `MCPORT_LIFECYCLE_SECRET` | Dedicated ≥32-character service token matching Honeycomb testing participant registration |
+| `MCPORT_TEST_APP_SECRETS` | JSON string mapping imported test UUIDs to test application secrets, configured before import |
+| `MCPORT_TELEMETRY_KEY`, `MCPORT_TEST_TELEMETRY_KEYS` | Production Space Station table key and JSON string of separate testing keys |
+| `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Live report delivery and verified sender; sender defaults to `mcport@teamofsilicons.com` |
+| `MCPORT_MASTER_KEY` | Optional 64 hex characters, preserved for this deployment's lifetime |
+
+Without an explicit master key the first app startup generates a protected
+`master.key` in `/var/lib/mcport`. Keep that directory empty before the first
+installer run. Webhooks/testing/mail/telemetry are not process-start or production
+login prerequisites, but their configured flows must be proved before claiming
+full readiness. Blank optional values should be omitted, not copied from examples.
+
+Create the secret from a protected local JSON file without putting its contents
+in shell arguments or SSM documents. Capture registration outputs privately.
+Never enable shell tracing, print environment files or show `SecretString`:
+
+```sh
+umask 077
+aws --profile silicon-production --region us-east-1 secretsmanager create-secret \
+  --name silicon-mcport/production-runtime \
+  --secret-string file:///protected/mcport-runtime.json \
+  > /protected/mcport-secret-receipt.json
+```
+
+If it already exists, inspect its metadata and deliberately update that secret;
+do not create an unrelated credential. `runtime_from_secret.py` is for the first
+configuration only. It captures AWS stdout/stderr, validates the object, and
+atomically creates `/etc/mcport/runtime.env` as root0600 without printing values.
+It refuses existing files, including symlinks. For later rotation, back up the
+matching runtime/database/key first, coordinate service restart and validate IAM.
+
+## Stage reviewed files through SSM
+
+The operator uploads reviewed scripts and the exact native backend candidate to
+immutable `releases/<revision>/` S3 keys. Include `deploy/install.py` from that
+same revision and this runtime helper. The instance can read exact release keys;
+it cannot list the bucket. Pass only names, object keys and hashes to SSM commands.
+Inside the SSM session, use the instance role rather than operator credentials:
+
+```sh
+sudo install -d -m 0700 -o root -g root /opt/mcport/bootstrap
+# Download exact reviewed object keys with aws s3 cp and verify their SHA-256s.
+# Do not run scripts fetched under an unverified mutable key.
+sudo python3 /opt/mcport/bootstrap/runtime_from_secret.py
+```
+
+Stage Caddy v2.11.7 ARM64 using the pinned archive hash:
+
+```sh
+sudo -i
+set -eu
+umask 077
+cd /opt/mcport/bootstrap
+curl --fail --location --proto '=https' --tlsv1.2 \
+  --output caddy-2.11.7.tar.gz \
+  https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_arm64.tar.gz
+printf '%s  %s\n' d8fc6d179a5d283028a472a5618564f6ad8a86fed513e64f032b3b0b7cc45e42 caddy-2.11.7.tar.gz | sha256sum -c -
+tar -xOzf caddy-2.11.7.tar.gz caddy > caddy
+install -m 0755 caddy /usr/local/bin/caddy
+/usr/local/bin/caddy version
+```
+
+Configure a dedicated unprivileged `caddy` user and systemd service using
+`/usr/local/bin/caddy run --config /etc/caddy/Caddyfile`, a persistent protected
+`/var/lib/caddy` state directory, and only `CAP_NET_BIND_SERVICE`. Do not use
+`--environ` or inject MCPort's runtime environment into Caddy. Adapt the reviewed
+[`Caddyfile.example`](../Caddyfile.example) to the backend hostname; the frontend
+DNS points to the separately verified Vercel target. Keep the backend proxy on
+`127.0.0.1:4380`, preserve every `Set-Cookie`, and expose no port4380 listener.
+
+## DNS-gated application installation
+
+After public DNS resolves the backend to its Elastic IP, validate the Caddyfile,
+start Caddy and confirm a valid certificate for the exact backend hostname.
+Obtain a native backend candidate for the final reviewed implementation revision;
+the earlier `1f334d9` candidate does not contain subsequent compact-ID changes.
+Set these nonsecret values to that verified candidate before running:
+
+```sh
+caddy validate --config /etc/caddy/Caddyfile
+systemctl daemon-reload
+systemctl enable --now caddy
+python3 /opt/mcport/bootstrap/install.py \
+  --bundle "$MCPORT_BUNDLE" --sha256 "$MCPORT_BUNDLE_SHA256" \
+  --revision "$MCPORT_REVISION"
+python3 /opt/mcport/bootstrap/install.py \
+  --bundle "$MCPORT_BUNDLE" --sha256 "$MCPORT_BUNDLE_SHA256" \
+  --revision "$MCPORT_REVISION" \
+  --public-health-url https://backend.mcport.teamofsilicons.com/health --apply
+```
+
+The reviewed installer backs up stopped state, switches the immutable release and
+requires matching private/public revision health. It starts/enables MCPort only
+after the protected runtime exists. Validate actual Carbon/Silicon login, refresh,
+provider execution and revocation through both CLI and the Vercel proxy; health
+alone does not establish these. Preserve the installer receipt and copy complete
+stopped-state backups to unique `backups/` keys before public release. Follow
+[native recovery](../README.md) on failure; never restore a database without its
+matching encryption key/configuration or over an active writer.

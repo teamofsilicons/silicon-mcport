@@ -14,6 +14,8 @@ use std::io::{self, Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use store::{Settings, Store, StoredSession};
 
+const DEFAULT_BACKEND: &str = "https://backend.mcport.teamofsilicons.com";
+
 #[derive(Debug, thiserror::Error)]
 enum CliError {
     #[error(transparent)]
@@ -196,16 +198,16 @@ async fn run(cli: Cli) -> Result<Value> {
             json!({"home":home,"directory":home.join(".mcport/dir"),"credentials_copied":false}),
         );
     }
-    if let Command::Config(ConfigCommand::Show) = &cli.command {
-        return Ok(
-            json!({"home":store.home,"directory":store.directory,"telemetry":settings.telemetry,"backend_url":cli.url.as_ref().or(settings.backend_url.as_ref()).map(String::as_str).unwrap_or("http://127.0.0.1:4380"),"test_id":cli.test_id}),
-        );
-    }
     let backend = cli
         .url
         .as_deref()
         .or(settings.backend_url.as_deref())
-        .unwrap_or("http://127.0.0.1:4380");
+        .unwrap_or(DEFAULT_BACKEND);
+    if let Command::Config(ConfigCommand::Show) = &cli.command {
+        return Ok(
+            json!({"home":store.home,"directory":store.directory,"telemetry":settings.telemetry,"backend_url":backend,"test_id":cli.test_id}),
+        );
+    }
     let client = Client::new(backend)?;
     let base = public_context(cli.test_id.clone(), &settings);
 

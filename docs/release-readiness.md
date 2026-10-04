@@ -1,29 +1,31 @@
 # Release readiness — observed 2026-10-04
 
-This records verification of implementation commit `1f334d9d45f24a89bd4f4775a02d8e1d80f7c2ce` and the remaining release steps. Honeycomb registration, release upload, consent, publication and production deployment have not been performed.
+The previous native candidates below verify `1f334d9d45f24a89bd4f4775a02d8e1d80f7c2ce`. Subsequent compact-ID, hosted CLI-default and Vercel changes have passed local checks and require fresh native candidates. The public repository, AWS host and private Honeycomb registration now exist; application cutover and live acceptance are still in progress.
 
 ## Current external state
 
 | Check | Observed result |
 |---|---|
 | Checkout | Reviewed source is committed and pushed through `1f334d9d45f24a89bd4f4775a02d8e1d80f7c2ce`; `origin` is HTTPS. The current development, backend and six-platform runs all target that exact revision. |
-| GitHub repository | `teamofsilicons/silicon-mcport` exists with visibility `PRIVATE`; the reviewed source has been pushed. |
+| GitHub repository | `teamofsilicons/silicon-mcport` is `PUBLIC`, as requested. Tracked content and prior Git blobs were checked for credentials before changing visibility. |
 | GitHub identity/capability | `saket1225` is the active CLI identity; organization membership is active/admin, and GraphQL reports `viewerCanCreateRepositories: true`. Existing token scopes include `repo` and `workflow`. No token values were printed. |
 | Organization Actions policy | Reading the Actions policy returned 403 because the token lacks `admin:org`. Repository creation capability is verified; organization Actions policy/budget is not. This does not establish that running Actions is blocked. |
 | Honeycomb CLI/context | Installed `honeycomb 0.6.1`; selected backend is `https://backend.honeycomb.teamofsilicons.com`, home `/Users/codanium`, production context. |
-| Live Honeycomb authority | `login status`, `apps get mcport`, `apps organization tos` and `iam` returned HTTP 503 `integration_unavailable` from IAM. A fresh `honeycomb login status --json` retry after the current implementation returned the same error. Current org-admin authority and global `mcport` handle availability are **unverified**. |
-| Direct IAM CLI | Default production profile is not signed in; `iam config profiles --json` reports no configured profiles. This is separate from Honeycomb's saved application session. |
+| Live Honeycomb authority | `c:saket` is authenticated with `tos:org_owner`. Organization inventory was checked before creating `mcport`; registration is accepted, configuration revision1, IAM revision7, state `active`, visibility `private`. One-time credentials were captured in protected operator storage. |
+| Direct IAM CLI | Production login is authenticated as `c:saket`. MCPort app-bound Carbon/Silicon login still needs live verification after deployment. |
 | Development checks | [Run 37162702968](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37162702968) passed at `1f334d9`: 82 Rust tests, strict Clippy/formatting, 24 web tests/build, 16 packaging tests, 3 fixture tests and 64 actual-binary E2E assertions. |
 | Backend candidate | [Run 37162713767](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37162713767) passed at `1f334d9`: native AL2023 ARM64 tests/build, exact-revision startup/shutdown smoke and website assembly. Downloaded archive SHA-256 `b136ca4082f0fe2f44e744a4828755c7796706f4cab377dd6af56dc774e9d8a4`, all 14 file checksums, build provenance and read-only installer validation passed (`apply: false`). Receipt: `.local/backend-candidate-1f334d9/verification.json`. It has not been deployed. |
 | Six-platform candidate | [Run 37162712569](https://github.com/teamofsilicons/silicon-mcport/actions/runs/37162712569) passed all six native jobs and final assembly at `1f334d9`. The downloaded archive passed its checksum and installed official Honeycomb 0.6.1 validation (`valid: true`, no errors). Fresh Honeycomb installation and public release remain unverified. |
 
-Do not recreate or overwrite an existing app based on the Honeycomb 503. Once that integration works, read `honeycomb apps get mcport --json` and the owning organization's apps before deciding whether registration or a revision update is needed. GitHub organization administration does not prove IAM organization administration.
+AWS stack `silicon-mcport-production` is complete; ARM64 instance `i-0bf2c2f54fce6cfca` has passed SSM/cloud-init checks and uses Elastic IP `100.57.137.244`. Its dedicated runtime secret is in Secrets Manager. Vercel project `silicon-mcport` is linked, with the production backend origin configured and `mcport.teamofsilicons.com` attached. See [cutover instructions](../deploy/aws/deploy.md). Infrastructure readiness does not prove application behavior.
+
+Current local gates passed: 92 Rust tests plus2 doctests, strict workspace Clippy/formatting,16 packaging tests,3 fixture tests,30 web tests/build and65 actual-binary E2E assertions. Manual compact-ID checks preserved all9 legacy connections, exercised delete/nonreuse and keyed replay across restart, and confirmed that replay did not repeat the provider action. Protected receipt: `.local/e2e/compact-ids/proof.json`.
 
 ## Reproducing the six native CI results
 
 The workflow uses native Ubuntu 24.04 x86-64/ARM64, macOS 15 Intel/ARM64 and Windows x86-64/ARM64 runners. These labels are listed for private repositories in [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). Linux and Windows ARM64 standard runners have supported private repositories since [January 29, 2026](https://github.blog/changelog/2026-01-29-arm64-standard-runners-are-now-available-in-private-repositories/); no larger-runner workaround is required. The workflow uses SHA-pinned actions and creates artifacts with read-only repository permissions.
 
-For a subsequent candidate, push the reviewed revision and dispatch the native candidate workflow in the existing private repository:
+For a subsequent candidate, push the reviewed revision and dispatch the native candidate workflow in the existing public repository:
 
 ```sh
 git push -u origin main
@@ -35,7 +37,7 @@ gh run download <run-id> --repo teamofsilicons/silicon-mcport \
   --name mcport-honeycomb-candidate --dir .local/release-candidate
 ```
 
-Repository public visibility is a separate source-publication decision. The native workflow dispatch does not tag, upload to Honeycomb, publish crates, or deploy a backend.
+The repository is public. Native workflow dispatch alone does not tag, upload to Honeycomb, publish crates, or deploy a backend.
 
 Each native job tests and executes the produced CLI before staging it. Assembly requires all six archives, checks binary CPU/format, hashes and permissions again, and emits `mcport-honeycomb.tar.gz`. The final job installs the published official `silicon-honeycomb-cli` version 0.6.1 and runs `honeycomb validate` before uploading the candidate. Older Linux/glibc compatibility is not established by Ubuntu 24.04 runs.
 
@@ -57,9 +59,9 @@ honeycomb validate mcport-honeycomb.tar.gz --json
 
 ## Registration and configuration prerequisites
 
-The current [application configuration reference](https://docs.honeycomb.teamofsilicons.com/application-config/) requires a real IAM org in which the current caller is owner/admin, globally unique app ID, display name (at most 100 bytes), description (50–1,000 words), HTTPS webhook URL, and a separate signing secret of at least 32 characters. `tos` is used by fixtures and is the intended context to verify; live ownership was not established by this audit.
+The current [application configuration reference](https://docs.honeycomb.teamofsilicons.com/application-config/) requires a real IAM org in which the current caller is owner/admin, globally unique app ID, display name (at most 100 bytes), description (50–1,000 words), HTTPS webhook URL, and a separate signing secret of at least 32 characters. Live ownership of `tos` was verified through the authenticated Honeycomb session before registration.
 
-Before constructing protected `application.json`, choose and deploy actual HTTPS backend/website origins and a recognizable logo. Set `/webhooks/iam` to the deployed receiver and configure its matching signing material. Identity and membership disclosure are needed by current login checks; request only those IAM scopes that the deployed implementation uses. MCPort declares no implemented OBO/ATA receiver catalogs, so keep `external`, `obo_endpoints` and `ata_endpoints` empty unless real handlers are added. Provider MCP OAuth is distinct from IAM OBO.
+Registered origins are `https://backend.mcport.teamofsilicons.com` and `https://mcport.teamofsilicons.com`; `/webhooks/iam` uses independent signing material. The sole requested IAM scope is `self.identity.read`; authorization-envelope organization bindings are checked on every action. MCPort declares no implemented OBO/ATA receiver catalogs, so keep `external`, `obo_endpoints` and `ata_endpoints` empty unless real handlers are added. Provider MCP OAuth is distinct from IAM OBO.
 
 Use explicit `visibility: private` during validation; the default production preference is public and can automatically start approval after an accepted configuration and valid production upload. The application input supports `logo_url`, `website_url`, `docs_url`, `base_url`, `webhook_scope`, `app_scope` and `testing_idle_days`. Do not invent extra lifecycle/callback fields: configure integration details through their supported contracts. Keep secret values out of this document and the repository.
 
@@ -104,6 +106,6 @@ Bundled offline documentation is available as `mcport docs [usage|development]`,
 
 Daemon completion events do reach Space Station through `execution::finish → record_execution` with source `daemon`; this preserves the invocation's opted-out flag and current environment/generation checks. Its local tracing logs alone were not that telemetry path. Actual production Space Station delivery requires configured table keys and live verification.
 
-The explicit organization/access-key/API-key contexts remain unresolved: current IAM introspection accepts Carbon/Silicon application sessions selecting an organization, and rejects other actor types. The user's API-key product decision is pending; do not claim these contexts are implemented merely because generic bearer headers exist.
+Application login uses IAM Carbon/Silicon sessions in authorized organization contexts. The user explicitly excluded MCPort API keys. Upstream provider credentials remain separate connection configuration; IAM application-verification keys do not grant user or connection permissions.
 
-The candidate CLI's default backend remains loopback unless configured with `MCPORT_URL`, `--backend`, or `config set backend`. A fresh public installation therefore needs either a deployed default endpoint or documented initial endpoint configuration before `iam` works. Published repository/docs/crates links and production Postmark delivery are not proven by local tests. The authoritative [ready-application guide](https://docs.honeycomb.teamofsilicons.com/guides/team-of-silicons-ready-applications/) requires the real discovery → installation → first useful command journey, both identity types and approval completion; those external release gates remain open.
+The current CLI source defaults to `https://backend.mcport.teamofsilicons.com`; explicit `--backend`, `MCPORT_URL` and saved configuration still override it. Fresh-profile precedence and real loopback discovery tests passed. The new native release must include this change. Published repository/docs/crates links and production Postmark delivery are not proven by local tests. The authoritative [ready-application guide](https://docs.honeycomb.teamofsilicons.com/guides/team-of-silicons-ready-applications/) requires the real discovery → installation → first useful command journey, both identity types and approval completion; those external release gates remain open.

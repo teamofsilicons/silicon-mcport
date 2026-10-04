@@ -315,15 +315,17 @@ pub async fn execute(
         ));
     }
     let fingerprint = hash(&json!([c.id, input.method, params]).to_string());
-    let call_id = if let Some(k) = input.idempotency_key {
+    let replay_key = if let Some(k) = input.idempotency_key {
         if k.is_empty() || k.len() > 255 {
             return Err(Error::bad("Idempotency key must contain 1–255 characters."));
         }
-        hash(&json!([a.env(), a.actor().org_id, a.actor().principal_id, c.id, k]).to_string())
+        Some(hash(
+            &json!([a.env(), a.actor().org_id, a.actor().principal_id, c.id, k]).to_string(),
+        ))
     } else {
-        id()
+        None
     };
-    let lock = app.lock(&format!("call:{call_id}"));
+    let lock = app.lock(&format!("call:{}", replay_key.clone().unwrap_or_else(id)));
     let guard = lock.lock().await;
     let environment_guard = auth::mutation_guard(&app, &a).await?;
     let current_connection = con::resolve(&app, &a, &c.id, false)?;
@@ -335,21 +337,10 @@ pub async fn execute(
     {
         return Err(Error::denied());
     }
-    if let Some(r) = app.store.get::<CallRecord>("call", &call_id)? {
-        if r.fingerprint != fingerprint {
-            return Err(Error::new(
-                409,
-                "idempotency_conflict",
-                "This key was used for a different request.",
-                "Use a new key only for a new operation.",
-            ));
-        }
-        return result_response(&r);
-    }
     let timeout = input.timeout_ms.unwrap_or(120000).clamp(100, 600000);
-    let r = CallRecord {
+    let mut r = CallRecord {
         invocation: Invocation {
-            id: call_id.clone(),
+            id: String::new(),
             connection_id: c.id.clone(),
             connection_name: c.name.clone(),
             actor_id: a.actor().principal_id.clone(),
@@ -380,14 +371,37 @@ pub async fn execute(
         timeout_ms: timeout,
         expires_at: now() + timeout.div_ceil(1000) as i64,
         connection_version: c.version,
-        fingerprint,
+        fingerprint: fingerprint.clone(),
         progress: None,
         telemetry_enabled: !headers
             .get("x-mcport-telemetry")
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| matches!(v, "false" | "off" | "0")),
     };
-    save(&app, &r)?;
+    let (r, created) = app.store.create_public(
+        "call",
+        a.env(),
+        &a.actor().org_id,
+        &a.actor().principal_id,
+        None,
+        replay_key.as_deref(),
+        |id| {
+            r.invocation.id = id;
+            r
+        },
+    )?;
+    if !created {
+        if r.fingerprint != fingerprint {
+            return Err(Error::new(
+                409,
+                "idempotency_conflict",
+                "This key was used for a different request.",
+                "Use a new key only for a new operation.",
+            ));
+        }
+        return result_response(&r);
+    }
+    let call_id = r.invocation.id.clone();
     record_execution(&app, &r, "backend", "dispatch", "pending");
     drop(environment_guard);
     drop(guard);
@@ -564,9 +578,7 @@ fn record_execution(app: &App, r: &CallRecord, source: &str, step: &str, outcome
             step: step.into(),
             outcome: outcome.into(),
             progress: None,
-            correlation_id: uuid::Uuid::parse_str(&r.invocation.id)
-                .ok()
-                .map(|id| id.to_string()),
+            correlation_id: Some(crate::public_ids::correlation_id(&r.invocation.id).to_string()),
             duration_ms: r
                 .invocation
                 .completed_at

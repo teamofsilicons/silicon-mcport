@@ -1,0 +1,227 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Silicon MCPort production host: AL2023 ARM64, SSM administration, retained encrypted storage; application deployment is separate.",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "Existing VPC; this stack does not change routes or other applications."
+    },
+    "PublicSubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "Existing public subnet in VpcId with an Internet Gateway route and working DNS."
+    },
+    "AmiId": {
+      "Type": "String",
+      "AllowedPattern": "^ami-([0-9a-f]{8}|[0-9a-f]{17})$",
+      "Description": "Exact, independently verified Amazon Linux 2023 ARM64 standard AMI ID in this region; no moving SSM alias."
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t4g.medium",
+      "AllowedValues": ["t4g.medium", "t4g.large", "t4g.xlarge"],
+      "Description": "ARM64 capacity; default is 2 vCPU and 4 GiB RAM. Review a change set before resizing."
+    }
+  },
+  "Resources": {
+    "Artifacts": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {"Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]},
+        "VersioningConfiguration": {"Status": "Enabled"},
+        "Tags": [
+          {"Key": "Service", "Value": "silicon-mcport"},
+          {"Key": "Environment", "Value": "production"},
+          {"Key": "ManagedBy", "Value": "CloudFormation"}
+        ]
+      }
+    },
+    "ArtifactsTransportPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Bucket": {"Ref": "Artifacts"},
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Sid": "DenyInsecureTransport",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:*",
+            "Resource": [
+              {"Fn::GetAtt": ["Artifacts", "Arn"]},
+              {"Fn::Sub": "${Artifacts.Arn}/*"}
+            ],
+            "Condition": {"Bool": {"aws:SecureTransport": "false"}}
+          }]
+        }
+      }
+    },
+    "Role": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "ec2.amazonaws.com"},
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "ManagedPolicyArns": [
+          {"Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"}
+        ],
+        "Policies": [{
+          "PolicyName": "MCPortRuntimeAndArtifacts",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "ReadProductionRuntimeSecrets",
+                "Effect": "Allow",
+                "Action": ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+                "Resource": {"Fn::Sub": "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:silicon-mcport/production-*"}
+              },
+              {
+                "Sid": "ReadReviewedReleases",
+                "Effect": "Allow",
+                "Action": "s3:GetObject",
+                "Resource": {"Fn::Sub": "${Artifacts.Arn}/releases/*"}
+              },
+              {
+                "Sid": "WriteAndReadStoppedStateBackups",
+                "Effect": "Allow",
+                "Action": ["s3:PutObject", "s3:GetObject"],
+                "Resource": {"Fn::Sub": "${Artifacts.Arn}/backups/*"}
+              }
+            ]
+          }
+        }],
+        "Tags": [
+          {"Key": "Service", "Value": "silicon-mcport"},
+          {"Key": "Environment", "Value": "production"},
+          {"Key": "ManagedBy", "Value": "CloudFormation"}
+        ]
+      }
+    },
+    "Profile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {"Roles": [{"Ref": "Role"}]}
+    },
+    "SecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "MCPort HTTP/HTTPS only; administration through SSM, no SSH or public gateway port",
+        "VpcId": {"Ref": "VpcId"},
+        "SecurityGroupIngress": [
+          {"IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "CidrIp": "0.0.0.0/0"},
+          {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "0.0.0.0/0"}
+        ],
+        "SecurityGroupEgress": [{"IpProtocol": "-1", "CidrIp": "0.0.0.0/0"}],
+        "Tags": [
+          {"Key": "Name", "Value": "silicon-mcport-production"},
+          {"Key": "Service", "Value": "silicon-mcport"},
+          {"Key": "Environment", "Value": "production"}
+        ]
+      }
+    },
+    "Instance": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {"Ref": "AmiId"},
+        "InstanceType": {"Ref": "InstanceType"},
+        "IamInstanceProfile": {"Ref": "Profile"},
+        "NetworkInterfaces": [{
+          "DeviceIndex": "0",
+          "SubnetId": {"Ref": "PublicSubnetId"},
+          "AssociatePublicIpAddress": true,
+          "GroupSet": [{"Ref": "SecurityGroup"}]
+        }],
+        "MetadataOptions": {
+          "HttpEndpoint": "enabled",
+          "HttpTokens": "required",
+          "HttpPutResponseHopLimit": 1,
+          "InstanceMetadataTags": "disabled"
+        },
+        "BlockDeviceMappings": [{
+          "DeviceName": "/dev/xvda",
+          "Ebs": {
+            "VolumeType": "gp3",
+            "VolumeSize": 30,
+            "Encrypted": true,
+            "DeleteOnTermination": false
+          }
+        }],
+        "PropagateTagsToVolumeOnCreation": true,
+        "Tags": [
+          {"Key": "Name", "Value": "silicon-mcport-production"},
+          {"Key": "Service", "Value": "silicon-mcport"},
+          {"Key": "Environment", "Value": "production"},
+          {"Key": "ManagedBy", "Value": "CloudFormation"}
+        ],
+        "UserData": {"Fn::Base64": {"Fn::Join": ["\n", [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          "umask 077",
+          "test \"$(uname -m)\" = aarch64",
+          ". /etc/os-release",
+          "test \"$ID\" = amzn",
+          "test \"$VERSION_ID\" = 2023",
+          "# EIP association can briefly interrupt first-boot network access.",
+          "for bootstrap_attempt in 1 2 3 4 5; do",
+          "  if dnf install -y python3 libgcc ca-certificates awscli-2 amazon-ssm-agent; then break; fi",
+          "  test \"$bootstrap_attempt\" -lt 5 || exit 1",
+          "  sleep 10",
+          "done",
+          "if ! id -u mcport >/dev/null 2>&1; then",
+          "  useradd --system --user-group --home-dir /var/lib/mcport --no-create-home --shell /sbin/nologin mcport",
+          "fi",
+          "install -d -m 0700 -o mcport -g mcport /var/lib/mcport",
+          "test -z \"$(find /var/lib/mcport -mindepth 1 -maxdepth 1 -print -quit)\"",
+          "install -d -m 0700 -o root -g root /etc/mcport",
+          "systemctl enable --now amazon-ssm-agent",
+          "# Runtime secrets, Caddy, DNS and the application are installed separately.",
+          ""
+        ]]}}
+      }
+    },
+    "Address": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {"Key": "Name", "Value": "silicon-mcport-production"},
+          {"Key": "Service", "Value": "silicon-mcport"},
+          {"Key": "Environment", "Value": "production"}
+        ]
+      }
+    },
+    "AddressAssociation": {
+      "Type": "AWS::EC2::EIPAssociation",
+      "Properties": {
+        "AllocationId": {"Fn::GetAtt": ["Address", "AllocationId"]},
+        "InstanceId": {"Ref": "Instance"}
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {"Value": {"Ref": "Instance"}},
+    "PublicIp": {"Value": {"Ref": "Address"}},
+    "RoleName": {"Value": {"Ref": "Role"}},
+    "RoleArn": {"Value": {"Fn::GetAtt": ["Role", "Arn"]}},
+    "ArtifactBucket": {"Value": {"Ref": "Artifacts"}}
+  }
+}

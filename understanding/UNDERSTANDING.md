@@ -4,6 +4,8 @@ Silicon MCPort is our common place to configure MCPs and use them through the CL
 
 Each configured MCP is a connection. Who can use it, where it runs, and whose account it uses are separate things.
 
+MCPort’s own public IDs start at 3 characters using `a–z`, `A–Z` and `0–9`. Use all available combinations before increasing to 4 characters, then 5 and so on. IDs stay unique and are never reused after deletion. IAM identities and authentication tokens keep their required formats.
+
 # Login
 
 Login and signup are handled by Silicon IAM using the official client. Carbons and Silicons have the same capabilities under the same permissions.
@@ -78,7 +80,7 @@ Above is the application behaviour the backend must enforce. Below are its clien
 
 The Rust package is the primary interface and is stateless. The CLI is stateful and uses only the package; it has no features missing from the package. The local daemon also uses the package and stays running while serving local MCPs. Build the CLI first; the website is a subset of it.
 
-Expose all public client actions, including read, write, update and delete, under the caller's permissions. Support Carbons, Silicons and authorized organization, access-key and API-key contexts. Backend internal operations are not client commands.
+Expose all public client actions, including read, write, update and delete, under the caller's permissions. Support Carbons and Silicons in their authorized organization contexts through IAM. MCPort does not issue or accept API keys for application login. Backend internal operations are not client commands.
 
 Use Rust, with other runtimes underneath where needed. For results needing a visual interface, return an authorized link to view or download them.
 

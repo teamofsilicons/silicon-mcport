@@ -1,6 +1,6 @@
 # Using MCPort
 
-Build the CLI from this checkout with `cargo build -p mcport-cli --release`. Add `target/release` to your PATH, or invoke its `mcport` binary directly. Set a deployed backend with `mcport config set backend https://your-mcport-backend.example`.
+Build the CLI from this checkout with `cargo build -p mcport-cli --release`. Add `target/release` to your PATH, or invoke its `mcport` binary directly. Fresh profiles use `https://backend.mcport.teamofsilicons.com`; existing saved settings are preserved. Backend precedence is `--backend`, then `MCPORT_URL`, then saved configuration, then this default. Use `mcport config set backend https://your-mcport-backend.example` for another deployment, or `MCPORT_URL=http://127.0.0.1:4380` with commands against the local development fixtures.
 
 Read bundled instructions with `mcport docs usage` or `mcport docs development`; both work offline before login.
 

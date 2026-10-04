@@ -111,6 +111,54 @@ describe("browser API security and contract", () => {
     expect(message(error)).toContain("may have completed");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it.each([502, 504])(
+    "marks an unstructured proxy %s during a tool call unknown without replay",
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(
+        new Response("<html>Gateway unavailable</html>", { status }),
+      );
+      const error = await api.call("docs", "write", {}).catch((e) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({
+        status,
+        code: "proxy_outcome_unknown",
+        outcomeUnknown: true,
+      });
+      expect(error.recovery).toContain("Inspect Activity");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("preserves a structured backend failure and does not mark unrelated reads or auth uncertain", async () => {
+    fetchMock.mockResolvedValueOnce(
+      response(
+        {
+          code: "provider_unavailable",
+          message: "Provider is offline.",
+          outcome_unknown: false,
+        },
+        502,
+      ),
+    );
+    await expect(api.call("docs", "write", {})).rejects.toMatchObject({
+      code: "provider_unavailable",
+      outcomeUnknown: false,
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response("Gateway unavailable", { status: 504 }),
+    );
+    await expect(api.connections()).rejects.toMatchObject({
+      code: "request_failed",
+      outcomeUnknown: false,
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response("Gateway unavailable", { status: 502 }),
+    );
+    await expect(api.browserRefresh()).rejects.toMatchObject({
+      code: "request_failed",
+      outcomeUnknown: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
   it("preserves API denial recovery information", async () => {
     fetchMock.mockResolvedValueOnce(
       response(

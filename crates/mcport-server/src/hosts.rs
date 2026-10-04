@@ -2,7 +2,7 @@ use crate::{
     auth::{self, Auth},
     error::{Error, Result},
     execution::{self, CallRecord},
-    state::{App, hash, id, now, secret},
+    state::{App, hash, now, secret},
 };
 use axum::{
     Json,
@@ -29,7 +29,11 @@ pub struct HostRecord {
     pub capabilities: BTreeMap<String, Value>,
 }
 pub fn resolve(app: &App, a: &Auth, name: &str) -> Result<HostRecord> {
-    let hosts = if let Some(h) = app.store.get::<HostRecord>("host", name)? {
+    let hosts = if let Some(h) = app.store.get::<HostRecord>("host", name)?
+        && h.host.environment == a.env()
+        && h.host.org_id == a.actor().org_id
+        && h.host.owner_id == a.actor().principal_id
+    {
         vec![h]
     } else {
         app.store
@@ -92,7 +96,7 @@ pub async fn create(
     }
     let token = secret("mph_");
     let host = Host {
-        id: id(),
+        id: String::new(),
         name: input.name,
         owner_id: a.actor().principal_id.clone(),
         org_id: a.actor().org_id.clone(),
@@ -101,26 +105,29 @@ pub async fn create(
         last_seen: None,
         created_at: now(),
     };
-    let record = HostRecord {
-        host: host.clone(),
+    let mut record = HostRecord {
+        host,
         token_hash: hash(&token),
         generation: a.session.generation,
         last_seen: 0,
         registered: vec![],
         capabilities: BTreeMap::new(),
     };
-    app.store.put(
+    let name = record.host.name.clone();
+    let (record, _) = app.store.create_public(
         "host",
-        &host.id,
         a.env(),
-        &host.org_id,
-        &host.owner_id,
-        Some(&host.name),
-        &record,
-        Some(0),
+        &a.actor().org_id,
+        &a.actor().principal_id,
+        Some(&name),
+        None,
+        |id| {
+            record.host.id = id;
+            record
+        },
     )?;
     Ok(Json(
-        json!({"data":HostRegistration{host,host_token:token}}),
+        json!({"data":HostRegistration{host:record.host,host_token:token}}),
     ))
 }
 pub async fn get(

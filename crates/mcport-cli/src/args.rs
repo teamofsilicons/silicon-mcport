@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-const LINKS: &str = "Repository: https://github.com/teamofsilicons/silicon-mcport\nDocumentation: https://github.com/teamofsilicons/silicon-mcport/tree/main/docs\nRust package (publication pending): https://crates.io/crates/mcport-client\n\nExample: mcport config set backend https://your-mcport-backend.example\nThen run mcport iam --json and mcport login <app-bound-slt>.\nRelated: mcport docs, mcport connection --help, mcport tool --help\nApplication login uses IAM; account connect handles upstream MCP authorization.";
+const LINKS: &str = "Repository: https://github.com/teamofsilicons/silicon-mcport\nDocumentation: https://github.com/teamofsilicons/silicon-mcport/tree/main/docs\nRust package (publication pending): https://crates.io/crates/mcport-client\n\nExample: mcport iam --json\nThen obtain an app-bound SLT from IAM and run mcport login <app-bound-slt>.\nFresh profiles use https://backend.mcport.teamofsilicons.com; config set backend selects another deployment.\nRelated: mcport docs, mcport config set --help, mcport connection --help, mcport tool --help\nApplication login uses IAM; account connect handles upstream MCP authorization.";
 
 #[derive(Debug, Parser)]
 #[command(name = "mcport", version, about = "Configure MCP connections and use their tools from any authorized machine", long_about = None, after_help = LINKS, propagate_version = true)]
@@ -11,7 +11,7 @@ pub struct Cli {
     /// Select an isolated test environment; requires that environment's credentials.
     #[arg(long = "test", global = true)]
     pub test_id: Option<String>,
-    /// MCPort backend URL. Defaults to saved configuration, then http://127.0.0.1:4380.
+    /// Backend URL; --backend overrides MCPORT_URL, then saved configuration, then https://backend.mcport.teamofsilicons.com.
     #[arg(long = "backend", env = "MCPORT_URL", global = true)]
     pub url: Option<String>,
     #[command(subcommand)]
@@ -31,7 +31,7 @@ pub enum Command {
     },
     /// Discover the app ID and official IAM login details before signing in.
     #[command(
-        after_help = "Example: mcport iam --json\nConfigure your backend first, then obtain an app-bound SLT from official IAM.\nRelated: mcport config set --help, mcport login --help"
+        after_help = "Example: mcport iam --json\nUses the selected backend. Obtain an app-bound SLT from official IAM for the returned app ID.\nRelated: mcport config set --help, mcport login --help"
     )]
     Iam,
     /// Exchange an app-bound short-lived token, or inspect login status.
@@ -609,7 +609,7 @@ pub enum ConfigCommand {
     },
     /// Print non-secret local settings and storage location.
     #[command(
-        after_help = "Example: mcport config show --json\nWithout a saved backend or override, the backend is http://127.0.0.1:4380.\nRelated: mcport config set --help, mcport config home --help"
+        after_help = "Example: mcport config show --json\nWithout a saved backend or override, the backend is https://backend.mcport.teamofsilicons.com.\nRelated: mcport config set --help, mcport config home --help"
     )]
     Show,
     /// Save the backend URL or enable/disable telemetry for this local home.

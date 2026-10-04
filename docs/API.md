@@ -2,6 +2,10 @@
 
 Application endpoints use `/api/v1`. Success is `{ "data": value }`; errors use an HTTP failure status and `{ "error": {"code", "message", "recovery": string|null, "outcome_unknown": boolean} }`. Raw asset downloads are the exception. Public DTOs live in `mcport-core`; timestamps are Unix seconds. Lists return arrays in `data`. Connection and host selectors accept IDs or unambiguous names. Reads never expose provider credentials.
 
+New connection, host, invocation/job and report IDs use case-sensitive base62 (`a-z`, `0-9`, `A-Z`), starting at three characters. All four resource types and all environments share one persistent namespace per gateway database. After all 238,328 three-character values have been used or reserved, IDs grow to four characters, then continue growing only after each complete width is exhausted. Deleted IDs are never reused. Treat IDs as opaque locators, not secrets: authorization is still required. Existing UUID and legacy invocation IDs remain valid after upgrade. IAM/Honeycomb IDs, authentication tokens, OAuth state and telemetry UUIDs retain their own formats.
+
+An accessible exact connection/host ID takes precedence over a matching name. Inaccessible IDs do not hide names that the caller may use. If a name collides with another accessible ID, use the intended resource's own ID and rename it if needed.
+
 Use `Authorization: Bearer <mcport-session-token>` or the website's same-origin HttpOnly session cookie. `X-MCPort-Test: <environment-id>` selects a provisioned, validated testing environment; omission means production. The header alone grants no authority. `X-MCPort-ISI` supplies optional audit context. `X-MCPort-Telemetry: false` suppresses diagnostic events for that request. JSON writes require `Content-Type: application/json`; cookie-authenticated writes must pass origin checks.
 
 ## Discovery and authentication

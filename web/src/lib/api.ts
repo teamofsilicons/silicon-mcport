@@ -154,6 +154,20 @@ async function request<T>(
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     const e = data?.error;
+    const proxyOutcomeUnknown =
+      (response.status === 502 || response.status === 504) &&
+      path.endsWith("/mcp") &&
+      (body as { method?: string } | undefined)?.method === "tools/call" &&
+      !(typeof e?.code === "string" && typeof e?.message === "string");
+    if (proxyOutcomeUnknown) {
+      throw new ApiError(
+        response.status,
+        "proxy_outcome_unknown",
+        "The gateway could not return the tool response.",
+        "Inspect Activity and the provider before retrying this action.",
+        true,
+      );
+    }
     throw new ApiError(
       response.status,
       e?.code || "request_failed",
