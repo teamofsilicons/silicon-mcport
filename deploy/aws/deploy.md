@@ -3,10 +3,12 @@
 Provisioned host: `i-0bf2c2f54fce6cfca`, region `us-east-1`, operator profile
 `silicon-production`, Elastic IP `100.57.137.244`. Artifact bucket:
 `silicon-mcport-production-artifacts-ezytfdmvjxeg`. On October 4, 2026 the native
-backend `3400f4e2e70f0bfbc26409b8f6e56884c2efbc37` was installed through SSM and
+backend `66c6e0c3775f46a65827ce0cabc8945cfe0e5b2b` was installed through SSM and
 passed exact-revision private/public health plus real provider calls. The cutover
 preserved runtime secrets, encryption keys and the telemetry spool; its queued
-events were acknowledged after a new browser call.
+events were acknowledged after fresh calls through all three MCP transports.
+The new installer handled the existing telemetry socket automatically; no manual
+pre-stop or socket removal was needed.
 
 Backend: `https://backend.mcport.teamofsilicons.com`; frontend:
 `https://mcport.teamofsilicons.com` on Vercel. Namecheap access was enabled and the
@@ -112,15 +114,13 @@ the earlier `1f334d9` candidate does not contain subsequent compact-ID changes.
 Set these nonsecret values to that verified candidate before running:
 
 If telemetry has run, its SDK can leave a Unix `daemon.sock` under
-`/var/lib/mcport/telemetry/<table-key-hash>/`. The current installer deliberately
-rejects special files during state backup. Before an upgrade, take the install
-lock, stop MCPort and verify an inactive service with `MainPID=0`. Confirm the
-exact socket is owned by the MCPort service user, then unlink only that socket.
-Preserve every spool, cursor, lock, database, key and runtime file. Release the
-operator lock immediately before invoking the installer's own locked apply.
-If preparation or installation fails before a healthy cutover, restart and
-verify the previous release. Never remove sockets from a running service or use
-a recursive cleanup. The SDK recreates its IPC socket after a new event.
+`/var/lib/mcport/telemetry/<table-key-hash>/`. The installer recognizes only that
+exact path with a 64-character lowercase hexadecimal hash and service-user
+ownership. Under its install lock, it stops MCPort, verifies an inactive service
+with `MainPID=0`, and removes the ephemeral socket before backup. Spools, cursors,
+locks, database, key and runtime files are preserved. Symlinks, changed sockets
+and unexpected special files still stop the upgrade. No manual socket cleanup is
+needed; the SDK recreates its IPC socket after a new event.
 
 ```sh
 caddy validate --config /etc/caddy/Caddyfile
