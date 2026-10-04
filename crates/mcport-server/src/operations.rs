@@ -15,7 +15,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 const REPOSITORY: &str = "https://github.com/teamofsilicons/silicon-mcport";
-const RECIPIENTS: &str = "saketdev12@gmail.com,shubhastro2@gmails.com,bugs@teamofsilicons.com";
+const RECIPIENTS: &str = "saketdev12@gmail.com,shubhastro2@gmail.com";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -282,7 +282,8 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
                 let status = response.status();
                 if status.is_success() {
                     match response.json::<Value>().await {
-                        Ok(value) if value.get("ErrorCode").and_then(Value::as_i64) == Some(0) => ("delivered", None),
+                        // Acceptance is terminal for our outbox, but does not confirm inbox delivery.
+                        Ok(value) if value.get("ErrorCode").and_then(Value::as_i64) == Some(0) => ("delivery_accepted", None),
                         _ => ("delivery_failed", Some("Postmark did not confirm successful acceptance.".into())),
                     }
                 } else { ("delivery_failed", Some(format!("Postmark returned HTTP {}.",status.as_u16()))) }
@@ -292,7 +293,7 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
         report.status = outcome.0.into();
         report.failure_reason = outcome.1;
         report.next_attempt_at = now() + 300;
-        if report.attempts >= 8 && report.status != "delivered" {
+        if report.attempts >= 8 && report.status != "delivery_accepted" {
             report.status = "delivery_failed".into();
         }
         app.store.put(
@@ -462,7 +463,7 @@ mod tests {
             created_at: 0,
         };
         let payload = report_payload(&report, "mcport@teamofsilicons.com");
-        assert_eq!(payload["To"], RECIPIENTS);
+        assert_eq!(payload["To"], "saketdev12@gmail.com,shubhastro2@gmail.com");
         assert!(payload.get("HtmlBody").is_none());
         assert!(payload.get("Attachments").is_none());
         assert_eq!(payload["TrackOpens"], false);
@@ -528,9 +529,11 @@ mod tests {
         config.data_dir = directory.path().into();
         config.postmark_token = Some("fixture-mail-token".into());
         let app = App::new(config.clone()).unwrap();
-        for (id, environment) in [
-            ("production-report", "production"),
-            ("testing-report", "test-isolated"),
+        for (id, environment, status) in [
+            ("production-report", "production", "delivery_pending"),
+            ("testing-report", "test-isolated", "delivery_pending"),
+            ("legacy-delivered-report", "production", "delivered"),
+            ("already-accepted-report", "production", "delivery_accepted"),
         ] {
             let report = Report {
                 id: id.into(),
@@ -539,7 +542,7 @@ mod tests {
                 owner_id: "c:owner".into(),
                 message: "Private fixture bug reproduction".into(),
                 pr: None,
-                status: "delivery_pending".into(),
+                status: status.into(),
                 failure_reason: None,
                 attempts: 0,
                 next_attempt_at: 0,
@@ -576,6 +579,7 @@ mod tests {
             0
         );
         failed.next_attempt_at = 0;
+        failed.attempts = 7;
         app.store
             .put(
                 "report",
@@ -599,9 +603,31 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .status,
-            "delivered"
+            "delivery_accepted"
         );
         assert_eq!(sent.load(Ordering::SeqCst), 2);
+        let accepted = restarted
+            .store
+            .get::<Report>("report", "production-report")
+            .unwrap()
+            .unwrap();
+        assert_eq!(accepted.attempts, 8);
+        let legacy = restarted
+            .store
+            .get::<Report>("report", "legacy-delivered-report")
+            .unwrap()
+            .unwrap();
+        assert_eq!(legacy.status, "delivered");
+        assert_eq!(legacy.attempts, 0);
+        assert_eq!(
+            restarted
+                .store
+                .get::<Report>("report", "already-accepted-report")
+                .unwrap()
+                .unwrap()
+                .attempts,
+            0
+        );
         assert_eq!(
             restarted
                 .store
