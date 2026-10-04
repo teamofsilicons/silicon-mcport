@@ -20,6 +20,7 @@ import tempfile
 import time
 import uuid
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -159,6 +160,72 @@ class Journey:
             time.sleep(0.3)
         raise AssertionError("Connection did not reach " + status + ": " + name)
 
+    def oauth_consent(self, role, connection, account=None, lifetime=None):
+        authorization = self.cli(role, "account", "connect", connection)
+        browser = build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        with browser.open(authorization["authorization_url"]) as response:
+            consent = response.read().decode()
+        provider_url = html.unescape(re.search(r"href=['\"]([^'\"]+)", consent).group(1))
+        selections = {}
+        if account is not None:
+            selections["fixture_account"] = account
+        if lifetime is not None:
+            selections["fixture_token_lifetime"] = lifetime
+        if selections:
+            provider_url += ("&" if "?" in provider_url else "?") + urlencode(selections)
+        with browser.open(provider_url) as response:
+            assert response.status == 200
+
+    def oauth_refresh_journey(self):
+        def provider_activity():
+            stats = request(self.provider + "/fixture/stats")
+            return {"calls": stats["calls"], "oauth_exchanges": stats["oauth_exchanges"], "requests": [item for item in stats["requests"] if item["path"].startswith(("/mcp/", "/oauth/"))]}
+
+        connection = "oauth-personal"
+        self.cli("owner", "connection", "new", connection, "--transport", "http", "--url", self.provider + "/mcp/oauth", "--auth", "per-user", "--visibility", "org")
+        self.oauth_consent("owner", connection, "oauth-carbon", 20)
+        before = provider_activity()
+        self.cli("silicon", "tool", "call", connection, "whoami", expected=False)
+        after = provider_activity()
+        self.check("Missing personal OAuth grant never borrows Carbon grant or contacts provider", before == after)
+
+        def call(role, account, generation):
+            result = self.cli(role, "tool", "call", connection, "whoami")["result"]["structuredContent"]
+            assert result["account"] == account and result["token_generation"] == generation, result
+            return result
+
+        # Every issued token lives 20 seconds, inside the gateway's 30 second refresh window.
+        # The provider revokes the old bearer and refresh token on each rotation.
+        call("owner", "oauth-carbon", 1)
+        call("owner", "oauth-carbon", 2)
+        self.check("Short-lived OAuth refresh persists the rotated token and uses new bearers")
+        self.oauth_consent("silicon", connection, "oauth-silicon", 20)
+        call("silicon", "oauth-silicon", 1)
+        call("owner", "oauth-carbon", 3)
+        call("silicon", "oauth-silicon", 2)
+        self.check("Carbon and Silicon personal OAuth refresh families remain isolated")
+
+        self.cli("silicon", "account", "disconnect", connection)
+        before = provider_activity()
+        self.cli("silicon", "tool", "call", connection, "whoami", expected=False)
+        after = provider_activity()
+        self.check("Disconnected personal OAuth cannot refresh or fall back to Carbon", before == after)
+        call("owner", "oauth-carbon", 4)
+        self.check("Disconnecting Silicon OAuth leaves Carbon account and rotation usable")
+
+        events = [event for event in request(self.provider + "/fixture/stats")["oauth_exchanges"] if event["account"] in ("oauth-carbon", "oauth-silicon")]
+        families = {}
+        for account, maximum in (("oauth-carbon", 4), ("oauth-silicon", 2)):
+            selected = [event for event in events if event["account"] == account]
+            assert [event["generation"] for event in selected] == list(range(maximum + 1))
+            assert [event["grant_type"] for event in selected] == ["authorization_code"] + ["refresh_token"] * maximum
+            families[account] = {event["family"] for event in selected}
+            assert len(families[account]) == 1
+        assert families["oauth-carbon"].isdisjoint(families["oauth-silicon"])
+        proof = {"access_token_lifetime_seconds": 20, "clock_waits": 0, "database_writes": False, "oauth_exchanges": events, "old_tokens_invalidated_on_refresh": True, "per_user_isolation": True, "missing_grant_no_fallback": True, "disconnect_denied_without_provider_contact": True}
+        (self.directory / "oauth-refresh-proof.json").write_text(json.dumps(proof, indent=2))
+        self.check("Provider recorded exactly six refresh rotations across two independent grants")
+
     def run(self):
         self.check("IAM discovery before login", self.cli("owner", "iam")["app_id"] == "mcport")
         for role in ("owner", "silicon", "stranger", "crossorg"):
@@ -240,14 +307,9 @@ class Journey:
         self.cli("silicon", "tool", "call", "personal", "whoami", expected=False)
         self.check("Disconnect immediately blocks further personal use")
         self.cli("owner", "connection", "new", "oauth", "--transport", "http", "--url", self.provider + "/mcp/oauth", "--auth", "shared", "--visibility", "org")
-        authorization = self.cli("owner", "account", "connect", "oauth")
-        browser = build_opener(HTTPCookieProcessor(http.cookiejar.CookieJar()))
-        with browser.open(authorization["authorization_url"]) as response:
-            consent = response.read().decode()
-        provider_url = html.unescape(re.search(r"href=['\"]([^'\"]+)", consent).group(1))
-        with browser.open(provider_url) as response:
-            assert response.status == 200
+        self.oauth_consent("owner", "oauth")
         self.check("OAuth PKCE consent binds creator grant for remote Silicon", self.cli("silicon", "tool", "call", "oauth", "whoami")["result"]["structuredContent"]["account"] == "oauth-owner")
+        self.oauth_refresh_journey()
         authority_before = self.authority_index()
         self.cli("owner", "connection", "new", "delete-authority", "--transport", "http", "--url", self.provider + "/mcp/oauth", "--auth", "per-user", "--visibility", "invited")
         self.cli("owner", "access", "new", "delete-authority", "--principal", "si:researcher")

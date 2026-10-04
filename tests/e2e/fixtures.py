@@ -42,6 +42,7 @@ class Fixtures:
         self.revoked = set()
         self.oauth_codes = {}
         self.oauth_tokens = {}
+        self.oauth_exchanges = []
         self.calls = []
         self.requests = []
         self.clients = {}
@@ -59,6 +60,14 @@ class Fixtures:
         self.tokens[access] = dict(grant, expires=time.time() + 3600, kind="access")
         self.tokens[refresh] = dict(grant, expires=time.time() + 86400, kind="refresh")
         return {"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "scope": "self.identity.read", "org_id": grant["actor"]["org_id"]}
+
+    def oauth_pair(self, grant, grant_type):
+        access = "provider_fixture_" + uuid.uuid4().hex
+        refresh = "provider_refresh_fixture_" + uuid.uuid4().hex
+        self.oauth_tokens[access] = dict(grant, kind="access", expires=time.time() + grant["lifetime"])
+        self.oauth_tokens[refresh] = dict(grant, kind="refresh", expires=time.time() + 3600)
+        self.oauth_exchanges.append({key: grant[key] for key in ("account", "family", "generation")} | {"grant_type": grant_type})
+        return {"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": grant["lifetime"], "scope": "mcp:tools"}
 
 
 def tools():
@@ -179,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"fixture": True, "ready": True})
         if path == "/fixture/stats":
             with self.fixture.lock:
-                return self.send(200, {"calls": self.fixture.calls, "requests": self.fixture.requests})
+                return self.send(200, {"calls": self.fixture.calls, "requests": self.fixture.requests, "oauth_exchanges": self.fixture.oauth_exchanges})
         if path == "/api/v1/application/testing-context":
             try:
                 environment = self.iam_environment()
@@ -198,6 +207,10 @@ class Handler(BaseHTTPRequestHandler):
             redirect = query.get("redirect_uri", "")
             if urlparse(redirect).hostname not in ("127.0.0.1", "localhost"):
                 return self.error("Fixture callback must use loopback")
+            # Test-only consent selections: twenty seconds falls inside MCPort's
+            # refresh window, so rotation is exercised without sleeping or DB edits.
+            if query.get("fixture_account", "oauth-owner") not in ("oauth-owner", "oauth-carbon", "oauth-silicon") or query.get("fixture_token_lifetime", "3600") not in ("20", "3600"):
+                return self.error("Unknown fixture OAuth account or token lifetime")
             code = "code_fixture_" + uuid.uuid4().hex
             with self.fixture.lock:
                 self.fixture.oauth_codes[code] = dict(query, expires=time.time() + 120)
@@ -256,21 +269,27 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/oauth/token":
             with self.fixture.lock:
                 if body.get("grant_type") == "refresh_token":
-                    account = self.fixture.oauth_tokens.pop(body.get("refresh_token"), None)
-                    if not account:
+                    grant = self.fixture.oauth_tokens.get(body.get("refresh_token"))
+                    if not grant or grant["kind"] != "refresh" or grant["expires"] < time.time():
                         return self.error("Invalid OAuth refresh token", 401)
-                else:
+                    if body.get("client_id") != grant["client_id"] or body.get("resource") != grant["resource"]:
+                        return self.error("Refresh client/resource binding mismatch", 401)
+                    # Single-use rotation also invalidates earlier access tokens:
+                    # a successful MCP response proves the new bearer was used.
+                    self.fixture.oauth_tokens = {token: value for token, value in self.fixture.oauth_tokens.items() if value["family"] != grant["family"]}
+                    grant = dict(grant, generation=grant["generation"] + 1)
+                elif body.get("grant_type") == "authorization_code":
                     attempt = self.fixture.oauth_codes.pop(body.get("code"), None)
                     if not attempt or attempt["expires"] < time.time():
                         return self.error("Invalid OAuth code", 401)
                     challenge = base64.urlsafe_b64encode(hashlib.sha256(body.get("code_verifier", "").encode()).digest()).decode().rstrip("=")
                     if challenge != attempt["code_challenge"] or body.get("redirect_uri") != attempt["redirect_uri"] or body.get("client_id") != attempt.get("client_id") or body.get("resource") != attempt.get("resource"):
                         return self.error("PKCE/client/redirect/resource binding mismatch", 401)
-                    account = "oauth-owner"
-                access, refresh = "provider_fixture_" + uuid.uuid4().hex, "provider_refresh_fixture_" + uuid.uuid4().hex
-                self.fixture.oauth_tokens[access] = account
-                self.fixture.oauth_tokens[refresh] = account
-            return self.send(200, {"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "scope": "mcp:tools"})
+                    grant = {"account": attempt.get("fixture_account", "oauth-owner"), "client_id": attempt["client_id"], "resource": attempt["resource"], "family": uuid.uuid4().hex, "generation": 0, "lifetime": int(attempt.get("fixture_token_lifetime", "3600"))}
+                else:
+                    return self.error("Unsupported OAuth grant type", 400)
+                tokens = self.fixture.oauth_pair(grant, body["grant_type"])
+            return self.send(200, tokens)
         if path.startswith("/mcp/"):
             token = self.headers.get("Authorization", "").removeprefix("Bearer ")
             account = "public" if path == "/mcp/public" else "desktop-owner"
@@ -279,13 +298,17 @@ class Handler(BaseHTTPRequestHandler):
                 if account is None:
                     return self.send(401, {"error": "invalid_token"}, {"WWW-Authenticate": "Bearer"})
             if path == "/mcp/oauth":
-                account = self.fixture.oauth_tokens.get(token)
-                if not account:
+                with self.fixture.lock:
+                    grant = self.fixture.oauth_tokens.get(token)
+                if not grant or grant["kind"] != "access" or grant["expires"] < time.time():
                     return self.send(401, {"error": "invalid_token"}, {"WWW-Authenticate": 'Bearer resource_metadata="' + self.fixture.origin + '/.well-known/oauth-protected-resource/mcp/oauth"'})
+                account = grant["account"]
             try:
                 result = mcp_result(body, account, self.fixture)
             except (ValueError, KeyError) as error:
                 return self.send(200, {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32601, "message": str(error)}})
+            if path == "/mcp/oauth" and body.get("method") == "tools/call" and body.get("params", {}).get("name") == "whoami":
+                result["structuredContent"]["token_generation"] = grant["generation"]
             if "id" not in body:
                 return self.send(202)
             if body.get("method") == "tools/call" and body.get("params", {}).get("name") == "drop":
