@@ -132,6 +132,71 @@ class BackendPackageTests(unittest.TestCase):
     def test_unconfirmed_stop_preserves_candidate_and_refuses_data_restore(self):
         self.simulate_failed_cutover(stop_fails=True)
 
+    @unittest.skipIf(os.name == "nt", "Unix permission bits are required for this installer regression")
+    def test_release_directories_are_traversable_under_private_umask(self):
+        assets = self.web / "assets" / "nested"
+        assets.mkdir(parents=True)
+        (assets / "application.js").write_text("/* fixture */")
+        output, result = self.package()
+        metadata, members = backend.installer.validate_bundle(output, result["sha256"], REVISION)
+        prefix = self.path / "opt"
+        releases = prefix / "releases"
+        releases.mkdir(mode=0o700, parents=True)
+        releases.chmod(0o700)
+        private = self.path / "private"
+        private.mkdir(mode=0o700)
+        secret = private / "runtime.env"
+        secret.write_text("FIXTURE_ONLY=placeholder")
+        secret.chmod(0o600)
+        release = releases / REVISION
+        previous_umask = os.umask(0o077)
+        try:
+            with mock.patch.object(backend.installer, "PREFIX", prefix), mock.patch.object(
+                backend.installer, "command", side_effect=RuntimeError("stop-before-host-operations")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "stop-before-host-operations"):
+                    backend.installer.install_release(metadata, members, "https://fixture.example/health", release, None)
+        finally:
+            os.umask(previous_umask)
+        for directory in (release, release / "web", release / "web/dist", release / "web/dist/assets", release / "web/dist/assets/nested"):
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o755, str(directory))
+        self.assertEqual((release / "web/dist/assets/nested/application.js").stat().st_mode & 0o777, 0o644)
+        self.assertEqual((release / "mcport-server").stat().st_mode & 0o777, 0o755)
+        self.assertEqual(releases.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+
+    @unittest.skipIf(os.name == "nt", "Unix permission bits are required for this installer regression")
+    def test_new_public_paths_override_umask_without_broadening_existing_private_paths(self):
+        prefix = self.path / "opt"
+        releases = prefix / "releases"
+        backups = self.path / "backups"
+        private = self.path / "private"
+        private.mkdir(mode=0o700)
+        secret = private / "runtime.env"
+        secret.write_text("FIXTURE_ONLY=placeholder")
+        secret.chmod(0o600)
+        real_stat = Path.stat
+        def root_owned_stat(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=0)
+        previous_umask = os.umask(0o077)
+        try:
+            with mock.patch.object(Path, "stat", root_owned_stat):
+                backend.installer.root_directory(prefix)
+                backend.installer.root_directory(releases)
+                backend.installer.root_directory(backups, private=True)
+                backend.installer.root_directory(private, private=True)
+                with self.assertRaisesRegex(ValueError, "traversable"):
+                    backend.installer.root_directory(private)
+        finally:
+            os.umask(previous_umask)
+        self.assertEqual(prefix.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(releases.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(backups.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+
     def simulate_failed_cutover(self, stop_fails=False):
         output, result = self.package()
         metadata, members = backend.installer.validate_bundle(output, result["sha256"], REVISION)

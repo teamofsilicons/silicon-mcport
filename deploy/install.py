@@ -144,10 +144,15 @@ def validate_state_tree(path):
 def root_directory(path, private=False):
     if path.is_symlink():
         raise ValueError("Deployment directories must not be symlinks")
+    created = not path.exists()
     path.mkdir(mode=0o700 if private else 0o755, parents=True, exist_ok=True)
+    if created:
+        path.chmod(0o700 if private else 0o755)
     mode = stat.S_IMODE(path.stat().st_mode)
     if path.stat().st_uid != 0 or mode & (0o077 if private else 0o022):
         raise ValueError("Deployment directories must be root-owned with appropriate protected permissions")
+    if not private and mode & 0o111 != 0o111:
+        raise ValueError("Public deployment directories must be traversable by the service; set mode 0755 before installing")
 
 
 def replace_link(path, target):
@@ -222,6 +227,12 @@ def install_release(metadata, members, public_health_url, release, previous):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(data)
             destination.chmod(mode)
+        # Validated payloads contain only public release files. Set directory
+        # permissions explicitly so an operator's private umask cannot hide
+        # website assets from the unprivileged service account.
+        for directory in staging.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o755)
         staging.chmod(0o755)
         staging.rename(release)
     finally:
