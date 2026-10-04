@@ -38,7 +38,7 @@ class BackendPackageTests(unittest.TestCase):
         self.web.mkdir()
         (self.web / "index.html").write_text("<html>Fixture only</html>")
         self.evidence = self.path / "provenance.json"
-        self.evidence.write_text(json.dumps({"source_revision": REVISION, "target": "aarch64-unknown-linux-gnu", "build_distribution": "Amazon Linux 2023", "glibc_baseline": "2.34", "build_image": "public.ecr.aws/amazonlinux/amazonlinux@sha256:" + "b" * 64, "rustc": "rustc fixture", "binary_sha256": hashlib.sha256(elf).hexdigest(), "native_tests_passed": True, "native_health_smoke_passed": True, "health_version": "0.1.0", "health_source_revision": REVISION}))
+        self.evidence.write_text(json.dumps({"source_revision": REVISION, "target": "aarch64-unknown-linux-gnu", "build_distribution": "Amazon Linux 2023", "glibc_baseline": "2.34", "build_image": "public.ecr.aws/amazonlinux/amazonlinux@sha256:" + "b" * 64, "rustc": "rustc fixture", "binary_sha256": hashlib.sha256(elf).hexdigest(), "native_tests_passed": True, "native_health_smoke_passed": True, "health_version": backend.tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"], "health_source_revision": REVISION}))
 
     def tearDown(self):
         self.temporary.cleanup()

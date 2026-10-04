@@ -6,8 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-mcport-core = { path = "../mcport-core", version = "0.1.0" }
-mcport-mcp = { path = "../mcport-mcp", version = "0.1.0" }
+mcport-core = { path = "../mcport-core", version = "0.2.0" }
+mcport-mcp = { path = "../mcport-mcp", version = "0.2.0" }
 silicon-iam-client = "=5.2.1"
 anyhow = "1"
 axum = { version = "0.8", features = ["macros"] }

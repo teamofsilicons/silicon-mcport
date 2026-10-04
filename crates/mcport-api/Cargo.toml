@@ -8,7 +8,7 @@ documentation.workspace = true
 description = "Stateless HTTP transport and wire API for Silicon MCPort"
 
 [dependencies]
-mcport-core = { path = "../mcport-core", version = "0.1.0" }
+mcport-core = { path = "../mcport-core", version = "0.2.0" }
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

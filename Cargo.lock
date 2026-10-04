@@ -1472,7 +1472,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mcport-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mcport-core",
  "reqwest",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "mcport-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "clap",
@@ -1505,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "mcport-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fs2",
  "mcport-api",
@@ -1520,7 +1520,7 @@ dependencies = [
 
 [[package]]
 name = "mcport-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "mcport-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "mcport-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -1573,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "mcport-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
