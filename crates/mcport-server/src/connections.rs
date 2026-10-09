@@ -638,7 +638,7 @@ pub async fn invite(
     Json(input): Json<AccessInput>,
 ) -> Result<Json<Value>> {
     let (c, _) = resolve(&app, &a.account, &name, true).await?;
-    let target = accounts::resolve(&app, &input.account).await?;
+    let target = accounts::resolve(&app, a.uuid(), &input.account).await?;
     if target.uuid == c.owner_uuid {
         return Err(Error::bad(
             "The owner already has access to its own connection.",
@@ -675,7 +675,7 @@ pub async fn invite(
 }
 /// The uuid a path segment names: a uuid with a grant, a cached current id, or
 /// (for anything else) a lookup in Accounts.
-async fn named_account(app: &App, connection: &str, input: &str) -> Result<String> {
+async fn named_account(app: &App, caller: &str, connection: &str, input: &str) -> Result<String> {
     if app
         .store
         .get::<GrantRecord>("grant", &grant_key(connection, input))?
@@ -683,7 +683,7 @@ async fn named_account(app: &App, connection: &str, input: &str) -> Result<Strin
     {
         return Ok(input.into());
     }
-    Ok(accounts::resolve(app, input).await?.uuid)
+    Ok(accounts::resolve(app, caller, input).await?.uuid)
 }
 pub async fn uninvite(
     State(app): State<App>,
@@ -691,7 +691,7 @@ pub async fn uninvite(
     Path((name, account)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
     let (c, _) = resolve(&app, &a.account, &name, true).await?;
-    let uuid = named_account(&app, &c.id, &account).await?;
+    let uuid = named_account(&app, a.uuid(), &c.id, &account).await?;
     app.store.delete("grant", &grant_key(&c.id, &uuid))?;
     crate::execution::invalidate_connection(&app, &c.id)?;
     Ok(Json(json!({"data":{"deleted":true}})))
@@ -738,7 +738,7 @@ pub async fn set_policy(
         return Err(Error::bad("A tool name is required."));
     }
     let account = match p.account.as_deref().filter(|s| !s.is_empty()) {
-        Some(input) => Some(accounts::resolve(&app, input).await?.uuid),
+        Some(input) => Some(accounts::resolve(&app, a.uuid(), input).await?.uuid),
         None => None,
     };
     let record = PolicyRecord {
@@ -776,7 +776,7 @@ async fn subject(app: &App, a: &Auth, query: &AccountQuery) -> Result<AccountRow
     let Some(input) = query.account.as_deref().filter(|s| !s.is_empty()) else {
         return Ok(a.account.clone());
     };
-    let target = accounts::resolve(app, input).await?;
+    let target = accounts::resolve(app, a.uuid(), input).await?;
     if target.uuid == a.uuid() {
         return Ok(a.account.clone());
     }
@@ -1372,6 +1372,63 @@ mod access_tests {
         assert!(
             message.contains("c:bob") && message.contains("c:cy"),
             "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn naming_accounts_is_limited_per_caller() {
+        let f = people().await;
+        let (_, body) = f
+            .as_(
+                "Cy",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("cy-tools", "none", "")),
+            )
+            .await;
+        let id = body["data"]["id"].as_str().unwrap().to_owned();
+        let token = f.token("Cy");
+        for n in 0..30 {
+            let (status, body) = f
+                .call(
+                    "POST",
+                    &format!("/api/v1/connections/{id}/access"),
+                    Some(&token),
+                    Some(json!({"account": format!("c:made-up-{n}")})),
+                )
+                .await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        }
+        let (status, body) = f
+            .call(
+                "POST",
+                &format!("/api/v1/connections/{id}/access"),
+                Some(&token),
+                Some(json!({"account":"c:made-up-final"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["error"]["code"], "too_many_lookups");
+        // Another account is unaffected.
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("ada-tools", "none", "")),
+            )
+            .await;
+        let ada = body["data"]["id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            f.as_(
+                "Ada",
+                "POST",
+                &format!("/api/v1/connections/{ada}/access"),
+                Some(json!({"account":"c:bob"}))
+            )
+            .await
+            .0,
+            StatusCode::OK
         );
     }
 

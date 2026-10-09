@@ -32,6 +32,8 @@ pub const ACCOUNT_MAX_AGE: i64 = 3600;
 pub const CUSTODIAN_MAX_AGE: i64 = 600;
 /// Optional lookups stop above this many per minute (Accounts allows 600 per app).
 const OPTIONAL_LOOKUPS_PER_MINUTE: usize = 450;
+/// Ids one account may have resolved per minute (each can cost an Accounts lookup).
+const RESOLUTIONS_PER_ACCOUNT_PER_MINUTE: usize = 30;
 /// How long a lookup may take before MCPort continues with what it knows.
 const LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -150,6 +152,7 @@ pub struct Accounts {
     introspected: Mutex<HashMap<String, Instant>>,
     resolved: Mutex<HashMap<String, (AccountSummary, Instant)>>,
     lookups: Mutex<VecDeque<Instant>>,
+    resolutions: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 impl Accounts {
     pub fn new(client: AccountsClient, app_id: &str, app_secret: &str, issuer: &str) -> Self {
@@ -163,6 +166,7 @@ impl Accounts {
             introspected: Mutex::new(HashMap::new()),
             resolved: Mutex::new(HashMap::new()),
             lookups: Mutex::new(VecDeque::new()),
+            resolutions: Mutex::new(HashMap::new()),
         }
     }
     pub fn app(&self) -> AppClient<'_> {
@@ -300,8 +304,37 @@ impl Accounts {
             )),
         }
     }
+    /// Count one id resolution for `caller`; refuse beyond the per-minute limit so
+    /// one account cannot spend MCPort's Accounts lookup allowance for everyone.
+    fn take_resolution(&self, caller: &str) -> Result<()> {
+        let mut all = self.resolutions.lock().unwrap_or_else(|e| e.into_inner());
+        if all.len() > 4096 {
+            all.retain(|_, times| {
+                times
+                    .back()
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(60))
+            });
+        }
+        let times = all.entry(caller.to_owned()).or_default();
+        while times
+            .front()
+            .is_some_and(|at| at.elapsed() > Duration::from_secs(60))
+        {
+            times.pop_front();
+        }
+        if times.len() >= RESOLUTIONS_PER_ACCOUNT_PER_MINUTE {
+            return Err(Error::new(
+                429,
+                "too_many_lookups",
+                "This account named too many accounts in the last minute.",
+                "Wait a minute, then try again.",
+            ));
+        }
+        times.push_back(Instant::now());
+        Ok(())
+    }
     /// Resolve a `c:`/`si:` id (current ids only) or a uuid through Accounts.
-    pub async fn resolve(&self, input: &str) -> Result<AccountSummary> {
+    pub async fn resolve(&self, caller: &str, input: &str) -> Result<AccountSummary> {
         let input = input.trim();
         if input.is_empty()
             || input.len() > 100
@@ -328,6 +361,7 @@ impl Accounts {
         {
             return Ok(summary.clone());
         }
+        self.take_resolution(caller)?;
         let summary = if by_id {
             self.take_lookup_budget(true);
             match tokio::time::timeout(LOOKUP_TIMEOUT, self.app().lookup_by_id(input)).await {
@@ -460,9 +494,9 @@ pub async fn fresh(app: &App, row: AccountRow, max_age: i64) -> AccountRow {
         }
     }
 }
-/// Resolve a caller-supplied `c:`/`si:` id or uuid to a stored account row.
-pub async fn resolve(app: &App, input: &str) -> Result<AccountRow> {
-    let summary = app.accounts.resolve(input).await?;
+/// Resolve a `c:`/`si:` id or uuid that `caller` supplied to a stored account row.
+pub async fn resolve(app: &App, caller: &str, input: &str) -> Result<AccountRow> {
+    let summary = app.accounts.resolve(caller, input).await?;
     let at_ms = now() * 1000;
     app.store
         .update_account(&summary.uuid, |row| {

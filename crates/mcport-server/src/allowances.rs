@@ -25,7 +25,7 @@ pub struct SiliconQuery {
 /// The Silicon whose list the caller manages: itself, or one it looks after.
 async fn silicon(app: &App, a: &Auth, input: Option<&str>) -> Result<AccountRow> {
     let target = match input.filter(|s| !s.is_empty()) {
-        Some(input) => accounts::resolve(app, input).await?,
+        Some(input) => accounts::resolve(app, a.uuid(), input).await?,
         None => a.account.clone(),
     };
     if !target.is_silicon() {
@@ -82,7 +82,7 @@ pub async fn add(
     Json(input): Json<AllowanceInput>,
 ) -> Result<Json<Value>> {
     let silicon = silicon(&app, &a, input.silicon.as_deref()).await?;
-    let account = accounts::resolve(&app, &input.account).await?;
+    let account = accounts::resolve(&app, a.uuid(), &input.account).await?;
     if account.uuid == silicon.uuid {
         return Err(Error::bad("A Silicon does not need to allow itself."));
     }
@@ -108,7 +108,7 @@ pub async fn remove(
     let uuid = if app.store.allows(&silicon.uuid, &account)? {
         account
     } else {
-        accounts::resolve(&app, &account).await?.uuid
+        accounts::resolve(&app, a.uuid(), &account).await?.uuid
     };
     let removed = app.store.disallow(&silicon.uuid, &uuid)?;
     Ok(Json(json!({"data": {"deleted": removed}})))

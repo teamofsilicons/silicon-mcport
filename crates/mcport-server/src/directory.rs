@@ -565,7 +565,7 @@ pub async fn share(
             "Community entries are already visible to everyone signed in.",
         ));
     }
-    let target = accounts::resolve(&app, &input.account).await?;
+    let target = accounts::resolve(&app, a.uuid(), &input.account).await?;
     if target.uuid == entry.owner_uuid {
         return Err(Error::bad("The creator already sees its own entry."));
     }
@@ -608,7 +608,7 @@ pub async fn unshare(
     {
         account
     } else {
-        accounts::resolve(&app, &account).await?.uuid
+        accounts::resolve(&app, a.uuid(), &account).await?.uuid
     };
     app.store
         .delete("directory_grant", &entry_grant_key(&entry.id, &uuid))?;

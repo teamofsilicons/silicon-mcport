@@ -190,6 +190,7 @@ pub struct Ticket {
     call_id: String,
     index: u32,
     viewer_uuid: String,
+    issued_at: i64,
     expires_at: i64,
 }
 const TICKET_SECONDS: i64 = 60;
@@ -290,6 +291,7 @@ pub async fn ticket(
                 call_id: record.invocation.id.clone(),
                 index,
                 viewer_uuid: a.uuid().into(),
+                issued_at: now(),
                 expires_at,
             },
         );
@@ -315,10 +317,11 @@ pub async fn redeem(State(app): State<App>, Path(value): Path<String>) -> Result
                 "Ask for a new download link.",
             )
         })?;
+    // A sign-out after the ticket was issued ends it too.
     let viewer = app
         .store
         .account(&ticket.viewer_uuid)?
-        .filter(AccountRow::active)
+        .filter(|viewer| viewer.active() && viewer.revoked_before <= ticket.issued_at)
         .ok_or_else(Error::missing)?;
     let record = authorized(&app, &viewer, &ticket.call_id).await?;
     let asset = embedded(record.invocation.result.as_ref().expect("checked result"))
@@ -566,6 +569,29 @@ mod tests {
         let (status, body) = f.call("GET", path, None, None).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "download_expired");
+        // A ticket issued before its holder signed out everywhere does not outlive that.
+        let (_, body) = f
+            .as_("Ada", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
+            .await;
+        let path = body["data"]["url"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches("http://127.0.0.1:4241")
+            .to_owned();
+        crate::accounts_webhook::revoke(&f.app, "Ada", (crate::state::now() + 1) * 1000, None)
+            .unwrap();
+        assert_eq!(
+            f.call("GET", &path, None, None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        f.app
+            .store
+            .update_account("Ada", |row| {
+                let mut row = row.unwrap();
+                row.revoked_before = 0;
+                Some(row)
+            })
+            .unwrap();
         // A ticket issued before access ended does not outlive it.
         let (_, body) = f
             .as_("Ada", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
