@@ -1,17 +1,17 @@
 # Store the completed file outside source control with mode 0600.
-MCPORT_BIND=127.0.0.1:4380
+# Silicon Accounts: the public URL issues access tokens (it is their `iss`).
+ACCOUNTS_URL=https://accounts.teamofsilicons.com
+# Optional: where MCPort calls Silicon Accounts, when that differs from ACCOUNTS_URL.
+# ACCOUNTS_API_URL=
 MCPORT_APP_ID=mcport
+# The mcport app's secret from Silicon Accounts (server only; never in the website).
 MCPORT_APP_SECRET=
-MCPORT_IAM_URL=https://backend.iam.teamofsilicons.com
-MCPORT_IAM_WEB_URL=https://iam.teamofsilicons.com
+# The whsec_ secret of mcport's webhook (https://backend.mcport.teamofsilicons.com/webhooks/accounts).
+MCPORT_ACCOUNTS_WEBHOOK_SECRET=
+MCPORT_BIND=127.0.0.1:4380
 MCPORT_PUBLIC_URL=https://your-mcport-host.example
-MCPORT_WEB_URL=https://your-mcport-host.example
+MCPORT_WEB_URL=https://your-mcport-website.example
 MCPORT_DATA_DIR=/var/lib/mcport
-MCPORT_WEBHOOK_SECRET=
-MCPORT_WEBHOOK_SECRET_VERSION=1
-MCPORT_LIFECYCLE_SECRET=
-MCPORT_TEST_APP_SECRETS={}
 MCPORT_TELEMETRY_KEY=
-MCPORT_TEST_TELEMETRY_KEYS={}
 POSTMARK_SERVER_TOKEN=
 MCPORT_REPORT_FROM=mcport@teamofsilicons.com

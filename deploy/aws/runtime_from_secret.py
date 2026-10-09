@@ -19,18 +19,16 @@ DESTINATION = Path('/etc/mcport/runtime.env')
 SECRET_ID = 'silicon-mcport/production-runtime'
 REGION = 'us-east-1'
 FIXED = {
+    'ACCOUNTS_URL': 'https://accounts.teamofsilicons.com',
     'MCPORT_APP_ID': 'mcport',
     'MCPORT_BIND': '127.0.0.1:4380',
     'MCPORT_DATA_DIR': '/var/lib/mcport',
-    'MCPORT_IAM_URL': 'https://backend.iam.teamofsilicons.com',
-    'MCPORT_IAM_WEB_URL': 'https://iam.teamofsilicons.com',
     'MCPORT_PUBLIC_URL': 'https://backend.mcport.teamofsilicons.com',
     'MCPORT_WEB_URL': 'https://mcport.teamofsilicons.com',
 }
 OPTIONAL = {
-    'MCPORT_MASTER_KEY', 'MCPORT_WEBHOOK_SECRET', 'MCPORT_WEBHOOK_SECRET_VERSION',
-    'MCPORT_LIFECYCLE_SECRET', 'MCPORT_TELEMETRY_KEY', 'MCPORT_TEST_APP_SECRETS',
-    'MCPORT_TEST_TELEMETRY_KEYS', 'POSTMARK_SERVER_TOKEN', 'MCPORT_REPORT_FROM',
+    'MCPORT_MASTER_KEY', 'MCPORT_ACCOUNTS_WEBHOOK_SECRET', 'MCPORT_TELEMETRY_KEY',
+    'POSTMARK_SERVER_TOKEN', 'MCPORT_REPORT_FROM', 'ACCOUNTS_API_URL',
 }
 
 
@@ -42,16 +40,12 @@ def render_runtime(payload):
     for key, value in payload.items():
         if not isinstance(value, str) or not value or any(ord(c) < 32 or ord(c) == 127 for c in value):
             raise ValueError('runtime values must be nonempty single-line strings')
-        if key in {'MCPORT_WEBHOOK_SECRET', 'MCPORT_LIFECYCLE_SECRET'} and len(value) < 32:
-            raise ValueError('signing and lifecycle secrets require at least 32 characters')
+        if key == 'MCPORT_ACCOUNTS_WEBHOOK_SECRET' and (not value.startswith('whsec_') or len(value) < 16):
+            raise ValueError('the Silicon Accounts webhook secret is the whsec_ value shown for the mcport webhook')
         if key == 'MCPORT_MASTER_KEY' and not re.fullmatch(r'[0-9a-fA-F]{64}', value):
             raise ValueError('master key requires 64 hex characters')
-        if key == 'MCPORT_WEBHOOK_SECRET_VERSION' and not re.fullmatch(r'[1-9][0-9]*', value):
-            raise ValueError('webhook version must be a positive integer')
-        if key in {'MCPORT_TEST_APP_SECRETS', 'MCPORT_TEST_TELEMETRY_KEYS'}:
-            values = json.loads(value)
-            if not isinstance(values, dict) or any(not isinstance(v, str) or not v for v in values.values()):
-                raise ValueError('test settings require a JSON object of nonempty strings')
+        if key == 'ACCOUNTS_API_URL' and not value.startswith('https://'):
+            raise ValueError('the Silicon Accounts API URL must use https')
     values = {**FIXED, **payload}
     # EnvironmentFile does not perform shell variable expansion. Quote its own
     # backslash/double-quote syntax; never source this file as a shell script.

@@ -1,132 +1,54 @@
-# Isolated acceptance setup
+# Acceptance against a test Silicon Accounts deployment
 
-Use a new Honeycomb world for MCPort acceptance. The operator's existing Carbon
-session manages that world; MCPort's own production application credential attaches
-the application. All acceptance identities and application sessions are created in
-the test world. No other application's secret or user token is used for MCPort login.
-The sequence below follows the current Honeycomb 0.6.1 and IAM 5.2.1 contracts; it
-is a setup procedure, not a claim that a particular live acceptance run passed.
+MCPort has no testing environments inside one backend. To test without touching
+production, run a separate MCPort backend (its own data directory and port) wired
+to a test Silicon Accounts deployment, with test Carbons and Silicons created
+there. Production credentials, accounts and data are never used.
 
-## Register the participant
+## Configure the backend
 
-Append this entry to Honeycomb's `HONEYCOMB_LIFECYCLE_PARTICIPANTS`, preserving its
-existing entries:
-
-```json
-{"app_id":"mcport","base_url":"https://backend.mcport.teamofsilicons.com","token_env":"MCPORT_LIFECYCLE_SECRET"}
-```
-
-Generate an independent service token of at least 32 characters. Store it as
-`MCPORT_LIFECYCLE_SECRET` in both runtimes, then restart them. This is deployment
-configuration; IAM and Honeycomb source changes are unnecessary. Register before
-attachment: without the participant, IAM can import first while Honeycomb remains
-pending and does not return the application credential. Resume the same request
-after correcting readiness, rather than creating another world.
-
-## Prepare the world and its members
-
-As the existing authorized Honeycomb operator, create a world before importing
-MCPort. This provisions the IAM/Honeycomb core without importing application data:
+The test Accounts deployment needs an `mcport` app with `device_flow` and
+`public_client` on and a registered website callback. Start the backend with:
 
 ```sh
-honeycomb --json environments create tos 'MCPort acceptance' \
-  --description 'Dedicated isolated MCPort acceptance'
-honeycomb --json environments get "$ENV_ID"
+ACCOUNTS_URL=http://localhost:9590 \      # the test deployment's public URL (token issuer)
+ACCOUNTS_API_URL=http://127.0.0.1:9589 \  # only if MCPort reaches it at another address
+MCPORT_APP_SECRET=<the test app's secret> \
+MCPORT_ACCOUNTS_WEBHOOK_SECRET=<whsec_ of the test app's webhook> \
+MCPORT_BIND=127.0.0.1:4241 MCPORT_PUBLIC_URL=http://127.0.0.1:4241 \
+MCPORT_DATA_DIR=/path/to/empty/test-data \
+mcport-server serve
 ```
 
-Retain the returned UUID and operation identity. Continue only when the core world
-is ready. Retrieve its key with `honeycomb environments key "$ENV_ID"`, capturing
-the output to a protected file; this command returns credential material.
+`http://` is accepted only for this machine (localhost and loopback addresses).
+Point the test app's webhook at `http://127.0.0.1:4241/webhooks/accounts`
+(`PUT /v1/apps/mcport/webhook` with the app's credentials; the first save returns
+the `whsec_` secret once) and check `POST /v1/apps/mcport/webhook/test` arrives.
 
-For IAM CLI onboarding, the same operator needs a direct IAM session authorized
-to manage this world. `iam --org tos env key "$ENV_ID"` retrieves and saves the
-key for that IAM profile; capture this output privately too. Do not pass a raw key
-to IAM's `--test`, which accepts a saved UUID. A fresh IAM profile must authenticate
-the operator legitimately before this management call. Alternatively, IAM's
-official Rust client accepts the retrieved key through `with_environment`, without
-copying a production credential into the test world.
+## Identities and tokens
 
-Create the test Carbon and `tos` before attaching the private application. Normal
-test signup accepts `000000` and sends no email or SMS. For example:
+Create one Carbon, a Silicon it looks after, and an unrelated Carbon in the test
+deployment. Get MCPort access tokens the way real clients do:
 
-```sh
-iam --test "$ENV_ID" --no-org --json signup --email mcport-qa@example.test \
-  --carbon-id c:mcportqa --display-name 'MCPort QA' --timezone Etc/UTC
-# Resume the returned signup session using its session ID:
-iam --test "$ENV_ID" --no-org --json signup --session-id "$SESSION_ID" \
-  --email-code 000000
-iam --test "$ENV_ID" --no-org org create tos --name 'MCPort acceptance'
-iam --test "$ENV_ID" --org tos silicon create si:mcportqa \
-  --display-name 'MCPort QA Silicon' --job-description 'Exercise isolated MCPort access'
-```
+- Carbons: sign in through the hosted pages (the website), or approve the CLI's
+  device code (`mcport login`).
+- Silicons: `silicon-accounts login --app mcport -q` gives a short-lived token;
+  `mcport login --slt-stdin` exchanges it (the CLI is a public client).
 
-Capture the Silicon creation response privately: it returns its credential once.
-Select `tos` when each actor obtains its MCPort SLT through IAM. Creating `tos` first
-preserves a login-capable test owner: automatic app import into an empty world
-would otherwise create the owning organization with a suspended fixture owner.
+## What to prove
 
-## Attach using MCPort's own authority
+1. `GET /api/v1/me` names each account (a Silicon's `custodian` is its Carbon).
+2. A Silicon's connection is managed by its custodian (`access: custodian`) and
+   invisible to the unrelated Carbon; `circle` connections are usable by the owner's
+   circle only.
+3. Sharing with a Silicon outside the sharer's circle answers
+   `silicon_not_reachable` until the custodian runs `POST /api/v1/allow`.
+4. Creating a host (an introspected route) succeeds with a live sign-in.
+5. Webhooks from the test deployment apply at once: an id change shows in `/me`; a
+   custodian transfer moves the Silicon's activity to the new custodian; rotating
+   the Silicon's STK makes its older token answer `signed_out`; removing MCPort's
+   access does the same for that account until it signs in again.
 
-Honeycomb CLI 0.6.1 supports world creation and operator imports, but has no
-app-owned attachment command that returns the app secret. Use its official Rust
-client, `Client::with_application("mcport", production_secret)` followed by
-`create_application_environment(name, description, Some(root_key), mutation)`.
-The matching API contract is:
-
-```text
-POST https://backend.honeycomb.teamofsilicons.com/api/v1/environments
-Authorization: Basic <base64 of mcport:its-own-production-app-secret>
-Content-Type: application/json
-Idempotency-Key: <one stable request key>
-```
-
-```json
-{"name":"MCPort acceptance","description":"Dedicated isolated MCPort acceptance","testing_key":"<prepared-world root key>"}
-```
-
-Read secrets from protected files in the operator process, never shell arguments,
-logs, or committed files. Do not send a user bearer or `X-Testing-Environment-Key`
-on this app-owned control request. It attaches MCPort to the existing world without
-transferring ownership. Keep the same request and idempotency key for a retry.
-
-Require the matching environment UUID and `app_id: "mcport"`, `state: "ready"`,
-an accepted or unchanged operation, and `credential_state: "ready"`. Save the
-returned `app_secret` privately. An ordinary operator import does not return this
-credential; app-owned attachment is the credential delivery step. Honeycomb calls
-IAM's protected management API internally; operators do not need its service secret.
-
-## Install the test credential and verify
-
-Set `MCPORT_TEST_APP_SECRETS` in the protected runtime configuration to a JSON map
-from the world UUID to that returned secret, then restart MCPort. A lifecycle
-receipt confirms provisioning, not successful IAM authentication. Credentials can
-arrive afterward without replaying import, changing a generation, or rotating the
-world key. The map overrides a stored secret only for an already provisioned active
-test world. Missing entries use only the same world's stored credential, if any;
-missing credentials fail. Unknown, disabled, retired or purged worlds stay blocked.
-
-IAM verifies the selected app credential and world on every authentication path.
-An invalid configured credential fails without trying an older or production
-credential. Update the entry and restart after test secret rotation or reimport;
-retain it until a later lifecycle operation has persisted that credential. Removing
-an override does not revoke a credential previously stored in the same world.
-Retire the world through Honeycomb to disable testing access.
-
-Authenticate each test actor directly with IAM in this world and obtain an
-app-bound MCPort SLT selecting `tos`. In separate fresh MCPort homes, verify both
-identities using those issued codes. A world UUID only selects the environment;
-MCPort rejects identity selectors such as `c:mcportqa` and `si:mcportqa` as login
-credentials, even in testing:
-
-```sh
-mcport --test "$ENV_ID" login "$CARBON_MCPORT_SLT"
-mcport --test "$ENV_ID" login status --json
-# In the Silicon's separate home:
-mcport --test "$ENV_ID" login "$SILICON_MCPORT_SLT"
-mcport --test "$ENV_ID" login status --json
-```
-
-Then configure a test provider, invite the Silicon, execute a useful call, revoke
-access, and prove the denial. Check cross-world and production isolation. Use test
-provider accounts or fixtures. Current website onboarding has no initial test-world
-selector, so these CLI/API checks do not prove browser test-world onboarding.
+The 2026-10-10 migration run of exactly this procedure, on a copy of a database
+written by MCPort 0.2.0 and re-keyed with `link-identities`, is recorded in
+[docs/migration/progress.md](../docs/migration/progress.md).

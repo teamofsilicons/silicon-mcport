@@ -1,0 +1,768 @@
+openapi: 3.1.0
+info:
+  title: Silicon MCPort API
+  version: 0.3.0
+  summary: Configure MCP servers once and use their tools from the CLI, the Rust package and the website.
+  description: >
+    Success responses are `{"data": …}`; errors are `{"error": ApiError}`. Accounts are Silicon Accounts
+    accounts: MCPort stores the permanent `uuid` and shows the current `id` (`c:…` or `si:…`). Wherever a
+    request names an account it accepts a `c:`/`si:` id or a uuid. See API.md for the rules
+    (ownership, custodians, circles, sharing, revocation).
+  license:
+    name: MIT
+servers:
+  - url: https://backend.mcport.teamofsilicons.com
+  - url: http://127.0.0.1:4241
+    description: Local development (the migration's port block)
+security:
+  - bearerAuth: []
+tags:
+  - name: discovery
+  - name: allow
+  - name: directory
+  - name: connections
+  - name: provider-accounts
+  - name: execution
+  - name: hosts
+  - name: operations
+  - name: webhooks
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        A Silicon Accounts access token issued to the `mcport` app (EdDSA, `aud` mcport, `iss` the Accounts
+        public URL, 30 minutes). Verified locally against the Accounts JWKS. Operations marked `x-live: true`
+        also introspect the token (cached 30 s), so revocation applies at once.
+    hostToken:
+      type: http
+      scheme: bearer
+      description: The host token (`mph_…`) returned once by POST /api/v1/hosts. Daemon routes only.
+    proofAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: >
+        `Proof sap_…` (Silicon Accounts User verification proof). Not accepted yet: MCPort answers 401
+        `proof_not_accepted`. Reserved scopes for a later release: `mcport.connections.read`,
+        `mcport.tools.call`.
+    accountsSignature:
+      type: apiKey
+      in: header
+      name: X-Accounts-Signature
+      description: >
+        `v1=<hex HMAC-SHA256 of "{X-Accounts-Timestamp}.{raw body}">` keyed by MCPORT_ACCOUNTS_WEBHOOK_SECRET;
+        5-minute tolerance.
+  parameters:
+    Connection:
+      name: connection
+      in: path
+      required: true
+      description: Connection ID or unambiguous name.
+      schema: {type: string}
+    Host:
+      name: host
+      in: path
+      required: true
+      description: Host ID or name.
+      schema: {type: string}
+    Call:
+      name: call
+      in: path
+      required: true
+      schema: {type: string}
+    Entry:
+      name: entry
+      in: path
+      required: true
+      schema: {type: string}
+    Account:
+      name: account
+      in: path
+      required: true
+      description: A `c:`/`si:` id or an account uuid.
+      schema: {type: string}
+    Index:
+      name: index
+      in: path
+      required: true
+      schema: {type: integer, minimum: 0}
+    SiliconQuery:
+      name: silicon
+      in: query
+      required: false
+      description: A Silicon the caller looks after (`si:` id or uuid). Default the caller.
+      schema: {type: string}
+  responses:
+    Error:
+      description: An error envelope.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+  schemas:
+    ApiError:
+      type: object
+      required: [code, message, outcome_unknown]
+      properties:
+        code: {type: string, examples: [authentication_required, signed_out, silicon_not_reachable]}
+        message: {type: string}
+        recovery: {type: [string, 'null']}
+        outcome_unknown: {type: boolean}
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error: {$ref: '#/components/schemas/ApiError'}
+    AccountRef:
+      type: object
+      required: [uuid]
+      properties:
+        uuid: {type: string, description: Permanent Silicon Accounts uuid (case-sensitive).}
+        id: {type: string, description: Current public id; empty when unknown.}
+        kind: {type: string, enum: [carbon, silicon, '']}
+        display_name: {type: string}
+        pfp_url: {type: string}
+    Me:
+      allOf:
+        - $ref: '#/components/schemas/AccountRef'
+        - type: object
+          properties:
+            custodian: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+            expires_at: {type: integer}
+    Discovery:
+      type: object
+      properties:
+        app_id: {type: string}
+        accounts_url: {type: string, format: uri}
+        client_id: {type: string}
+        backend_url: {type: string, format: uri}
+        website_url: {type: string, format: uri}
+        repository_url: {type: string, format: uri}
+        docs_url: {type: string, format: uri}
+        package_url: {type: string, format: uri}
+        install_url: {type: string, format: uri}
+        version: {type: string}
+    AccountStatus:
+      type: object
+      properties:
+        connected: {type: boolean}
+        account: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+        label: {type: string}
+        kind: {type: string, examples: [none, bearer, header, oauth, host, per-user, shared]}
+    Connection:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        owner: {$ref: '#/components/schemas/AccountRef'}
+        transport: {type: string, enum: [http, stdio]}
+        url: {type: [string, 'null'], description: Managers only.}
+        host_id: {type: [string, 'null']}
+        command: {type: [string, 'null'], description: Managers only.}
+        args: {type: array, items: {type: string}}
+        auth_mode: {type: string, enum: [none, per-user, shared]}
+        visibility: {type: string, enum: [invited, circle]}
+        status: {type: string, enum: [ready, offline, checking, authentication_required]}
+        can_manage: {type: boolean}
+        access: {type: string, enum: [owner, custodian, circle, invited]}
+        account: {$ref: '#/components/schemas/AccountStatus'}
+        created_at: {type: integer}
+        updated_at: {type: integer}
+        version: {type: integer}
+    ConnectionInput:
+      type: object
+      additionalProperties: false
+      required: [name, transport, auth_mode]
+      properties:
+        name: {type: string, pattern: '^[A-Za-z0-9_-]{1,80}$'}
+        description: {type: string, maxLength: 4096}
+        transport: {type: string, enum: [http, stdio]}
+        url: {type: [string, 'null']}
+        host_id: {type: [string, 'null']}
+        command: {type: [string, 'null']}
+        args: {type: array, items: {type: string}, maxItems: 128}
+        auth_mode: {type: string, enum: [none, per-user, shared]}
+        visibility: {type: string, enum: ['', invited, circle, private], description: '`org` answers 400 visibility_removed.'}
+    ConnectionUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string}
+        description: {type: string}
+        visibility: {type: string, enum: [invited, circle, private]}
+        version: {type: integer}
+    AccessInput:
+      type: object
+      additionalProperties: false
+      required: [account]
+      properties:
+        account: {type: string, description: '`c:`/`si:` id or uuid. `principal_id` is accepted as an alias.'}
+    AccessGrant:
+      type: object
+      properties:
+        account: {$ref: '#/components/schemas/AccountRef'}
+        created_at: {type: integer}
+        created_by: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+    ToolPolicy:
+      type: object
+      properties:
+        tool: {type: string}
+        account: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+        enabled: {type: boolean}
+    ToolPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [tool, enabled]
+      properties:
+        tool: {type: string, maxLength: 256}
+        account: {type: [string, 'null'], description: '`c:`/`si:` id or uuid; null for everyone.'}
+        enabled: {type: boolean}
+    Allowance:
+      type: object
+      properties:
+        silicon: {$ref: '#/components/schemas/AccountRef'}
+        account: {$ref: '#/components/schemas/AccountRef'}
+        created_at: {type: integer}
+        created_by: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+    AllowanceInput:
+      type: object
+      additionalProperties: false
+      required: [account]
+      properties:
+        account: {type: string}
+        silicon: {type: [string, 'null']}
+    DirectoryTemplate:
+      type: object
+      additionalProperties: false
+      required: [transport, auth_mode]
+      properties:
+        transport: {type: string, enum: [http, stdio]}
+        url: {type: [string, 'null']}
+        command: {type: [string, 'null']}
+        args: {type: array, items: {type: string}}
+        auth_mode: {type: string, enum: [none, per-user, shared]}
+    DirectoryInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, maxLength: 128}
+        description: {type: string, maxLength: 4096}
+        category: {type: string, maxLength: 64}
+        source_url: {type: [string, 'null']}
+        template: {oneOf: [{$ref: '#/components/schemas/DirectoryTemplate'}, {type: 'null'}]}
+    DirectoryUpdate:
+      type: object
+      additionalProperties: false
+      required: [input, version]
+      properties:
+        input: {$ref: '#/components/schemas/DirectoryInput'}
+        version: {type: integer}
+    DirectoryEntry:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        category: {type: string}
+        source: {type: string, enum: [community, personal]}
+        source_url: {type: [string, 'null']}
+        source_revision: {type: [string, 'null']}
+        owner: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+        can_manage: {type: boolean}
+        template: {oneOf: [{$ref: '#/components/schemas/DirectoryTemplate'}, {type: 'null'}]}
+        version: {type: integer}
+        created_at: {type: integer}
+        updated_at: {type: integer}
+    RpcInput:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [tools/list, tools/call, resources/list, resources/templates/list, resources/read, prompts/list, prompts/get, completion/complete]
+        params: {type: object}
+        timeout_ms: {type: integer, minimum: 100, maximum: 600000}
+        idempotency_key: {type: string, minLength: 1, maxLength: 255}
+    RpcOutput:
+      type: object
+      properties:
+        call_id: {type: string}
+        result: {}
+    Invocation:
+      type: object
+      properties:
+        id: {type: string}
+        connection_id: {type: string}
+        connection_name: {type: string}
+        caller: {$ref: '#/components/schemas/AccountRef'}
+        execution_account: {oneOf: [{$ref: '#/components/schemas/AccountRef'}, {type: 'null'}]}
+        method: {type: string}
+        tool_name: {type: [string, 'null']}
+        status: {type: string, enum: [queued, running, completed, tool_error, failed, cancelled, unknown]}
+        created_at: {type: integer}
+        completed_at: {type: [integer, 'null']}
+        result: {}
+        error: {oneOf: [{$ref: '#/components/schemas/ApiError'}, {type: 'null'}]}
+        progress: {description: 'Latest provider progress (GET /calls/{call} only).'}
+    ResultAsset:
+      type: object
+      properties:
+        index: {type: integer}
+        name: {type: string}
+        mime_type: {type: string}
+        size: {type: integer}
+        source_uri: {type: [string, 'null']}
+        download_url: {type: string}
+    DownloadTicket:
+      type: object
+      properties:
+        url: {type: string, format: uri, description: Works once, until expires_at (60 seconds).}
+        expires_at: {type: integer}
+    Host:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        owner: {$ref: '#/components/schemas/AccountRef'}
+        online: {type: boolean}
+        last_seen: {type: [integer, 'null']}
+        created_at: {type: integer}
+        can_manage: {type: boolean}
+    HostRegistration:
+      type: object
+      properties:
+        host: {$ref: '#/components/schemas/Host'}
+        host_token: {type: string, description: Returned only once.}
+    Actor:
+      type: object
+      description: >
+        The caller of a host job. principal_id, identity_kind and org_id are transition fields for daemons
+        released before 0.3.0.
+      properties:
+        uuid: {type: string}
+        id: {type: string}
+        kind: {type: string}
+        display_name: {type: string}
+        principal_id: {type: string}
+        identity_kind: {type: string}
+        org_id: {type: string}
+    HostPoll:
+      type: object
+      properties:
+        registered_connections: {type: array, items: {type: string}, maxItems: 2000}
+        capabilities:
+          type: object
+          description: Capacity, active jobs, account owners, health; `registry_version` 2 for uuid-keyed registries.
+    HostJob:
+      type: object
+      properties:
+        id: {type: string}
+        connection_id: {type: string}
+        method: {type: string}
+        params: {}
+        timeout_ms: {type: integer}
+        expires_at: {type: integer}
+        actor: {$ref: '#/components/schemas/Actor'}
+    HostPollResult:
+      type: object
+      properties:
+        jobs: {type: array, items: {$ref: '#/components/schemas/HostJob'}}
+        cancelled: {type: array, items: {type: string}}
+    HostJobResult:
+      type: object
+      properties:
+        result: {}
+        error: {oneOf: [{$ref: '#/components/schemas/ApiError'}, {type: 'null'}]}
+    Settings:
+      type: object
+      additionalProperties: false
+      required: [telemetry]
+      properties:
+        telemetry: {type: boolean}
+    TelemetryInput:
+      type: object
+      additionalProperties: false
+      required: [source, operation, step, outcome]
+      properties:
+        source: {type: string, enum: [web, cli, daemon, backend, rust-client]}
+        operation: {type: string}
+        step: {type: string, enum: [start, validate, authorize, dispatch, provider, complete, render]}
+        outcome: {type: string, enum: [pending, success, failure, cancelled]}
+        progress: {type: [number, 'null'], minimum: 0, maximum: 1}
+        correlation_id: {type: [string, 'null'], format: uuid}
+        duration_ms: {type: [integer, 'null'], maximum: 86400000}
+    ReportInput:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message: {type: string, minLength: 1, maxLength: 16384}
+        pr: {type: [string, 'null'], description: HTTPS GitHub pull request URL.}
+    AccountsEvent:
+      type: object
+      required: [event_id, type, data]
+      properties:
+        event_id: {type: string}
+        type:
+          type: string
+          examples: [account.id_changed, account.updated, silicon.custodian_changed, membership.signed_out, membership.access_removed, account.deleted, ping]
+        occurred_at: {type: string, format: date-time}
+        app_id: {type: string}
+        data: {type: object}
+paths:
+  /health:
+    get:
+      tags: [discovery]
+      security: []
+      responses:
+        '200': {description: '`{status, version, source_revision}`'}
+  /api/v1/discovery:
+    get:
+      tags: [discovery]
+      security: []
+      responses:
+        '200': {description: Discovery, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Discovery'}}}}}}
+  /api/v1/me:
+    get:
+      tags: [discovery]
+      responses:
+        '200': {description: The signed-in account, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Me'}}}}}}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v1/allow:
+    get:
+      tags: [allow]
+      parameters: [{$ref: '#/components/parameters/SiliconQuery'}]
+      responses:
+        '200': {description: The allow list, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/Allowance'}}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      tags: [allow]
+      x-live: true
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceInput'}}}}
+      responses:
+        '200': {description: Added, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Allowance'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/allow/{account}:
+    delete:
+      tags: [allow]
+      x-live: true
+      parameters: [{$ref: '#/components/parameters/Account'}, {$ref: '#/components/parameters/SiliconQuery'}]
+      responses:
+        '200': {description: '`{deleted: boolean}`'}
+  /api/v1/directory:
+    get:
+      tags: [directory]
+      parameters: [{name: q, in: query, schema: {type: string, maxLength: 256}}]
+      responses:
+        '200': {description: Visible entries, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/DirectoryEntry'}}}}}}}
+    post:
+      tags: [directory]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryInput'}}}}
+      responses:
+        '200': {description: Created personal entry, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/DirectoryEntry'}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+  /api/v1/directory/{entry}:
+    parameters: [{$ref: '#/components/parameters/Entry'}]
+    get:
+      tags: [directory]
+      responses:
+        '200': {description: Entry, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/DirectoryEntry'}}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      tags: [directory]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DirectoryUpdate'}}}}
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/DirectoryEntry'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      tags: [directory]
+      responses:
+        '200': {description: '`{deleted: true}`'}
+  /api/v1/directory/{entry}/access:
+    parameters: [{$ref: '#/components/parameters/Entry'}]
+    get:
+      tags: [directory]
+      responses:
+        '200': {description: Shares, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/AccessGrant'}}}}}}}
+    post:
+      tags: [directory]
+      x-live: true
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccessInput'}}}}
+      responses:
+        '200': {description: Shared, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/AccessGrant'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /api/v1/directory/{entry}/access/{account}:
+    delete:
+      tags: [directory]
+      x-live: true
+      parameters: [{$ref: '#/components/parameters/Entry'}, {$ref: '#/components/parameters/Account'}]
+      responses:
+        '200': {description: '`{deleted: true}`'}
+  /api/v1/connections:
+    get:
+      tags: [connections]
+      responses:
+        '200': {description: Usable connections, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/Connection'}}}}}}}
+    post:
+      tags: [connections]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ConnectionInput'}}}}
+      responses:
+        '200': {description: Created, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Connection'}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v1/connections/{connection}:
+    parameters: [{$ref: '#/components/parameters/Connection'}]
+    get:
+      tags: [connections]
+      responses:
+        '200': {description: Connection, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Connection'}}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [connections]
+      x-live: true
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ConnectionUpdate'}}}}
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Connection'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      tags: [connections]
+      x-live: true
+      responses:
+        '200': {description: '`{deleted: true}`'}
+        '403': {$ref: '#/components/responses/Error'}
+  /api/v1/connections/{connection}/access:
+    parameters: [{$ref: '#/components/parameters/Connection'}]
+    get:
+      tags: [connections]
+      responses:
+        '200': {description: Grants, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/AccessGrant'}}}}}}}
+    post:
+      tags: [connections]
+      x-live: true
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccessInput'}}}}
+      responses:
+        '200': {description: Granted, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/AccessGrant'}}}}}}
+        '403': {description: '`access_denied` or `silicon_not_reachable`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+        '404': {description: '`unknown_account`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+  /api/v1/connections/{connection}/access/{account}:
+    delete:
+      tags: [connections]
+      x-live: true
+      parameters: [{$ref: '#/components/parameters/Connection'}, {$ref: '#/components/parameters/Account'}]
+      responses:
+        '200': {description: '`{deleted: true}`'}
+  /api/v1/connections/{connection}/policies:
+    parameters: [{$ref: '#/components/parameters/Connection'}]
+    get:
+      tags: [connections]
+      responses:
+        '200': {description: Policies, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/ToolPolicy'}}}}}}}
+    put:
+      tags: [connections]
+      x-live: true
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ToolPolicyInput'}}}}
+      responses:
+        '200': {description: Stored, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/ToolPolicy'}}}}}}
+  /api/v1/connections/{connection}/account:
+    parameters: [{$ref: '#/components/parameters/Connection'}]
+    get:
+      tags: [provider-accounts]
+      x-live: true
+      parameters: [{name: account, in: query, description: A Silicon the caller looks after., schema: {type: string}}]
+      responses:
+        '200': {description: Status, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/AccountStatus'}}}}}}
+    post:
+      tags: [provider-accounts]
+      x-live: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, secret]
+              properties:
+                kind: {type: string, enum: [bearer, header]}
+                secret: {type: string, maxLength: 16384}
+                label: {type: string}
+                header_name: {type: string, description: An X- header for kind header.}
+      responses:
+        '200': {description: Connected, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/AccountStatus'}}}}}}
+    delete:
+      tags: [provider-accounts]
+      x-live: true
+      parameters: [{name: account, in: query, description: A Silicon the caller looks after., schema: {type: string}}]
+      responses:
+        '200': {description: '`{disconnected: true}`'}
+  /api/v1/connections/{connection}/account/authorize:
+    post:
+      tags: [provider-accounts]
+      x-live: true
+      parameters: [{$ref: '#/components/parameters/Connection'}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {client_id: {type: [string, 'null']}}}}}}
+      responses:
+        '200': {description: '`{authorization_url, state}`'}
+  /api/v1/connections/{connection}/mcp:
+    post:
+      tags: [execution]
+      x-live: true
+      parameters: [{$ref: '#/components/parameters/Connection'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RpcInput'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/RpcOutput'}}}}}}
+        '409': {description: '`operation_in_progress`, `idempotency_conflict`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+        '502': {description: Provider error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+  /api/v1/calls:
+    get:
+      tags: [execution]
+      parameters: [{name: connection_id, in: query, schema: {type: string}}]
+      responses:
+        '200': {description: Summaries without results, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/Invocation'}}}}}}}
+  /api/v1/calls/{call}:
+    get:
+      tags: [execution]
+      parameters: [{$ref: '#/components/parameters/Call'}]
+      responses:
+        '200': {description: Invocation, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Invocation'}}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/calls/{call}/cancel:
+    post:
+      tags: [execution]
+      parameters: [{$ref: '#/components/parameters/Call'}]
+      responses:
+        '200': {description: Cancelled invocation, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Invocation'}}}}}}
+  /api/v1/calls/{call}/assets:
+    get:
+      tags: [execution]
+      parameters: [{$ref: '#/components/parameters/Call'}]
+      responses:
+        '200': {description: Assets, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/ResultAsset'}}}}}}}
+  /api/v1/calls/{call}/assets/{index}:
+    get:
+      tags: [execution]
+      parameters: [{$ref: '#/components/parameters/Call'}, {$ref: '#/components/parameters/Index'}]
+      responses:
+        '200': {description: Raw bytes as an attachment.}
+  /api/v1/calls/{call}/assets/{index}/ticket:
+    post:
+      tags: [execution]
+      parameters: [{$ref: '#/components/parameters/Call'}, {$ref: '#/components/parameters/Index'}]
+      responses:
+        '200': {description: One-time link, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/DownloadTicket'}}}}}}
+  /api/v1/downloads/{ticket}:
+    get:
+      tags: [execution]
+      security: []
+      parameters: [{name: ticket, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Raw bytes as an attachment.}
+        '404': {description: '`download_expired`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+  /api/v1/hosts:
+    get:
+      tags: [hosts]
+      responses:
+        '200': {description: Hosts, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: '#/components/schemas/Host'}}}}}}}
+    post:
+      tags: [hosts]
+      x-live: true
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string, pattern: '^[A-Za-z0-9_-]{1,80}$'}}}}}}
+      responses:
+        '200': {description: Registered, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/HostRegistration'}}}}}}
+  /api/v1/hosts/{host}:
+    parameters: [{$ref: '#/components/parameters/Host'}]
+    get:
+      tags: [hosts]
+      responses:
+        '200': {description: Host, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Host'}}}}}}
+    delete:
+      tags: [hosts]
+      x-live: true
+      responses:
+        '200': {description: '`{deleted: true}`'}
+  /api/v1/hosts/{host}/poll:
+    post:
+      tags: [hosts]
+      security: [{hostToken: []}]
+      parameters: [{$ref: '#/components/parameters/Host'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HostPoll'}}}}
+      responses:
+        '200': {description: Jobs (long poll up to 20 s), content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/HostPollResult'}}}}}}
+  /api/v1/hosts/{host}/jobs/{job}/result:
+    post:
+      tags: [hosts]
+      security: [{hostToken: []}]
+      parameters: [{$ref: '#/components/parameters/Host'}, {name: job, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HostJobResult'}}}}
+      responses:
+        '200': {description: '`{accepted: true}`'}
+  /api/v1/hosts/{host}/jobs/{job}/progress:
+    post:
+      tags: [hosts]
+      security: [{hostToken: []}]
+      parameters: [{$ref: '#/components/parameters/Host'}, {name: job, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [progress], properties: {progress: {}}}}}}
+      responses:
+        '200': {description: '`{accepted: true}`'}
+  /api/v1/settings:
+    get:
+      tags: [operations]
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Settings'}}}}}}
+    patch:
+      tags: [operations]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Settings'}}}}
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Settings'}}}}}}
+  /api/v1/telemetry:
+    post:
+      tags: [operations]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TelemetryInput'}}}}
+      responses:
+        '200': {description: '`{recorded: boolean}`'}
+  /api/v1/reports:
+    post:
+      tags: [operations]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReportInput'}}}}
+      responses:
+        '200': {description: '`{id, status, delivery_detail, repository_url}`'}
+  /webhooks/accounts:
+    post:
+      tags: [webhooks]
+      security: [{accountsSignature: []}]
+      parameters:
+        - {name: X-Accounts-Timestamp, in: header, required: true, schema: {type: string}}
+        - {name: X-Accounts-Event-Id, in: header, required: false, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountsEvent'}}}}
+      responses:
+        '200': {description: '`{received: true}` (and `duplicate: true` for a repeated event_id)'}
+        '400': {description: '`invalid_webhook_body`, `wrong_app`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+        '401': {description: '`invalid_webhook_signature`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+        '503': {description: '`webhook_not_configured`', content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}}
+  /oauth/start:
+    get:
+      tags: [provider-accounts]
+      security: []
+      parameters: [{name: state, in: query, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Provider consent confirmation page (HTML).}
+  /oauth/callback:
+    get:
+      tags: [provider-accounts]
+      security: []
+      responses:
+        '200': {description: Provider account connected (HTML).}
+  /oauth/client-metadata.json:
+    get:
+      tags: [provider-accounts]
+      security: []
+      responses:
+        '200': {description: OAuth Client ID Metadata Document (public HTTPS deployments only).}
