@@ -301,7 +301,7 @@ struct Plan<'a> {
     mapping: &'a Mapping,
     known: &'a Known,
     /// Linked connections: id → (owner uuid, original owner principal, original visibility, auth mode).
-    connections: HashMap<String, (String, String, String, String)>,
+    connections: BTreeMap<String, (String, String, String, String)>,
 }
 impl Plan<'_> {
     fn forward(&self, kind: &str, o: &Original) -> Option<Target> {
@@ -526,7 +526,7 @@ fn link_in(tx: &RawTx<'_, '_>, mapping: &Mapping, known: &Known, commit: bool) -
     let mut plan = Plan {
         mapping,
         known,
-        connections: HashMap::new(),
+        connections: BTreeMap::new(),
     };
     for (record, o) in items.iter().filter(|(r, _)| r.kind == "connection") {
         let principal = text(&o.value, "owner_id").unwrap_or_else(|| o.owner.clone());
