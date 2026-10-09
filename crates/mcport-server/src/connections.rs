@@ -1376,6 +1376,148 @@ mod access_tests {
     }
 
     #[tokio::test]
+    async fn accessible_exact_ids_win_and_hidden_ids_do_not_shadow_authorized_names() {
+        let f = people().await;
+        let ada = f.auth("Ada").await;
+        let template = ConnectionRecord {
+            name: "template".into(),
+            owner_uuid: "Ada".into(),
+            transport: "http".into(),
+            url: Some("https://mcp.example/mcp".into()),
+            auth_mode: "none".into(),
+            visibility: "invited".into(),
+            version: 1,
+            ..Default::default()
+        };
+        let put = |c: &ConnectionRecord| {
+            f.app
+                .store
+                .put(
+                    "connection",
+                    &c.id,
+                    ENV,
+                    &c.owner_uuid,
+                    &c.owner_uuid,
+                    Some(&c.name),
+                    c,
+                    Some(0),
+                )
+                .unwrap();
+            let host = crate::hosts::HostRecord {
+                host: crate::hosts::HostData {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    owner_uuid: c.owner_uuid.clone(),
+                    ..Default::default()
+                },
+                token_hash: "fixture".into(),
+                ..Default::default()
+            };
+            f.app
+                .store
+                .put(
+                    "host",
+                    &c.id,
+                    ENV,
+                    &c.owner_uuid,
+                    &c.owner_uuid,
+                    Some(&c.name),
+                    &host,
+                    Some(0),
+                )
+                .unwrap();
+        };
+        // Records Ada cannot use: another owner's, and one never linked to an account.
+        for (index, owner) in ["Bob", ""].into_iter().enumerate() {
+            let selector = format!("aB{index}");
+            put(&ConnectionRecord {
+                id: selector.clone(),
+                name: format!("hidden-{index}"),
+                owner_uuid: owner.into(),
+                ..template.clone()
+            });
+            let authorized = ConnectionRecord {
+                // A legacy UUID remains directly addressable after the upgrade.
+                id: uuid::Uuid::new_v4().to_string(),
+                name: selector.clone(),
+                ..template.clone()
+            };
+            put(&authorized);
+            assert_eq!(
+                resolve(&f.app, &ada.account, &selector, false)
+                    .await
+                    .unwrap()
+                    .0
+                    .id,
+                authorized.id
+            );
+            assert_eq!(
+                resolve(&f.app, &ada.account, &authorized.id, true)
+                    .await
+                    .unwrap()
+                    .0
+                    .id,
+                authorized.id
+            );
+            assert_eq!(
+                crate::hosts::resolve(&f.app, &ada.account, &selector)
+                    .await
+                    .unwrap()
+                    .0
+                    .host
+                    .id,
+                authorized.id
+            );
+        }
+        let exact = ConnectionRecord {
+            id: "c9Z".into(),
+            name: "exact-id".into(),
+            ..template.clone()
+        };
+        let named = ConnectionRecord {
+            id: "b8Y".into(),
+            name: exact.id.clone(),
+            ..template
+        };
+        put(&exact);
+        put(&named);
+        assert_eq!(
+            resolve(&f.app, &ada.account, "c9Z", true)
+                .await
+                .unwrap()
+                .0
+                .id,
+            exact.id
+        );
+        assert_eq!(
+            resolve(&f.app, &ada.account, "b8Y", true)
+                .await
+                .unwrap()
+                .0
+                .id,
+            named.id
+        );
+        assert_eq!(
+            crate::hosts::resolve(&f.app, &ada.account, "c9Z")
+                .await
+                .unwrap()
+                .0
+                .host
+                .id,
+            exact.id
+        );
+        assert_eq!(
+            crate::hosts::resolve(&f.app, &ada.account, "b8Y")
+                .await
+                .unwrap()
+                .0
+                .host
+                .id,
+            named.id
+        );
+    }
+
+    #[tokio::test]
     async fn records_not_linked_to_an_account_are_visible_to_nobody() {
         let f = people().await;
         let legacy = json!({"id":"aB0","name":"legacy","description":"","org_id":"tos","owner_id":"c:ada","environment":"production","transport":"http","url":"https://example.com/mcp","host_id":null,"command":null,"args":[],"auth_mode":"none","visibility":"org","status":"ready","can_manage":true,"account":null,"created_at":1,"updated_at":1,"version":1});
