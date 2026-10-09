@@ -12,9 +12,9 @@ default = []
 local = ["dep:mcport-daemon", "dep:mcport-mcp", "dep:serde_json", "dep:thiserror", "dep:fs2", "dep:tokio", "dep:tokio-util"]
 
 [dependencies]
-mcport-api = { path = "../mcport-api", version = "0.2.0" }
-mcport-daemon = { path = "../mcport-daemon", version = "0.2.0", optional = true }
-mcport-mcp = { path = "../mcport-mcp", version = "0.2.0", optional = true }
+mcport-api = { path = "../mcport-api", version = "0.3.0" }
+mcport-daemon = { path = "../mcport-daemon", version = "0.3.0", optional = true }
+mcport-mcp = { path = "../mcport-mcp", version = "0.3.0", optional = true }
 serde_json = { version = "1", optional = true }
 thiserror = { version = "2", optional = true }
 fs2 = { version = "0.4", optional = true }

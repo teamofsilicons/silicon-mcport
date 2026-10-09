@@ -11,10 +11,22 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{path::Path, sync::Mutex};
 
+/// The only environment new records use. Rows of removed testing environments keep
+/// their own value and are never read again (they are not deleted).
+pub const ENV: &str = "production";
+/// Schema version written to `PRAGMA user_version` by this release.
+pub const SCHEMA_VERSION: i64 = 1;
+
 /// All record bodies, including provider grants, jobs and results, are encrypted.
-/// AAD binds ciphertext to its record and tenant; indexes never contain secrets.
+/// AAD binds ciphertext to its record and owner; indexes never contain secrets.
+///
+/// Accounts era: `org_id` and `owner_id` both hold the owning account's uuid (the
+/// `org_id` column is the per-owner name namespace). Records written before
+/// 0.3.0 keep their IAM-era values until `mcport-server link-identities` re-keys
+/// them; that command keeps the originals in `legacy_org_id`/`legacy_owner_id` and
+/// in each value's `legacy` object.
 pub struct Store {
-    db: Mutex<Connection>,
+    pub(crate) db: Mutex<Connection>,
     cipher: Aes256Gcm,
 }
 impl Store {
@@ -41,6 +53,7 @@ impl Store {
             params![INITIAL_CURSOR, rand::random::<[u8; 32]>().as_slice()],
         )?;
         migration.commit()?;
+        Self::migrate_schema(&mut db)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -51,10 +64,75 @@ impl Store {
             cipher: Aes256Gcm::new(key.into()),
         })
     }
-    fn aad(kind: &str, id: &str, env: &str, org: &str, owner: &str) -> String {
+    /// Additive, numbered schema steps gated by `PRAGMA user_version`. Each step runs
+    /// in one IMMEDIATE transaction together with its version bump. Never edit an
+    /// applied step and never drop or rewrite data here: identity re-keying is the
+    /// explicit operator command `mcport-server link-identities`.
+    fn migrate_schema(db: &mut Connection) -> Result<()> {
+        const STEPS: [&str; SCHEMA_VERSION as usize] = [
+            // 1: Silicon Accounts identity (0.3.0).
+            "CREATE TABLE IF NOT EXISTS accounts(
+                uuid TEXT PRIMARY KEY NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                id TEXT NOT NULL DEFAULT '',
+                display_name TEXT NOT NULL DEFAULT '',
+                pfp_url TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                custodian_uuid TEXT,
+                custodian_id TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                revoked_before INTEGER NOT NULL DEFAULT 0,
+                synced_at_ms INTEGER NOT NULL DEFAULT 0,
+                looked_up_at INTEGER NOT NULL DEFAULT 0,
+                last_fid TEXT,
+                updated_at INTEGER NOT NULL DEFAULT 0);
+             CREATE INDEX IF NOT EXISTS accounts_by_custodian ON accounts(custodian_uuid);
+             CREATE TABLE IF NOT EXISTS identity_links(
+                iam_principal_id TEXT PRIMARY KEY NOT NULL,
+                iam_public_id TEXT NOT NULL,
+                accounts_uuid TEXT NOT NULL,
+                linked_at INTEGER NOT NULL,
+                source TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS identity_links_by_uuid ON identity_links(accounts_uuid);
+             CREATE TABLE IF NOT EXISTS identity_link_runs(
+                run INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at INTEGER NOT NULL,
+                mapping_sha256 TEXT NOT NULL,
+                dry_run INTEGER NOT NULL,
+                report TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS accounts_webhook_events(
+                event_id TEXT PRIMARY KEY NOT NULL,
+                event_type TEXT NOT NULL,
+                occurred_at_ms INTEGER,
+                received_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS silicon_allowances(
+                silicon_uuid TEXT NOT NULL,
+                account_uuid TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(silicon_uuid, account_uuid));
+             ALTER TABLE records ADD COLUMN legacy_id TEXT;
+             ALTER TABLE records ADD COLUMN legacy_org_id TEXT;
+             ALTER TABLE records ADD COLUMN legacy_owner_id TEXT;
+             CREATE INDEX IF NOT EXISTS owner_records ON records(owner_id,kind);",
+        ];
+        for (index, step) in STEPS.iter().enumerate() {
+            let version = index as i64 + 1;
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let current: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            if current >= version {
+                continue;
+            }
+            tx.execute_batch(step)?;
+            tx.execute_batch(&format!("PRAGMA user_version={version}"))?;
+            tx.commit()?;
+        }
+        Ok(())
+    }
+    pub(crate) fn aad(kind: &str, id: &str, env: &str, org: &str, owner: &str) -> String {
         serde_json::json!([kind, id, env, org, owner]).to_string()
     }
-    fn encrypt<T: Serialize>(&self, value: &T, aad: &str) -> Result<String> {
+    pub(crate) fn encrypt<T: Serialize>(&self, value: &T, aad: &str) -> Result<String> {
         let nonce: [u8; 12] = rand::random();
         let plain = serde_json::to_vec(value)?;
         let cipher = self
@@ -71,7 +149,7 @@ impl Store {
         packed.extend(cipher);
         Ok(STANDARD.encode(packed))
     }
-    fn decrypt<T: DeserializeOwned>(&self, value: &str, aad: &str) -> Result<T> {
+    pub(crate) fn decrypt<T: DeserializeOwned>(&self, value: &str, aad: &str) -> Result<T> {
         let packed = STANDARD.decode(value).map_err(|_| Error::internal())?;
         if packed.len() < 28 {
             return Err(Error::internal());
@@ -200,82 +278,105 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    /// Persist a legacy private-to-invited update without activating dormant grants.
-    pub fn put_connection_reset_grants(
+    /// Persist a legacy private-to-invited update without activating dormant grants:
+    /// the connection is stored only if its revision is still `expected`, and every
+    /// grant on it is removed in the same transaction.
+    pub fn put_connection_reset_grants<T: Serialize>(
         &self,
-        connection: &mcport_core::Connection,
+        id: &str,
+        owner: &str,
+        name: &str,
+        connection: &T,
         expected: i64,
     ) -> Result<()> {
         let mut db = self.db.lock().map_err(|_| Error::internal())?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let cipher = self.encrypt(
-            connection,
-            &Self::aad(
-                "connection",
-                &connection.id,
-                &connection.environment,
-                &connection.org_id,
-                &connection.owner_id,
-            ),
-        )?;
-        let changed = tx.execute(
-            "UPDATE records SET name=?,value=?,revision=revision+1 WHERE kind='connection' AND id=? AND environment=? AND org_id=? AND owner_id=? AND revision=?",
-            params![connection.name, cipher, connection.id, connection.environment, connection.org_id, connection.owner_id, expected],
-        )?;
-        if changed != 1 {
+        let row: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT environment,org_id,owner_id FROM records WHERE kind='connection' AND id=? AND revision=?",
+                params![id, expected],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((env, org, stored_owner)) = row.filter(|(_, _, stored)| stored == owner) else {
             return Err(Error::new(
                 409,
                 "revision_conflict",
                 "This connection changed.",
                 "Refresh before applying the change.",
             ));
-        }
-        self.delete_connection_grants(&tx, connection)?;
+        };
+        let cipher = self.encrypt(
+            connection,
+            &Self::aad("connection", id, &env, &org, &stored_owner),
+        )?;
+        tx.execute(
+            "UPDATE records SET name=?,value=?,revision=revision+1 WHERE kind='connection' AND id=?",
+            params![name, cipher, id],
+        )?;
+        self.delete_connection_records(&tx, id, &["grant"])?;
         tx.commit()?;
         Ok(())
     }
-    fn delete_connection_grants(
+    /// Delete the records of `kinds` whose encrypted value names `connection_id`
+    /// (grants, policies, credentials and OAuth attempts). A credential's provider
+    /// account epoch goes with it.
+    fn delete_connection_records(
         &self,
         tx: &rusqlite::Transaction<'_>,
-        connection: &mcport_core::Connection,
+        connection_id: &str,
+        kinds: &[&str],
     ) -> Result<()> {
-        let rows = {
-            let mut statement = tx.prepare("SELECT id,owner_id,value FROM records WHERE kind='grant' AND environment=? AND org_id=?")?;
-            statement
-                .query_map(params![connection.environment, connection.org_id], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?
-        };
-        for (id, owner, cipher) in rows {
-            let value: serde_json::Value = self.decrypt(
-                &cipher,
-                &Self::aad(
-                    "grant",
-                    &id,
-                    &connection.environment,
-                    &connection.org_id,
-                    &owner,
-                ),
-            )?;
-            if value
-                .get("connection_id")
-                .and_then(serde_json::Value::as_str)
-                == Some(&connection.id)
-            {
-                tx.execute("DELETE FROM records WHERE kind='grant' AND id=?", [&id])?;
+        for kind in kinds {
+            let rows = {
+                let mut statement = tx.prepare(
+                    "SELECT id,environment,org_id,owner_id,value FROM records WHERE kind=?",
+                )?;
+                statement
+                    .query_map([kind], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+            };
+            for (id, env, org, owner, cipher) in rows {
+                let value: serde_json::Value =
+                    self.decrypt(&cipher, &Self::aad(kind, &id, &env, &org, &owner))?;
+                if value
+                    .get("connection_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(connection_id)
+                {
+                    tx.execute(
+                        "DELETE FROM records WHERE kind=? AND id=?",
+                        params![kind, id],
+                    )?;
+                    if *kind == "credential" {
+                        tx.execute(
+                            "DELETE FROM records WHERE kind='account_epoch' AND id=?",
+                            [&id],
+                        )?;
+                    }
+                }
             }
         }
         Ok(())
     }
-    /// Startup migration is atomic across all contexts and does not expand access.
+    /// Startup migration is atomic across all records and does not expand access.
+    /// It reads values as JSON, so it works on every stored connection shape.
     pub fn migrate_private_visibility(&self) -> Result<usize> {
         let mut db = self.db.lock().map_err(|_| Error::internal())?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = self.migrate_private_visibility_in(&tx)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+    fn migrate_private_visibility_in(&self, tx: &rusqlite::Transaction<'_>) -> Result<usize> {
         let rows = {
             let mut statement = tx.prepare(
                 "SELECT id,environment,org_id,owner_id,value FROM records WHERE kind='connection'",
@@ -295,14 +396,22 @@ impl Store {
         let mut changed = 0;
         for (id, env, org, owner, cipher) in rows {
             let aad = Self::aad("connection", &id, &env, &org, &owner);
-            let mut connection: mcport_core::Connection = self.decrypt(&cipher, &aad)?;
-            if connection.visibility != "private" {
+            let mut connection: serde_json::Value = self.decrypt(&cipher, &aad)?;
+            if connection
+                .get("visibility")
+                .and_then(serde_json::Value::as_str)
+                != Some("private")
+            {
                 continue;
             }
-            self.delete_connection_grants(&tx, &connection)?;
-            connection.visibility = "invited".into();
-            connection.version += 1;
-            connection.updated_at = crate::state::now();
+            self.delete_connection_records(tx, &id, &["grant"])?;
+            connection["visibility"] = "invited".into();
+            let version = connection
+                .get("version")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            connection["version"] = (version + 1).into();
+            connection["updated_at"] = crate::state::now().into();
             let cipher = self.encrypt(&connection, &aad)?;
             tx.execute(
                 "UPDATE records SET value=?,revision=revision+1 WHERE kind='connection' AND id=?",
@@ -310,8 +419,26 @@ impl Store {
             )?;
             changed += 1;
         }
-        tx.commit()?;
         Ok(changed)
+    }
+    /// Run `f` in one IMMEDIATE transaction with raw record access (operator
+    /// commands). Commits only when `commit` is true; otherwise rolls back.
+    pub fn raw_transaction<R>(
+        &self,
+        commit: bool,
+        f: impl FnOnce(&RawTx<'_, '_>) -> Result<R>,
+    ) -> Result<R> {
+        let mut db = self.db.lock().map_err(|_| Error::internal())?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let raw = RawTx {
+            tx: &tx,
+            store: self,
+        };
+        let result = f(&raw)?;
+        if commit {
+            tx.commit()?;
+        }
+        Ok(result)
     }
     pub fn get<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<Option<T>> {
         let row: Option<(String, String, String, String)> = self
@@ -390,53 +517,197 @@ impl Store {
     }
     /// Remove a connection and all of its provider authority in one transaction.
     /// Retain call history; its read path still requires the live connection.
-    pub fn delete_connection(&self, connection_id: &str, environment: &str) -> Result<()> {
+    pub fn delete_connection(&self, connection_id: &str) -> Result<()> {
         let mut db = self.db.lock().map_err(|_| Error::internal())?;
-        let tx = db.transaction()?;
-        let rows = {
-            let mut stmt = tx.prepare("SELECT kind,id,org_id,owner_id,value FROM records WHERE environment=? AND kind IN ('credential','grant','policy','oauth_attempt')")?;
-            stmt.query_map([environment], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                ))
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?
-        };
-        for (kind, id, org, owner, cipher) in rows {
-            let value: serde_json::Value =
-                self.decrypt(&cipher, &Self::aad(&kind, &id, environment, &org, &owner))?;
-            if value
-                .get("connection_id")
-                .and_then(serde_json::Value::as_str)
-                == Some(connection_id)
-            {
-                tx.execute(
-                    "DELETE FROM records WHERE kind=? AND id=?",
-                    params![kind, id],
-                )?;
-                if kind == "credential" {
-                    tx.execute(
-                        "DELETE FROM records WHERE kind='account_epoch' AND id=?",
-                        [&id],
-                    )?;
-                }
-            }
-        }
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        self.delete_connection_records(
+            &tx,
+            connection_id,
+            &["credential", "grant", "policy", "oauth_attempt"],
+        )?;
         tx.execute(
-            "DELETE FROM records WHERE kind='connection' AND id=? AND environment=?",
-            params![connection_id, environment],
+            "DELETE FROM records WHERE kind='connection' AND id=?",
+            [connection_id],
         )?;
         tx.commit()?;
         Ok(())
     }
-    pub fn clear_environment(&self, env: &str) -> Result<()> {
-        self.db.lock().map_err(|_| Error::internal())?.execute(
-            "DELETE FROM records WHERE environment=? AND kind NOT IN ('environment','lifecycle')",
-            [env],
+    /// `(kind, id)` of every record of `kinds` whose owner column is `owner`.
+    pub fn owned_by(&self, owner: &str, kinds: &[&str]) -> Result<Vec<(String, String)>> {
+        let db = self.db.lock().map_err(|_| Error::internal())?;
+        let mut statement =
+            db.prepare("SELECT kind,id FROM records WHERE owner_id=? ORDER BY rowid")?;
+        let rows = statement
+            .query_map([owner], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows
+            .into_iter()
+            .filter(|(kind, _)| kinds.contains(&kind.as_str()))
+            .collect())
+    }
+}
+
+/// One stored record with its columns and decrypted value.
+#[derive(Clone, Debug)]
+pub struct RawRecord {
+    pub rowid: i64,
+    pub kind: String,
+    pub id: String,
+    pub environment: String,
+    pub org_id: String,
+    pub owner_id: String,
+    pub name: Option<String>,
+    pub legacy_id: Option<String>,
+    pub legacy_org_id: Option<String>,
+    pub legacy_owner_id: Option<String>,
+    pub value: serde_json::Value,
+}
+/// Raw record access inside one transaction (see `Store::raw_transaction`).
+pub struct RawTx<'t, 'c> {
+    tx: &'t rusqlite::Transaction<'c>,
+    store: &'t Store,
+}
+impl RawTx<'_, '_> {
+    pub fn connection(&self) -> &rusqlite::Connection {
+        self.tx
+    }
+    pub fn migrate_private_visibility(&self) -> Result<usize> {
+        self.store.migrate_private_visibility_in(self.tx)
+    }
+    /// Every record of `kinds`, decrypted, in creation order.
+    pub fn records(&self, kinds: &[&str]) -> Result<Vec<RawRecord>> {
+        let mut statement = self.tx.prepare(
+            "SELECT rowid,kind,id,environment,org_id,owner_id,name,legacy_id,legacy_org_id,legacy_owner_id,value FROM records ORDER BY rowid",
+        )?;
+        let rows = statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(7)?,
+                    r.get::<_, Option<String>>(8)?,
+                    r.get::<_, Option<String>>(9)?,
+                    r.get::<_, String>(10)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut out = Vec::new();
+        for (
+            rowid,
+            kind,
+            id,
+            environment,
+            org_id,
+            owner_id,
+            name,
+            legacy_id,
+            legacy_org_id,
+            legacy_owner_id,
+            cipher,
+        ) in rows
+        {
+            if !kinds.contains(&kind.as_str()) {
+                continue;
+            }
+            let value = self.store.decrypt(
+                &cipher,
+                &Store::aad(&kind, &id, &environment, &org_id, &owner_id),
+            )?;
+            out.push(RawRecord {
+                rowid,
+                kind,
+                id,
+                environment,
+                org_id,
+                owner_id,
+                name,
+                legacy_id,
+                legacy_org_id,
+                legacy_owner_id,
+                value,
+            });
+        }
+        Ok(out)
+    }
+    /// Count records per kind (all environments).
+    pub fn counts(&self) -> Result<Vec<(String, String, i64)>> {
+        let mut statement = self.tx.prepare(
+            "SELECT kind,environment,count(*) FROM records GROUP BY kind,environment ORDER BY kind,environment",
+        )?;
+        Ok(statement
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+    /// Move a record out of the way: a temporary id and/or no name.
+    pub fn park(&self, kind: &str, id: &str, temporary_id: Option<&str>) -> Result<()> {
+        self.tx.execute(
+            "UPDATE records SET id=coalesce(?,id),name=NULL WHERE kind=? AND id=?",
+            params![temporary_id, kind, id],
+        )?;
+        Ok(())
+    }
+    /// Rewrite the record currently stored as (`kind`, `current_id`). Returns
+    /// false (and changes nothing) when the new id or name is already taken.
+    #[allow(clippy::too_many_arguments)] // Every column is explicit: they bind the AAD.
+    pub fn rewrite(
+        &self,
+        kind: &str,
+        current_id: &str,
+        id: &str,
+        org: &str,
+        owner: &str,
+        name: Option<&str>,
+        value: &serde_json::Value,
+        legacy: Option<(&str, &str, &str)>,
+    ) -> Result<bool> {
+        let cipher = self
+            .store
+            .encrypt(value, &Store::aad(kind, id, ENV, org, owner))?;
+        let (legacy_id, legacy_org, legacy_owner) = match legacy {
+            Some((id, org, owner)) => (Some(id), Some(org), Some(owner)),
+            None => (None, None, None),
+        };
+        match self.tx.execute(
+            "UPDATE records SET id=?,org_id=?,owner_id=?,name=?,value=?,legacy_id=?,legacy_org_id=?,legacy_owner_id=? WHERE kind=? AND id=?",
+            params![id, org, owner, name, cipher, legacy_id, legacy_org, legacy_owner, kind, current_id],
+        ) {
+            Ok(_) => Ok(true),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+    /// Insert a new record unless (`kind`, `id`) exists. Returns whether it was inserted.
+    pub fn insert(
+        &self,
+        kind: &str,
+        id: &str,
+        org: &str,
+        owner: &str,
+        value: &serde_json::Value,
+    ) -> Result<bool> {
+        let cipher = self
+            .store
+            .encrypt(value, &Store::aad(kind, id, ENV, org, owner))?;
+        Ok(self.tx.execute(
+            "INSERT OR IGNORE INTO records(kind,id,environment,org_id,owner_id,value) VALUES(?,?,?,?,?,?)",
+            params![kind, id, ENV, org, owner, cipher],
+        )? == 1)
+    }
+    pub fn delete(&self, kind: &str, id: &str) -> Result<()> {
+        self.tx.execute(
+            "DELETE FROM records WHERE kind=? AND id=?",
+            params![kind, id],
         )?;
         Ok(())
     }
@@ -520,9 +791,9 @@ mod tests {
                     .into()
             })
             .into();
-        store.delete_connection(&old[0], "test").unwrap();
+        store.delete_connection(&old[0]).unwrap();
         store.delete("host", &old[1]).unwrap();
-        store.clear_environment("test").unwrap();
+        store.delete("call", &old[2]).unwrap();
         drop(store);
         let store = Store::open(&path, &[7; 32]).unwrap();
         let new: Vec<String> = ["connection", "host", "call", "report"]
@@ -648,7 +919,7 @@ mod tests {
             .unwrap();
         assert!(!created);
         assert_eq!(replayed["id"], id);
-        store.clear_environment("test").unwrap();
+        store.delete("call", &id).unwrap();
         let (fresh, created) = store
             .create_public(
                 "call",
@@ -806,7 +1077,7 @@ mod tests {
                 }
             }
         }
-        store.delete_connection("delete", "production").unwrap();
+        store.delete_connection("delete").unwrap();
         assert!(
             store
                 .get::<Value>("connection", "delete")
@@ -845,34 +1116,48 @@ mod tests {
 #[cfg(test)]
 mod visibility_migration_tests {
     use super::*;
-    use mcport_core::Connection as McpConnection;
-    use serde_json::json;
-    fn connection(id: &str, environment: &str, visibility: &str) -> McpConnection {
-        serde_json::from_value(json!({"id":id,"name":id,"description":"","org_id":"tos","owner_id":"c:owner","environment":environment,"transport":"http","url":"https://example.com/mcp","host_id":null,"command":null,"args":[],"auth_mode":"shared","visibility":visibility,"status":"ready","can_manage":false,"account":null,"created_at":1,"updated_at":1,"version":1})).unwrap()
+    use crate::connections::ConnectionRecord as McpConnection;
+    use serde_json::{Value, json};
+    /// A connection exactly as releases before 0.3.0 stored it.
+    fn connection(id: &str, environment: &str, visibility: &str) -> Value {
+        json!({"id":id,"name":id,"description":"","org_id":"tos","owner_id":"c:owner","environment":environment,"transport":"http","url":"https://example.com/mcp","host_id":null,"command":null,"args":[],"auth_mode":"shared","visibility":visibility,"status":"ready","can_manage":false,"account":null,"created_at":1,"updated_at":1,"version":1})
     }
-    fn save(store: &Store, connection: &McpConnection) {
+    fn save(store: &Store, connection: &Value) {
+        let id = connection["id"].as_str().unwrap();
+        let environment = connection["environment"].as_str().unwrap();
         store
             .put(
                 "connection",
-                &connection.id,
-                &connection.environment,
+                id,
+                environment,
                 "tos",
                 "c:owner",
-                Some(&connection.name),
+                Some(id),
                 connection,
                 Some(0),
             )
             .unwrap();
-        store.put("grant",&format!("grant-{}",connection.id),&connection.environment,"tos","c:owner",None,&json!({"connection_id":connection.id,"grant":{"principal_id":"si:invitee","created_at":1}}),Some(0)).unwrap();
         store
             .put(
-                "credential",
-                &format!("credential-{}", connection.id),
-                &connection.environment,
+                "grant",
+                &format!("grant-{id}"),
+                environment,
                 "tos",
                 "c:owner",
                 None,
-                &json!({"connection_id":connection.id,"secret":"private-fixture"}),
+                &json!({"connection_id":id,"grant":{"principal_id":"si:invitee","created_at":1}}),
+                Some(0),
+            )
+            .unwrap();
+        store
+            .put(
+                "credential",
+                &format!("credential-{id}"),
+                environment,
+                "tos",
+                "c:owner",
+                None,
+                &json!({"connection_id":id,"secret":"private-fixture"}),
                 Some(0),
             )
             .unwrap();
@@ -945,10 +1230,14 @@ mod visibility_migration_tests {
         let store = Store::open(&dir.path().join("db.sqlite"), &[7; 32]).unwrap();
         let mut c = connection("existing", "production", "org");
         save(&store, &c);
-        c.visibility = "invited".into();
-        c.version = 2;
+        c["visibility"] = json!("invited");
+        c["version"] = json!(2);
         assert_eq!(
-            store.put_connection_reset_grants(&c, 0).unwrap_err().1.code,
+            store
+                .put_connection_reset_grants("existing", "c:owner", "existing", &c, 0)
+                .unwrap_err()
+                .1
+                .code,
             "revision_conflict"
         );
         assert!(
@@ -965,7 +1254,9 @@ mod visibility_migration_tests {
                 .visibility,
             "org"
         );
-        store.put_connection_reset_grants(&c, 1).unwrap();
+        store
+            .put_connection_reset_grants("existing", "c:owner", "existing", &c, 1)
+            .unwrap();
         assert_eq!(
             store
                 .get::<McpConnection>("connection", "existing")

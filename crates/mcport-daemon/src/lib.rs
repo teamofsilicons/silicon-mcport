@@ -500,8 +500,7 @@ pub async fn run(
                         let actor = Actor {
                             principal_id: principal.clone(),
                             org_id: org.clone(),
-                            identity_kind: String::new(),
-                            display_name: String::new(),
+                            ..Default::default()
                         };
                         registry
                             .connections
@@ -831,6 +830,7 @@ mod tests {
             identity_kind: "silicon".into(),
             org_id: "org".into(),
             display_name: "caller".into(),
+            ..Default::default()
         };
         assert!(endpoint_for(&connection, &actor).is_err());
         let mut shared = connection.clone();
@@ -847,6 +847,7 @@ mod tests {
             org_id: "org".into(),
             identity_kind: "silicon".into(),
             display_name: "caller".into(),
+            ..Default::default()
         };
         let mut registry = Registry::new(host());
         registry

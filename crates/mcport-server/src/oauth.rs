@@ -1,8 +1,11 @@
+//! Provider (upstream MCP) OAuth: PKCE authorization of a provider account for a
+//! connection. Unrelated to Silicon Accounts sign-in.
 use crate::{
-    auth::{self, Auth},
-    connections::{self, ProviderGrant},
+    auth::{self, Auth, Live},
+    connections::{self, ConnectionRecord, ProviderGrant},
     error::{Error, Result},
     state::{App, hash, now, secret},
+    store::ENV,
 };
 use axum::{
     Json,
@@ -11,21 +14,22 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use mcport_core::Connection;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, time::Duration};
 
+/// One provider authorization in progress (expires after 10 minutes). `other`
+/// keeps fields of earlier releases; such attempts can no longer complete.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Attempt {
     pub key: String,
     pub connection_id: String,
-    pub environment: String,
-    pub generation: i64,
-    pub family: String,
-    pub principal_id: String,
-    pub org_id: String,
+    /// The account that started it.
+    #[serde(default)]
+    pub account_uuid: String,
+    #[serde(default)]
+    pub created_at: i64,
     pub verifier: String,
     pub client_id: String,
     pub token_url: String,
@@ -38,22 +42,28 @@ pub struct Attempt {
     pub expires_at: i64,
     pub cookie: String,
     pub account_epoch: i64,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
-pub fn epoch(app: &App, c: &Connection, a: &Auth) -> Result<i64> {
+/// The replacement counter of `account`'s provider account on `c`.
+pub fn epoch(app: &App, c: &ConnectionRecord, account: &str) -> Result<i64> {
     Ok(app
         .store
-        .get::<i64>("account_epoch", &connections::credential_key(c, a))?
+        .get::<i64>(
+            "account_epoch",
+            &connections::credential_key(&c.id, account),
+        )?
         .unwrap_or(0))
 }
-pub fn bump_epoch(app: &App, c: &Connection, a: &Auth) -> Result<()> {
+pub fn bump_epoch(app: &App, c: &ConnectionRecord, account: &str) -> Result<()> {
     app.store.put(
         "account_epoch",
-        &connections::credential_key(c, a),
-        a.env(),
-        &c.org_id,
-        &a.actor().principal_id,
+        &connections::credential_key(&c.id, account),
+        ENV,
+        &c.owner_uuid,
+        account,
         None,
-        &(epoch(app, c, a)? + 1),
+        &(epoch(app, c, account)? + 1),
         None,
     )
 }
@@ -494,23 +504,22 @@ pub struct AuthorizeInput {
 }
 pub async fn authorize(
     State(app): State<App>,
-    headers: HeaderMap,
+    Live(a): Live,
     Path(name): Path<String>,
     Json(input): Json<AuthorizeInput>,
 ) -> Result<Response> {
-    auth::csrf(&app, &headers)?;
-    let a = auth::authenticate(&app, &headers).await?;
-    let c = connections::resolve(&app, &a, &name, false)?;
+    let (c, access) = connections::resolve(&app, &a.account, &name, false).await?;
     if c.host_id.is_some() {
         return Err(failure(
             "configure_on_host",
             "Authorize local MCP accounts on their registered host.",
         ));
     }
-    if c.auth_mode == "none" || c.auth_mode == "shared" && !connections::can_manage(&c, &a) {
+    if c.auth_mode == "none" || c.auth_mode == "shared" && !access.manages() {
         return Err(Error::denied());
     }
-    let account_epoch = epoch(&app, &c, &a)?;
+    let account = connections::execution_account(&c, a.uuid()).to_owned();
+    let account_epoch = epoch(&app, &c, &account)?;
     let endpoint = url::Url::parse(c.url.as_deref().ok_or_else(Error::internal)?)
         .map_err(|_| Error::bad("Invalid MCP URL."))?;
     // Only the initial unauthorized Bearer challenge chooses requested scopes.
@@ -619,12 +628,9 @@ pub async fn authorize(
     }
     let attempt = Attempt {
         key: key.clone(),
-        connection_id: c.id,
-        environment: a.env().into(),
-        generation: a.session.generation,
-        family: a.session.family.clone(),
-        principal_id: a.actor().principal_id.clone(),
-        org_id: a.actor().org_id.clone(),
+        connection_id: c.id.clone(),
+        account_uuid: a.uuid().into(),
+        created_at: now(),
         verifier,
         client_id,
         token_url,
@@ -636,18 +642,19 @@ pub async fn authorize(
         expires_at: now() + 600,
         cookie: nonce,
         account_epoch,
+        other: Map::new(),
     };
-    let _environment_guard = auth::mutation_guard(&app, &a).await?;
-    let current = connections::resolve(&app, &a, &attempt.connection_id, false)?;
-    if current.version != c.version || epoch(&app, &current, &a)? != account_epoch {
+    let (current, _) =
+        connections::resolve(&app, &a.account, &attempt.connection_id, false).await?;
+    if current.version != c.version || epoch(&app, &current, &account)? != account_epoch {
         return Err(Error::denied());
     }
     app.store.put(
         "oauth_attempt",
         &key,
-        &attempt.environment,
-        &attempt.org_id,
-        &attempt.principal_id,
+        ENV,
+        &c.owner_uuid,
+        a.uuid(),
         None,
         &attempt,
         Some(0),
@@ -678,17 +685,26 @@ fn cookie_header(app: &App, name: &str, value: &str, age: i64) -> String {
         }
     )
 }
+fn attempt_expired() -> Error {
+    Error::new(
+        401,
+        "authorization_expired",
+        "This provider authorization link expired or was already used.",
+        "Start the provider account connection again from MCPort.",
+    )
+}
 pub async fn start(State(app): State<App>, Query(q): Query<OAuthQuery>) -> Result<Response> {
     let attempt = app
         .store
         .get::<Attempt>("oauth_attempt", &hash(&q.state))?
-        .ok_or_else(Error::expired)?;
+        .filter(|attempt| !attempt.account_uuid.is_empty())
+        .ok_or_else(attempt_expired)?;
     if attempt.expires_at <= now() {
-        return Err(Error::expired());
+        return Err(attempt_expired());
     }
-    let a = auth::authorize_family(&app, &attempt.family, &attempt.environment).await?;
-    let c = connections::resolve(&app, &a, &attempt.connection_id, false)?;
-    let mut response=Html(format!("<!doctype html><html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Authorize MCP account · Silicon MCPort</title><body style='font:18px system-ui;max-width:560px;margin:10vh auto;padding:24px'><h1>Connect {}</h1><p>This will save the provider account for <strong>{}</strong> in organization <strong>{}</strong>.</p><p>{}</p><a href='{}'>Continue to provider authorization</a><p>You can close this window to cancel.</p></body></html>",escape(&c.name),escape(&attempt.principal_id),escape(&attempt.org_id),if c.auth_mode=="shared"{"People with access to this connection will be able to act through this provider account."}else{"This provider account will be used only for your own calls."},escape(&attempt.authorization_url))).into_response();
+    let a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    let (c, _) = connections::resolve(&app, &a.account, &attempt.connection_id, false).await?;
+    let mut response=Html(format!("<!doctype html><html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Authorize MCP account · Silicon MCPort</title><body style='font:18px system-ui;max-width:560px;margin:10vh auto;padding:24px'><h1>Connect {}</h1><p>This will save the provider account for <strong>{}</strong>.</p><p>{}</p><a href='{}'>Continue to provider authorization</a><p>You can close this window to cancel.</p></body></html>",escape(&c.name),escape(a.account.label()),if c.auth_mode=="shared"{"Carbons and Silicons with access to this connection will be able to act through this provider account."}else{"This provider account will be used only for your own calls."},escape(&attempt.authorization_url))).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,
         cookie_header(
@@ -713,27 +729,25 @@ pub async fn callback(
     let attempt = app
         .store
         .get::<Attempt>("oauth_attempt", &key)?
-        .ok_or_else(Error::expired)?;
+        .filter(|attempt| !attempt.account_uuid.is_empty())
+        .ok_or_else(attempt_expired)?;
     if attempt.expires_at <= now()
         || auth::cookie(&headers, &format!("mcport_oauth_{}", &key[..16])).as_deref()
             != Some(&attempt.cookie)
     {
-        return Err(Error::expired());
+        return Err(attempt_expired());
     }
     validate_issuer(&attempt.issuer, q.iss.as_deref(), attempt.require_iss)?;
-    app.assert_generation(&attempt.environment, attempt.generation)?;
-    let a = auth::authorize_family(&app, &attempt.family, &attempt.environment).await?;
-    let c = connections::resolve(&app, &a, &attempt.connection_id, false)?;
-    if a.actor().principal_id != attempt.principal_id
-        || a.actor().org_id != attempt.org_id
-        || c.auth_mode == "shared" && !connections::can_manage(&c, &a)
-    {
+    let a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    let (c, access) = connections::resolve(&app, &a.account, &attempt.connection_id, false).await?;
+    if c.auth_mode == "shared" && !access.manages() {
         return Err(Error::denied());
     }
-    let credential_key = connections::credential_key(&c, &a);
+    let account = connections::execution_account(&c, a.uuid()).to_owned();
+    let credential_key = connections::credential_key(&c.id, &account);
     let account_lock = app.lock(&format!("credential:{credential_key}"));
     let _account_guard = account_lock.lock().await;
-    if epoch(&app, &c, &a)? != attempt.account_epoch {
+    if epoch(&app, &c, &account)? != attempt.account_epoch {
         return Err(Error::new(
             409,
             "account_changed",
@@ -742,8 +756,7 @@ pub async fn callback(
         ));
     }
     {
-        let _environment_guard = auth::mutation_guard(&app, &a).await?;
-        let current = connections::resolve(&app, &a, &c.id, false)?;
+        let (current, _) = connections::resolve(&app, &a.account, &c.id, false).await?;
         if current.version != c.version {
             return Err(Error::denied());
         }
@@ -786,36 +799,34 @@ pub async fn callback(
         })?;
     let tokens = body(response).await?;
     validate_token(&tokens)?;
-    let access = required(&tokens, "access_token")?;
-    app.assert_generation(&attempt.environment, attempt.generation)?;
-    let a = auth::authorize_family(&app, &attempt.family, &attempt.environment).await?;
-    let _environment_guard = auth::mutation_guard(&app, &a).await?;
-    let current = connections::resolve(&app, &a, &c.id, false)?;
+    let token = required(&tokens, "access_token")?;
+    let a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    let (current, _) = connections::resolve(&app, &a.account, &c.id, false).await?;
     if current.version != c.version {
         return Err(Error::denied());
     }
     let g = ProviderGrant {
         connection_id: c.id.clone(),
-        owner_id: a.actor().principal_id.clone(),
-        owner_org: a.actor().org_id.clone(),
-        label: a.actor().display_name.clone(),
+        owner_uuid: account.clone(),
+        label: a.account.label().to_owned(),
         kind: "oauth".into(),
-        secret: access,
+        secret: token,
         header_name: None,
         oauth: Some(
             json!({"issuer":attempt.issuer,"token_url":attempt.token_url,"client_id":attempt.client_id,"resource":attempt.resource,"refresh_token":tokens.get("refresh_token"),"expires_at":now()+tokens.get("expires_in").and_then(Value::as_i64).unwrap_or(3600).clamp(1,31536000)}),
         ),
+        other: Map::new(),
     };
     // Every successful account replacement advances the epoch, including OAuth
     // callbacks. Older authorization windows cannot replace the new account.
-    bump_epoch(&app, &c, &a)?;
+    bump_epoch(&app, &c, &account)?;
     crate::execution::invalidate_connection(&app, &c.id)?;
     app.store.put(
         "credential",
-        &connections::credential_key(&c, &a),
-        a.env(),
-        &c.org_id,
-        &g.owner_id,
+        &credential_key,
+        ENV,
+        &c.owner_uuid,
+        &account,
         None,
         &g,
         None,
@@ -838,25 +849,24 @@ fn validate_token(tokens: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn replace_existing_grant(
+async fn replace_existing_grant(
     app: &App,
-    c: &Connection,
+    c: &ConnectionRecord,
     a: &Auth,
+    key: &str,
     expected: &ProviderGrant,
     replacement: &ProviderGrant,
 ) -> Result<()> {
-    // The caller holds the credential and environment locks. Connection deletion
-    // uses only the latter, so a grant loaded before waiting must never upsert.
-    let current = connections::resolve(app, a, &c.id, false)?;
+    // The caller holds the credential lock. Connection deletion does not, so a
+    // grant loaded before waiting is only ever replaced in place, never upserted.
+    let (current, _) = connections::resolve(app, &a.account, &c.id, false).await?;
     if current.version != c.version {
         return Err(Error::denied());
     }
     let expected = serde_json::to_value(expected)?;
     let mut replaced = false;
-    app.store.update::<ProviderGrant>(
-        "credential",
-        &connections::credential_key(c, a),
-        |grant| {
+    app.store
+        .update::<ProviderGrant>("credential", key, |grant| {
             if serde_json::to_value(&*grant).is_ok_and(|value| value == expected) {
                 *grant = replacement.clone();
                 replaced = true;
@@ -864,15 +874,14 @@ fn replace_existing_grant(
             } else {
                 false
             }
-        },
-    )?;
+        })?;
     if !replaced {
         return Err(Error::denied());
     }
     Ok(())
 }
-pub async fn execution_grant(app: &App, c: &Connection, a: &Auth) -> Result<ProviderGrant> {
-    let key = connections::credential_key(c, a);
+pub async fn execution_grant(app: &App, c: &ConnectionRecord, a: &Auth) -> Result<ProviderGrant> {
+    let key = connections::credential_key(&c.id, connections::execution_account(c, a.uuid()));
     let lock = app.lock(&format!("credential:{key}"));
     let _guard = lock.lock().await;
     let mut g = app
@@ -909,10 +918,7 @@ pub async fn execution_grant(app: &App, c: &Connection, a: &Auth) -> Result<Prov
     let previous = g.clone();
     oauth["refresh_uncertain"] = json!(true);
     g.oauth = Some(oauth.clone());
-    {
-        let _environment_guard = auth::mutation_guard(app, a).await?;
-        replace_existing_grant(app, c, a, &previous, &g)?;
-    }
+    replace_existing_grant(app, c, a, &key, &previous, &g).await?;
     let uncertain = g.clone();
     let response=client(app,&token_url).await?.post(&token_url).form(&[("grant_type","refresh_token"),("refresh_token",&refresh),("client_id",&client_id),("resource",&resource)]).send().await.map_err(|_|failure("provider_refresh_uncertain","The provider refresh response was lost. Reconnect this account before another call."))?;
     let tokens = body(response).await?;
@@ -931,17 +937,18 @@ pub async fn execution_grant(app: &App, c: &Connection, a: &Auth) -> Result<Prov
     );
     oauth["refresh_uncertain"] = json!(false);
     g.oauth = Some(oauth);
-    let _environment_guard = auth::mutation_guard(app, a).await?;
-    replace_existing_grant(app, c, a, &uncertain, &g)?;
+    replace_existing_grant(app, c, a, &key, &uncertain, &g).await?;
     Ok(g)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{auth::StoredSession, execution::CallRecord, state::Config};
+    use crate::{
+        execution::{CallRecord, InvocationData},
+        test_support::{Fixture, fixture_with},
+    };
     use axum::{Router, http::Uri};
-    use mcport_core::{Actor, Invocation};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -953,13 +960,6 @@ mod tests {
     }
     async fn request(State(provider): State<Arc<Provider>>, uri: Uri, body: String) -> Json<Value> {
         match uri.path() {
-            "/api/v1/oauth/introspect" => Json(
-                json!({"active":true,"public_id":"c:alice","actor_type":"carbon",
-                "client_id":"mcport","audience":"mcport","org_id":"tos","membership_id":"c:alice[tos]","expires_at":now()+3600,
-                "authorization":{"actor_type":"carbon","public_id":"c:alice","organization_id":"00000000-0000-0000-0000-000000000001",
-                    "org_id":"tos","membership_id":"c:alice[tos]","membership_version":1,"authorization_epoch":1,
-                    "audience":"mcport","testing_environment_id":null,"scopes":[],"org_role":null,"tags":null}}),
-            ),
             "/provider/token" => {
                 provider.exchanges.fetch_add(1, Ordering::SeqCst);
                 let form: std::collections::HashMap<_, _> =
@@ -973,98 +973,61 @@ mod tests {
             _ => panic!("Unexpected fixture route {}", uri.path()),
         }
     }
+    /// Accounts stub + a provider token endpoint at `provider` + Alice's
+    /// per-user connection.
     async fn fixture() -> (
-        App,
-        tempfile::TempDir,
+        Fixture,
         Auth,
-        Connection,
+        ConnectionRecord,
         Arc<Provider>,
+        String,
         tokio::task::JoinHandle<()>,
     ) {
-        let directory = tempfile::tempdir().unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let provider = Arc::new(Provider::default());
         let router = Router::new().fallback(request).with_state(provider.clone());
         let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-        let mut config = Config::from_env();
-        config.data_dir = directory.path().into();
-        config.app_id = "mcport".into();
-        config.app_secret = "app-secret".into();
-        config.iam_url = origin.clone();
-        config.upstream_origins.insert(origin);
-        let app = App::new(config).unwrap();
-        let a = Auth {
-            session: StoredSession {
-                key: hash("gateway-session"),
-                family: "family".into(),
-                actor: Actor {
-                    principal_id: "c:alice".into(),
-                    identity_kind: "carbon".into(),
-                    org_id: "tos".into(),
-                    display_name: "Alice".into(),
-                },
-                environment: "production".into(),
-                generation: 0,
-                control_revision: 0,
-                iam_access: "iam-access".into(),
-                iam_refresh: "iam-refresh".into(),
-                iam_expires: now() + 3600,
-                expires_at: now() + 3600,
-                refresh_key: None,
-            },
-        };
-        app.store
-            .put(
-                "session",
-                &a.session.key,
-                a.env(),
-                "tos",
-                "c:alice",
-                None,
-                &a.session,
-                None,
-            )
-            .unwrap();
-        let c = Connection {
+        let allowed = origin.clone();
+        let f = fixture_with(move |config| {
+            config.upstream_origins.insert(allowed);
+        })
+        .await;
+        f.carbon("Alice", "c:alice");
+        let a = f.auth("Alice").await;
+        let c = ConnectionRecord {
             id: "connection".into(),
             name: "fixture".into(),
-            description: "".into(),
-            org_id: "tos".into(),
-            owner_id: "c:alice".into(),
-            environment: "production".into(),
+            owner_uuid: "Alice".into(),
             transport: "http".into(),
             url: Some("https://mcp.example/mcp".into()),
-            host_id: None,
-            command: None,
-            args: vec![],
             auth_mode: "per-user".into(),
-            visibility: "private".into(),
-            status: "active".into(),
-            can_manage: true,
-            account: None,
+            visibility: "invited".into(),
             created_at: now(),
             updated_at: now(),
             version: 1,
+            ..Default::default()
         };
-        app.store
+        f.app
+            .store
             .put(
                 "connection",
                 &c.id,
-                a.env(),
-                "tos",
-                "c:alice",
+                ENV,
+                "Alice",
+                "Alice",
                 Some(&c.name),
                 &c,
                 None,
             )
             .unwrap();
-        (app, directory, a, c, provider, task)
+        (f, a, c, provider, origin, task)
     }
     fn attempt(
         app: &App,
         a: &Auth,
-        c: &Connection,
+        c: &ConnectionRecord,
+        origin: &str,
         state: &str,
         require_iss: bool,
     ) -> (HeaderMap, OAuthQuery) {
@@ -1072,29 +1035,27 @@ mod tests {
         let attempt = Attempt {
             key: key.clone(),
             connection_id: c.id.clone(),
-            environment: a.env().into(),
-            generation: 0,
-            family: a.session.family.clone(),
-            principal_id: a.actor().principal_id.clone(),
-            org_id: a.actor().org_id.clone(),
+            account_uuid: a.uuid().into(),
+            created_at: now(),
             verifier: "verifier".into(),
             client_id: "fixture".into(),
-            token_url: format!("{}/provider/token", app.config.iam_url),
+            token_url: format!("{origin}/provider/token"),
             issuer: "https://issuer.example".into(),
             require_iss,
             resource: "https://mcp.example/mcp".into(),
             authorization_url: "https://issuer.example/authorize".into(),
             expires_at: now() + 600,
             cookie: "nonce".into(),
-            account_epoch: epoch(app, c, a).unwrap(),
+            account_epoch: epoch(app, c, a.uuid()).unwrap(),
+            other: Map::new(),
         };
         app.store
             .put(
                 "oauth_attempt",
                 &key,
-                a.env(),
-                "tos",
-                "c:alice",
+                ENV,
+                &c.owner_uuid,
+                a.uuid(),
                 None,
                 &attempt,
                 None,
@@ -1148,7 +1109,8 @@ mod tests {
     }
     #[tokio::test]
     async fn missing_or_wrong_issuer_never_sends_code_or_verifier_to_token_endpoint() {
-        let (app, _dir, a, c, provider, task) = fixture().await;
+        let (f, a, c, provider, origin, task) = fixture().await;
+        let app = f.app.clone();
         for (state, iss, error) in [
             ("missing", None, None),
             ("wrong", Some("https://wrong.example"), None),
@@ -1158,7 +1120,7 @@ mod tests {
                 Some("access_denied"),
             ),
         ] {
-            let (headers, mut q) = attempt(&app, &a, &c, state, true);
+            let (headers, mut q) = attempt(&app, &a, &c, &origin, state, true);
             q.iss = iss.map(str::to_owned);
             q.error = error.map(str::to_owned);
             assert_eq!(
@@ -1173,12 +1135,12 @@ mod tests {
         assert_eq!(provider.exchanges.load(Ordering::SeqCst), 0);
         assert!(
             app.store
-                .get::<ProviderGrant>("credential", &connections::credential_key(&c, &a))
+                .get::<ProviderGrant>("credential", &connections::credential_key(&c.id, a.uuid()))
                 .unwrap()
                 .is_none()
         );
         // Older issuers which do not advertise response-iss support remain usable.
-        let (headers, mut q) = attempt(&app, &a, &c, "legacy", false);
+        let (headers, mut q) = attempt(&app, &a, &c, &origin, "legacy", false);
         q.iss = None;
         callback(State(app.clone()), headers, Query(q))
             .await
@@ -1188,36 +1150,29 @@ mod tests {
     }
     #[tokio::test]
     async fn new_oauth_account_invalidates_work_and_prevents_older_attempt_replacement() {
-        let (app, _dir, a, c, provider, task) = fixture().await;
-        let (old_headers, old) = attempt(&app, &a, &c, "old", true);
-        let (new_headers, new) = attempt(&app, &a, &c, "new", true);
+        let (f, a, c, provider, origin, task) = fixture().await;
+        let app = f.app.clone();
+        let (old_headers, old) = attempt(&app, &a, &c, &origin, "old", true);
+        let (new_headers, new) = attempt(&app, &a, &c, &origin, "new", true);
         let call = CallRecord {
-            invocation: Invocation {
+            invocation: InvocationData {
                 id: "call".into(),
                 connection_id: c.id.clone(),
                 connection_name: c.name.clone(),
-                actor_id: a.actor().principal_id.clone(),
-                execution_account_id: a.actor().principal_id.clone(),
                 method: "tools/call".into(),
                 tool_name: Some("mutate".into()),
                 status: "running".into(),
                 created_at: now(),
-                completed_at: None,
-                result: None,
-                error: None,
+                ..Default::default()
             },
-            environment: a.env().into(),
-            org_id: "tos".into(),
-            family: a.session.family.clone(),
-            generation: 0,
-            host_id: None,
+            caller_uuid: a.uuid().into(),
+            execution_account_uuid: Some(a.uuid().into()),
             params: json!({"name":"mutate","arguments":{}}),
             timeout_ms: 30000,
             expires_at: now() + 30,
             connection_version: 1,
             fingerprint: "call".into(),
-            progress: None,
-            telemetry_enabled: false,
+            ..Default::default()
         };
         crate::execution::save(&app, &call).unwrap();
         let cancellation = tokio_util::sync::CancellationToken::new();
@@ -1228,7 +1183,7 @@ mod tests {
         callback(State(app.clone()), new_headers, Query(new))
             .await
             .unwrap();
-        assert_eq!(epoch(&app, &c, &a).unwrap(), 1);
+        assert_eq!(epoch(&app, &c, a.uuid()).unwrap(), 1);
         assert!(cancellation.is_cancelled());
         let cancelled = app
             .store
@@ -1248,46 +1203,54 @@ mod tests {
         assert_eq!(provider.exchanges.load(Ordering::SeqCst), 1);
         assert_eq!(
             app.store
-                .get::<ProviderGrant>("credential", &connections::credential_key(&c, &a))
+                .get::<ProviderGrant>("credential", &connections::credential_key(&c.id, a.uuid()))
                 .unwrap()
                 .unwrap()
                 .secret,
             "account-new"
         );
+        let stored = app
+            .store
+            .get::<ProviderGrant>("credential", &connections::credential_key(&c.id, a.uuid()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.owner_uuid, "Alice");
+        assert_eq!(stored.label, "c:alice");
         task.abort();
     }
 
     #[tokio::test]
-    async fn refresh_waiting_for_environment_cannot_recreate_a_deleted_connection_grant() {
-        let (app, _dir, a, c, provider, server) = fixture().await;
+    async fn refresh_waiting_for_the_credential_cannot_recreate_a_deleted_connection_grant() {
+        let (f, a, c, provider, origin, server) = fixture().await;
+        let app = f.app.clone();
+        let key = connections::credential_key(&c.id, a.uuid());
         let grant = ProviderGrant {
             connection_id: c.id.clone(),
-            owner_id: a.actor().principal_id.clone(),
-            owner_org: "tos".into(),
+            owner_uuid: a.uuid().into(),
             label: "Alice".into(),
             kind: "oauth".into(),
             secret: "expired-token".into(),
             header_name: None,
             oauth: Some(
-                json!({"token_url":format!("{}/provider/token",app.config.iam_url),"client_id":"fixture",
+                json!({"token_url":format!("{origin}/provider/token"),"client_id":"fixture",
                 "resource":"https://mcp.example/mcp","refresh_token":"rotating-refresh","expires_at":0}),
             ),
+            other: Map::new(),
         };
-        let key = connections::credential_key(&c, &a);
         app.store
             .put(
                 "credential",
                 &key,
-                a.env(),
-                "tos",
-                "c:alice",
+                ENV,
+                "Alice",
+                "Alice",
                 None,
                 &grant,
                 None,
             )
             .unwrap();
-        let environment_lock = app.lock("environment:production");
-        let guard = environment_lock.lock().await;
+        let credential_lock = app.lock(&format!("credential:{key}"));
+        let guard = credential_lock.lock().await;
         let task_app = app.clone();
         let task_c = c.clone();
         let task_a = a.clone();
@@ -1298,8 +1261,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        app.store.delete("connection", &c.id).unwrap();
-        app.store.delete("credential", &key).unwrap();
+        app.store.delete_connection(&c.id).unwrap();
         drop(guard);
         assert!(task.await.unwrap().is_err());
         assert!(
@@ -1384,7 +1346,7 @@ mod tests {
     }
     async fn discovery_fixture(
         app: &App,
-        c: &Connection,
+        c: &ConnectionRecord,
     ) -> (App, Arc<Discovery>, String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -1404,9 +1366,9 @@ mod tests {
             .put(
                 "connection",
                 &c.id,
-                &c.environment,
-                &c.org_id,
-                &c.owner_id,
+                ENV,
+                &c.owner_uuid,
+                &c.owner_uuid,
                 Some(&c.name),
                 &c,
                 None,
@@ -1414,15 +1376,10 @@ mod tests {
             .unwrap();
         (app, state, origin, task)
     }
-    async fn authorize_fixture(app: &App, configured: Option<&str>) -> Result<Attempt> {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            "Bearer gateway-session".parse().unwrap(),
-        );
+    async fn authorize_fixture(app: &App, a: &Auth, configured: Option<&str>) -> Result<Attempt> {
         let response = authorize(
             State(app.clone()),
-            headers,
+            Live(a.clone()),
             Path("connection".into()),
             Json(AuthorizeInput {
                 client_id: configured.map(str::to_owned),
@@ -1496,8 +1453,8 @@ mod tests {
     }
     #[tokio::test]
     async fn oidc_appended_discovery_and_root_resource_fallback_use_challenge_scope_and_cimd() {
-        let (app, _dir, _a, c, _provider, iam) = fixture().await;
-        let (app, discovery, origin, server) = discovery_fixture(&app, &c).await;
+        let (f, a, c, _provider, _origin, iam) = fixture().await;
+        let (app, discovery, origin, server) = discovery_fixture(&f.app, &c).await;
         let issuer = format!("{origin}/tenant");
         discovery.challenge(r#"Basic realm="ignore, this", Bearer scope="read:one read:two""#);
         discovery.reply("/.well-known/oauth-protected-resource",200,json!({"resource":format!("{origin}/mcp"),"authorization_servers":[issuer],"scopes_supported":["admin"]}));
@@ -1506,7 +1463,7 @@ mod tests {
             200,
             metadata(&origin, &issuer),
         );
-        let attempt = authorize_fixture(&app, None).await.unwrap();
+        let attempt = authorize_fixture(&app, &a, None).await.unwrap();
         assert_eq!(attempt.issuer, issuer);
         assert_eq!(
             attempt.client_id,
@@ -1542,8 +1499,8 @@ mod tests {
     }
     #[tokio::test]
     async fn discovery_does_not_fallback_after_issuer_mismatch_or_redirect() {
-        let (app, _dir, _a, c, _provider, iam) = fixture().await;
-        let (app, discovery, origin, server) = discovery_fixture(&app, &c).await;
+        let (f, _a, c, _provider, _origin, iam) = fixture().await;
+        let (app, discovery, origin, server) = discovery_fixture(&f.app, &c).await;
         let issuer = format!("{origin}/tenant");
         discovery.reply(
             "/.well-known/oauth-authorization-server/tenant",
@@ -1589,8 +1546,8 @@ mod tests {
     }
     #[tokio::test]
     async fn registration_order_and_application_type_respect_configured_public_url() {
-        let (app, _dir, _a, c, _provider, iam) = fixture().await;
-        let (mut app, discovery, origin, server) = discovery_fixture(&app, &c).await;
+        let (f, _a, c, _provider, _origin, iam) = fixture().await;
+        let (mut app, discovery, origin, server) = discovery_fixture(&f.app, &c).await;
         let metadata = metadata(&origin, &origin);
         discovery.reply(
             "/register",
@@ -1643,8 +1600,8 @@ mod tests {
     #[tokio::test]
     async fn client_metadata_route_is_public_and_never_uses_request_host() {
         use tower::ServiceExt;
-        let (app, _dir, _a, c, _provider, iam) = fixture().await;
-        let (app, _discovery, _origin, server) = discovery_fixture(&app, &c).await;
+        let (f, _a, c, _provider, _origin, iam) = fixture().await;
+        let (app, _discovery, _origin, server) = discovery_fixture(&f.app, &c).await;
         let response = crate::router(app)
             .oneshot(
                 axum::http::Request::builder()

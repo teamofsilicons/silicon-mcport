@@ -31,8 +31,7 @@ impl Monitor {
                 let actor = Actor {
                     principal_id: principal.clone(),
                     org_id: registry.host.org_id.clone(),
-                    identity_kind: String::new(),
-                    display_name: String::new(),
+                    ..Default::default()
                 };
                 if let Ok(endpoint) = endpoint_for(connection, &actor) {
                     desired.insert((id.clone(), principal), endpoint);

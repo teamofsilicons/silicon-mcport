@@ -44,6 +44,7 @@ fn job(id: &str, connection: &str) -> HostJob {
             identity_kind: "silicon".into(),
             org_id: "org".into(),
             display_name: "caller".into(),
+            ..Default::default()
         },
     }
 }

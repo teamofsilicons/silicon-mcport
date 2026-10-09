@@ -66,13 +66,7 @@ impl Scope {
             .host_id
             .as_deref()
             .ok_or_else(|| invalid("This connection has no local execution host."))?;
-        self.validate_registry(registry, host_id)?;
-        if connection.org_id != self.org_id || connection.environment != self.environment {
-            return Err(invalid(
-                "Connection does not match the selected organization and testing environment.",
-            ));
-        }
-        Ok(())
+        self.validate_registry(registry, host_id)
     }
 }
 
@@ -83,21 +77,18 @@ pub fn registry_for_host(
     isi: Option<String>,
 ) -> Result<Registry> {
     let host = registration.host;
-    if host.owner_id != scope.principal_id
-        || host.org_id != scope.org_id
-        || host.environment != scope.environment
-    {
+    if host.owner.uuid != scope.principal_id {
         return Err(invalid(
-            "The registered host belongs to a different account, organization or environment.",
+            "The registered host belongs to a different account.",
         ));
     }
     Ok(Registry::new(HostConfig {
         backend_url: scope.backend_url.clone(),
         host_id: host.id,
         host_token: registration.host_token,
-        environment: host.environment,
-        org_id: host.org_id,
-        owner_id: host.owner_id,
+        environment: scope.environment.clone(),
+        org_id: scope.org_id.clone(),
+        owner_id: host.owner.uuid,
         isi,
     }))
 }
@@ -112,7 +103,7 @@ pub fn register_connection(
     env: BTreeMap<String, String>,
 ) -> Result<bool> {
     scope.validate_connection(registry, connection)?;
-    if connection.owner_id != scope.principal_id || registry.host.owner_id != scope.principal_id {
+    if connection.owner.uuid != scope.principal_id || registry.host.owner_id != scope.principal_id {
         return Err(invalid(
             "Only the connection and host owner may approve local execution.",
         ));
@@ -165,7 +156,7 @@ fn selected<'a>(
     mutation: bool,
 ) -> Result<&'a mut RegisteredConnection> {
     scope.validate_connection(registry, connection)?;
-    if mutation && connection.auth_mode == "shared" && connection.owner_id != scope.principal_id {
+    if mutation && connection.auth_mode == "shared" && connection.owner.uuid != scope.principal_id {
         return Err(invalid(
             "Only the connection owner can change its shared provider account.",
         ));
@@ -248,7 +239,7 @@ pub fn account_status(
         registered.personal_accounts.get(&scope.principal_id)
     };
     Ok(
-        json!({"connected":account.is_some(),"owner_id":if connection.auth_mode == "shared" { &connection.owner_id } else { &scope.principal_id },"label":account.map(|a|a.label.as_str()),"kind":"local","uses_host_account":connection.auth_mode == "shared" && account.is_none() && !registered.shared_account_disconnected,"disconnected":registered.shared_account_disconnected,"provider_verified":false}),
+        json!({"connected":account.is_some(),"owner_id":if connection.auth_mode == "shared" { &connection.owner.uuid } else { &scope.principal_id },"label":account.map(|a|a.label.as_str()),"kind":"local","uses_host_account":connection.auth_mode == "shared" && account.is_none() && !registered.shared_account_disconnected,"disconnected":registered.shared_account_disconnected,"provider_verified":false}),
     )
 }
 pub fn unregister_connection(
@@ -257,7 +248,7 @@ pub fn unregister_connection(
     scope: &Scope,
 ) -> Result<bool> {
     scope.validate_connection(registry, connection)?;
-    if connection.owner_id != scope.principal_id || registry.host.owner_id != scope.principal_id {
+    if connection.owner.uuid != scope.principal_id || registry.host.owner_id != scope.principal_id {
         return Err(invalid(
             "Only the connection and host owner may remove its local registration.",
         ));
@@ -612,7 +603,7 @@ mod tests {
     }
     fn connection(mode: &str) -> Connection {
         serde_json::from_value(json!({
-            "id":"connection-one", "name":"Local fixture", "description":"", "org_id":"org-one", "owner_id":"ca:owner", "environment":"test-one", "transport":"http", "url":"http://127.0.0.1:4392/mcp", "host_id":"host-one", "command":null, "args":[], "auth_mode":mode, "visibility":"invited", "status":"checking", "can_manage":true, "account":null, "created_at":0, "updated_at":0, "version":1
+            "id":"connection-one", "name":"Local fixture", "description":"", "owner":{"uuid":"ca:owner","id":"c:owner","kind":"carbon","display_name":"Owner"}, "transport":"http", "url":"http://127.0.0.1:4392/mcp", "host_id":"host-one", "command":null, "args":[], "auth_mode":mode, "visibility":"invited", "status":"checking", "can_manage":true, "account":null, "created_at":0, "updated_at":0, "version":1
         })).unwrap()
     }
 

@@ -112,6 +112,7 @@ fn job() -> HostJob {
             identity_kind: "silicon".into(),
             org_id: "tos".into(),
             display_name: "caller".into(),
+            ..Default::default()
         },
     }
 }

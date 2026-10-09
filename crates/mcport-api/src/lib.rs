@@ -414,7 +414,7 @@ impl Client {
         self.post(
             ctx,
             &["connections", id, "access"],
-            json!({"principal_id":principal}),
+            json!({"account":principal}),
         )
         .await
     }
@@ -438,7 +438,7 @@ impl Client {
         &self,
         ctx: &RequestContext,
         id: &str,
-        input: &ToolPolicy,
+        input: &ToolPolicyInput,
     ) -> Result<ToolPolicy, Error> {
         self.request(
             ctx,
@@ -896,7 +896,7 @@ mod tests {
     async fn directory_crud_preserves_context_search_and_expected_version() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let entry = json!({"id":"dir/one","name":"Team docs","description":"Shared reference","category":"Documentation","source":"org","source_url":"https://example.test","source_revision":null,"owner_id":"si:writer","org_id":"tos","environment":"test-one","can_manage":true,"template":{"transport":"http","url":"https://example.test/mcp","command":null,"args":[],"auth_mode":"per-user"},"version":7,"created_at":1,"updated_at":2});
+        let entry = json!({"id":"dir/one","name":"Team docs","description":"Shared reference","category":"Documentation","source":"personal","source_url":"https://example.test","source_revision":null,"owner":{"uuid":"Wr1","id":"si:writer","kind":"silicon","display_name":"Writer"},"can_manage":true,"template":{"transport":"http","url":"https://example.test/mcp","command":null,"args":[],"auth_mode":"per-user"},"version":7,"created_at":1,"updated_at":2});
         let response_entry = entry.clone();
         let server = tokio::spawn(async move {
             let mut requests = vec![];

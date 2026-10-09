@@ -6,7 +6,7 @@ use args::*;
 use clap::Parser;
 use mcport_client::{
     ApiError, Client, ConnectionInput, ConnectionUpdate, DirectoryEntry, DirectoryInput,
-    DirectoryUpdate, RequestContext, Session, ToolPolicy,
+    DirectoryUpdate, RequestContext, Session, ToolPolicyInput,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -465,16 +465,17 @@ async fn dispatch_inner(
                 environment,
             } => {
                 let connection = client.connection(ctx, &connection).await?;
-                if connection.owner_id != session.principal_id
-                    || connection.org_id != session.org_id
-                    || connection.environment != ctx.test_id.as_deref().unwrap_or("production")
-                {
-                    return Err(CliError::Input("Only the connection owner in its organization and testing environment can approve local execution.".into()));
+                if connection.owner.uuid != session.principal_id {
+                    return Err(CliError::Input(
+                        "Only the connection's owner can approve local execution.".into(),
+                    ));
                 }
                 let host_id = connection.host_id.as_deref().ok_or_else(|| CliError::Input("This is a cloud connection. Only connections assigned to a local host need registration.".into()))?;
                 let host = client.host(ctx, host_id).await?;
-                if host.owner_id != session.principal_id || host.org_id != session.org_id {
-                    return Err(CliError::Input("The connection's execution host is not owned by this account and organization.".into()));
+                if host.owner.uuid != session.principal_id {
+                    return Err(CliError::Input(
+                        "The connection's execution host is not owned by this account.".into(),
+                    ));
                 }
                 let path = local::require_registry(
                     store,
@@ -677,9 +678,9 @@ async fn dispatch_inner(
                     .set_tool_policy(
                         ctx,
                         &connection,
-                        &ToolPolicy {
+                        &ToolPolicyInput {
                             tool,
-                            principal_id: principal,
+                            account: principal,
                             enabled,
                         },
                     )
