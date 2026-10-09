@@ -1376,6 +1376,156 @@ mod access_tests {
     }
 
     #[tokio::test]
+    async fn custodians_inspect_and_disconnect_but_never_connect_a_silicons_provider_account() {
+        let f = people().await;
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("personal", "per-user", "circle")),
+            )
+            .await;
+        let personal = body["data"]["id"].as_str().unwrap().to_owned();
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("team", "shared", "circle")),
+            )
+            .await;
+        let shared = body["data"]["id"].as_str().unwrap().to_owned();
+        let secret = json!({"kind":"bearer","secret":"scout-provider-token"});
+        // Scout (in Ada's circle) connects its own personal provider account.
+        let (status, body) = f
+            .as_(
+                "Scout",
+                "POST",
+                &format!("/api/v1/connections/{personal}/account"),
+                Some(secret.clone()),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["account"]["id"], "si:scout");
+        // Its custodian sees it and can disconnect it.
+        let (status, body) = f
+            .as_(
+                "Ada",
+                "GET",
+                &format!("/api/v1/connections/{personal}/account?account=si:scout"),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            (
+                body["data"]["connected"].as_bool(),
+                body["data"]["account"]["uuid"].as_str()
+            ),
+            (Some(true), Some("Scout"))
+        );
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "GET",
+                &format!("/api/v1/connections/{personal}/account"),
+                None,
+            )
+            .await;
+        assert_eq!(
+            body["data"]["connected"], false,
+            "Ada's own personal account is separate"
+        );
+        // Nobody else can, and a Silicon in the same circle is not its custodian.
+        for who in ["Bob", "Pilot"] {
+            let (status, _) = f
+                .as_(
+                    who,
+                    "GET",
+                    &format!("/api/v1/connections/{personal}/account?account=si:scout"),
+                    None,
+                )
+                .await;
+            assert!(
+                status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+                "{who}: {status}"
+            );
+        }
+        let (status, _) = f
+            .as_(
+                "Ada",
+                "DELETE",
+                &format!("/api/v1/connections/{personal}/account?account=si:scout"),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) = f
+            .as_(
+                "Scout",
+                "GET",
+                &format!("/api/v1/connections/{personal}/account"),
+                None,
+            )
+            .await;
+        assert_eq!(body["data"]["connected"], false);
+        // There is no way to connect one for the Silicon: a POST always connects the caller's own.
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                &format!("/api/v1/connections/{personal}/account"),
+                Some(secret.clone()),
+            )
+            .await;
+        assert_eq!(body["data"]["account"]["id"], "c:ada");
+        let (_, body) = f
+            .as_(
+                "Scout",
+                "GET",
+                &format!("/api/v1/connections/{personal}/account"),
+                None,
+            )
+            .await;
+        assert_eq!(body["data"]["connected"], false);
+        // A shared account is configured by managers only.
+        let (status, _) = f
+            .as_(
+                "Scout",
+                "POST",
+                &format!("/api/v1/connections/{shared}/account"),
+                Some(secret.clone()),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                &format!("/api/v1/connections/{shared}/account"),
+                Some(secret),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (_, body) = f
+            .as_(
+                "Scout",
+                "GET",
+                &format!("/api/v1/connections/{shared}/account"),
+                None,
+            )
+            .await;
+        assert_eq!(
+            (
+                body["data"]["connected"].as_bool(),
+                body["data"]["account"]["id"].as_str()
+            ),
+            (Some(true), Some("c:ada"))
+        );
+    }
+
+    #[tokio::test]
     async fn naming_accounts_is_limited_per_caller() {
         let f = people().await;
         let (_, body) = f

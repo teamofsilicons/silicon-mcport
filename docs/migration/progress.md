@@ -63,7 +63,7 @@ Tests (all with `CARGO_TARGET_DIR=target/mig`):
 |---|---|
 | `cargo fmt --all --check` | pass |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass |
-| `cargo test --locked --workspace --no-fail-fast` | pass: 126 tests + 2 doctests (server 69, daemon 17, mcp 12, cli 12, client 9, api 7) |
+| `cargo test --locked --workspace --no-fail-fast` | pass: 127 tests + 2 doctests (server 70, daemon 17, mcp 12, cli 12, client 9, api 7) |
 | `python -m unittest discover -s scripts/tests` (venv with PyYAML 6.0.3) | 28 pass |
 | `python -m unittest discover -s tests/e2e -p 'test_*.py'` | 4 pass (fixture self-tests) |
 | `openapi-spec-validator` on `docs/openapi.yaml` + router/path comparison | valid; no missing or extra paths |
@@ -75,7 +75,7 @@ tests → 8 new `auth::tests` (local JWT verification, wrong aud/iss/exp/signatu
 revocation, introspection, deferred work, removed routes); `state::test_credential_configuration…` →
 `state::accounts_urls_require_https_except_on_this_machine`; renamed ports: `assets::downloads_recheck_…`,
 `directory::` ×3, `hosts::host_tokens_cannot_cross_…`, `oauth::refresh_waiting_for_…`,
-`connections::…exact_ids_win…` (now in `access_tests`). New: connection access (6), host custodian/transition (2),
+`connections::…exact_ids_win…` (now in `access_tests`). New: connection access (8, incl. custodian provider-account powers), host custodian/transition (2),
 download tickets (incl. sign-out), the per-caller lookup limit, directory legacy read, schema migration (empty + origin/main schema), mapping parser,
 `link-identities` (dry run, commit, idempotent re-run, other mapping, back again, duplicates).
 
