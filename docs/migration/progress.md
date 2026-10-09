@@ -54,7 +54,8 @@ What changed (`crates/mcport-server` unless noted):
   `deploy/Caddyfile.example`; `honeycomb.yaml` version follows the workspace until the packaging stage replaces it.
 
 Commits: `bc47e14` baseline record · `e5e49cd` service migration · `d8fd90a` report ordering · `66b9c36` API/config
-docs · `fffbf60` exact-id resolution test · (this section and the migration docs).
+docs · `fffbf60` exact-id resolution test · `43b9c2b` migration docs · the per-caller lookup limit and
+ticket hardening (S26, S27) · (final progress update).
 
 Tests (all with `CARGO_TARGET_DIR=target/mig`):
 
@@ -62,7 +63,7 @@ Tests (all with `CARGO_TARGET_DIR=target/mig`):
 |---|---|
 | `cargo fmt --all --check` | pass |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass |
-| `cargo test --locked --workspace --no-fail-fast` | pass: 125 tests + 2 doctests (server 68, daemon 17, mcp 12, cli 12, client 9, api 7) |
+| `cargo test --locked --workspace --no-fail-fast` | pass: 126 tests + 2 doctests (server 69, daemon 17, mcp 12, cli 12, client 9, api 7) |
 | `python -m unittest discover -s scripts/tests` (venv with PyYAML 6.0.3) | 28 pass |
 | `python -m unittest discover -s tests/e2e -p 'test_*.py'` | 4 pass (fixture self-tests) |
 | `openapi-spec-validator` on `docs/openapi.yaml` + router/path comparison | valid; no missing or extra paths |
@@ -75,7 +76,7 @@ revocation, introspection, deferred work, removed routes); `state::test_credenti
 `state::accounts_urls_require_https_except_on_this_machine`; renamed ports: `assets::downloads_recheck_…`,
 `directory::` ×3, `hosts::host_tokens_cannot_cross_…`, `oauth::refresh_waiting_for_…`,
 `connections::…exact_ids_win…` (now in `access_tests`). New: connection access (6), host custodian/transition (2),
-download tickets, directory legacy read, schema migration (empty + origin/main schema), mapping parser,
+download tickets (incl. sign-out), the per-caller lookup limit, directory legacy read, schema migration (empty + origin/main schema), mapping parser,
 `link-identities` (dry run, commit, idempotent re-run, other mapping, back again, duplicates).
 
 Proofs with real binaries (`.mig/` in this worktree, never committed):

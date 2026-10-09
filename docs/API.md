@@ -37,7 +37,8 @@ no proof scopes yet and reserves `mcport.connections.read` and `mcport.tools.cal
 Authentication errors (401): `authentication_required` (no bearer token), `token_expired`, `wrong_audience`,
 `wrong_issuer`, `unknown_signing_key`, `token_not_yet_valid`, `invalid_token`, `signed_out` (issued before a
 revocation), `account_deleted`, `sign_in_revoked` (live check failed). 503 `accounts_unavailable` means MCPort could
-not reach Silicon Accounts. `X-MCPort-ISI` supplies optional audit context. `X-MCPort-Telemetry: false` suppresses
+not reach Silicon Accounts. Naming accounts costs lookups: each account may have 30 ids resolved per minute (429
+`too_many_lookups` beyond). `X-MCPort-ISI` supplies optional audit context. `X-MCPort-Telemetry: false` suppresses
 diagnostic events for that request. JSON writes require `Content-Type: application/json`.
 
 | Method and path | Request and response |

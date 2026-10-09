@@ -69,6 +69,13 @@ where those left room, the reasoning is given. Later stages append their own sec
 | S23 | Host jobs keep transition fields for daemons released before 0.3.0: `principal_id` is the caller's linked pre-0.3.0 id and `org_id` the host's legacy value while the host's daemon has not reported `capabilities.registry_version = 2`; otherwise the uuid and an empty `org_id`. Per-user host account status also matches linked legacy ids for such hosts. | Survey risk: installed daemons reject jobs from "another organization" and key personal accounts by the old ids; this keeps the Carbon's running daemon working until `mcport host migrate` (CLI stage). |
 | S24 | Testing environments (`--test`, `X-MCPort-Test`, `MCPORT_TEST_APP_SECRETS`) are removed; testing means a separate backend wired to a test Accounts deployment (deploy/testing.md). The `environment` column stays (`production` for every new record). | Decisions file. |
 
+### Hardening found in review
+
+| # | Decision | Why |
+|---|---|---|
+| S26 | Each account may have 30 ids resolved per minute (cached resolutions are free); more answer 429 `too_many_lookups`. | Resolving a caller-supplied id costs an Accounts lookup; without a per-caller limit one account could spend MCPort's 600/minute allowance for everyone. |
+| S27 | A download ticket ends when its holder signs out everywhere after it was issued (as well as when access to the call ends). | Sign-out changes only `revoked_before`, not the account's status. |
+
 ### Local test stack
 
 | # | Decision |
