@@ -1,11 +1,11 @@
 /**
- * The root layout: <html> and <body>, the Silicon look (Arc's foundation, BDO Grotesk, the tokens, squircles, the base),
+ * The root layout: <html> and <body>, the Silicon look (Silicon UI foundation, BDO Grotesk, the tokens, squircles, the base),
  * the no-flash theme boot script (inline, with the request's CSP nonce from proxy.ts), the app's colour and the
  * metadata every page shares. It ships no client code of its own: the public pages stay server-rendered HTML with a
  * few small islands, and the signed-in workspace mounts its providers in app/(workspace)/layout.tsx. Every page renders
  * per request (the nonce changes each time).
  */
-import "@/components/arc/foundation.css";
+import "@/components/silicon-ui/foundation.css";
 import "@/styles/fonts.css";
 import "@/styles/tokens.css";
 import "@/styles/squircle.css";

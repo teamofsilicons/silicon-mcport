@@ -12,7 +12,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { api, message } from "./lib/api";
-import { HoldToConfirm } from "@/components/arc/hold-to-confirm/hold-to-confirm";
+import { HoldToConfirm } from "@/components/silicon-ui/hold-to-confirm/hold-to-confirm";
 import { McpResult } from "./McpResult";
 import type { Activity, Discovery, Host, Session } from "./lib/api";
 import {
@@ -550,8 +550,8 @@ export function SettingsPage({
           <h2>Built with care</h2>
           <p className="muted-copy">
             MCPort uses open source components from{" "}
-            <a href="https://uiarc.dev" target="_blank" rel="noreferrer">
-              Arc UI
+            <a href="https://ui.teamofsilicons.com" target="_blank" rel="noreferrer">
+              Silicon UI
             </a>
             .{" "}
             <a href="/UI-ARC-LICENSE.txt" target="_blank" rel="noreferrer">

@@ -1,4 +1,4 @@
-/* Code blocks on the public pages: Arc's code-block anatomy and colour roles (components/arc/code-block), as on the
+/* Code blocks on the public pages: Arc's code-block anatomy and colour roles (components/silicon-ui/code-block), as on the
    developer site (developer/components/docs/code-block.module.css). */
 .block {
   --sq-r: var(--radius-control);

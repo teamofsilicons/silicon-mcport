@@ -1,5 +1,5 @@
 /*
- * The Silicon look, mapped onto Arc's semantic tokens (components/arc/foundation.css, imported first). One look, two
+ * The Silicon look, mapped onto Arc's semantic tokens (components/silicon-ui/foundation.css, imported first). One look, two
  * modes (light and dark, or the system's), applied to <html data-theme> and to any subtree that sets data-theme itself
  * (a preview can show the other mode). Floating layers (menus, dialogs) portal to <body> and follow the page.
  *

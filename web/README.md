@@ -1,6 +1,6 @@
 # Silicon MCPort website
 
-Next.js 16, React 19 and Arc UI, using the Accounts/Apps theme and workspace shell. The website calls the actual MCPort API through a same-origin server proxy. Tokens stay in sealed HTTP-only cookies; the browser uses hosted Silicon Accounts sign-in with PKCE.
+Next.js 16, React 19 and Silicon UI, using the Accounts/Apps theme and workspace shell. The website calls the actual MCPort API through a same-origin server proxy. Tokens stay in sealed HTTP-only cookies; the browser uses hosted Silicon Accounts sign-in with PKCE.
 
 ## Product pages
 
@@ -60,4 +60,4 @@ Vercel: project root `web`, use the checked-in Next configuration and the enviro
 
 ## Design and provenance
 
-Shared styles and Arc components are under `styles/`, `components/arc/` and `components/foundation/`. Product components are under `components/mcport/`. See `DESIGN.md`, `vendor/uiarc/PROVENANCE.md`, `vendor/uiarc/LICENSE` and the BDO Grotesk font licenses.
+Shared styles and Silicon UI components are under `styles/`, `components/silicon-ui/` and `components/foundation/`. Product components are under `components/mcport/`. See `DESIGN.md`, `vendor/silicon-ui/PROVENANCE.md`, `vendor/uiarc/LICENSE` and the BDO Grotesk font licenses.

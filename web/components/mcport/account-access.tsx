@@ -5,7 +5,7 @@ import { api as transport } from "@/lib/client/api";
 import { Section,Stack,Cluster } from "@/components/foundation/layout/layout";
 import { Button,Input,ErrorBox } from "./ui";
 import { message,type AccountRef } from "./lib/api";
-import { HoldToConfirm } from "@/components/arc/hold-to-confirm/hold-to-confirm";
+import { HoldToConfirm } from "@/components/silicon-ui/hold-to-confirm/hold-to-confirm";
 type Allowance={account:AccountRef;silicon:AccountRef;created_at:number};
 export function AccountAccess(){const[silicon,setSilicon]=useState("");const[selector,setSelector]=useState("");const[target,setTarget]=useState("");const[error,setError]=useState("");const[busy,setBusy]=useState(false);
  const list=useQuery({queryKey:["allow",silicon],queryFn:()=>transport.get<{data:Allowance[]}>("/api/v1/allow",{query:silicon?{silicon}:{}}),enabled:!!silicon});

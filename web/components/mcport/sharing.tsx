@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/client/api";
 import { Stack,Cluster,Section } from "@/components/foundation/layout/layout";
-import { HoldToConfirm } from "@/components/arc/hold-to-confirm/hold-to-confirm";
+import { HoldToConfirm } from "@/components/silicon-ui/hold-to-confirm/hold-to-confirm";
 import { Button,Input,Dialog,DialogContent,ErrorBox } from "./ui";
 import { message,type Access,type Account } from "./lib/api";
 export function DirectorySharing({entry,name}:{entry:string;name:string}){const[open,setOpen]=useState(false);const[target,setTarget]=useState("");const[busy,setBusy]=useState(false);const[error,setError]=useState("");const path="/api/v1/directory/"+encodeURIComponent(entry)+"/access";

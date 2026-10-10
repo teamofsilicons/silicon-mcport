@@ -1,9 +1,9 @@
 "use client";
 import { Children, isValidElement, type ReactNode, type ComponentProps } from "react";
 import { PageHeader } from "@/components/foundation/layout/layout";
-import { Select as ArcSelect } from "@/components/arc/select/select";
-import { Textarea as ArcTextarea } from "@/components/arc/textarea/textarea";
-import { DialogContent as ArcDialogContent } from "@/components/arc/dialog/dialog";
+import { Select as ArcSelect } from "@/components/silicon-ui/select/select";
+import { Textarea as ArcTextarea } from "@/components/silicon-ui/textarea/textarea";
+import { DialogContent as ArcDialogContent } from "@/components/silicon-ui/dialog/dialog";
 import {
   AlertCircle,
   ArrowRight,
@@ -12,14 +12,14 @@ import {
   Terminal,
   Unplug,
 } from "lucide-react";
-import { Button } from "@/components/arc/button/button";
-import { CopyButton } from "@/components/arc/copy-button/copy-button";
+import { Button } from "@/components/silicon-ui/button/button";
+import { CopyButton } from "@/components/silicon-ui/copy-button/copy-button";
 export { Button };
-export { Input } from "@/components/arc/input/input";
-export { Switch } from "@/components/arc/switch/switch";
-export { Dialog } from "@/components/arc/dialog/dialog";
+export { Input } from "@/components/silicon-ui/input/input";
+export { Switch } from "@/components/silicon-ui/switch/switch";
+export { Dialog } from "@/components/silicon-ui/dialog/dialog";
 export function DialogContent(props:ComponentProps<typeof ArcDialogContent>){return <ArcDialogContent {...props} className={"mcport-product "+(props.className??"")}/>;}
-export { default as SegmentedControl } from "@/components/arc/segmented-control/segmented-control";
+export { default as SegmentedControl } from "@/components/silicon-ui/segmented-control/segmented-control";
 export function Status({ status = "unknown" }: { status?: string }) {
   const positive = [
     "online",

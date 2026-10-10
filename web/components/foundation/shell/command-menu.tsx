@@ -5,8 +5,8 @@
  * (lib/commands.ts): the shell's navigation, theme and account commands plus whatever the current page adds.
  */
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { CommandPalette, type CommandItem } from "@/components/arc/command-palette/command-palette";
-import { returnFocusTo, useLayerOpener } from "@/components/arc/lib/return-focus";
+import { CommandPalette, type CommandItem } from "@/components/silicon-ui/command-palette/command-palette";
+import { returnFocusTo, useLayerOpener } from "@/components/silicon-ui/lib/return-focus";
 import { closeCommandPalette, setCommandPaletteOpen, useCommandPaletteOpen, useCommands } from "@/lib/commands";
 import styles from "./shell.module.css";
 

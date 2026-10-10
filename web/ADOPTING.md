@@ -27,7 +27,7 @@ Then, in `web/`:
   4180, hook 4200, extend 4220, mcport 4240). Keep every dependency pin as it is.
 - `playwright.config.ts`: the same port as the default of `E2E_PORT`, and the app's service in place of the stub
   (step 6).
-- Keep `components/arc/`, `vendor/uiarc/` (the MIT notice must travel with Arc's source), `styles/`, `public/fonts/`,
+- Keep `components/silicon-ui/`, `vendor/uiarc/` (the MIT notice must travel with Arc's source), `styles/`, `public/fonts/`,
   `assets/og/` and their licence files exactly as they are.
 
 Check: `pnpm typecheck && pnpm lint && pnpm test` pass before you change anything else.
@@ -153,16 +153,16 @@ The browser calls `/api/<the service's own path>`; the kit forwards it to `APP_A
 - **Server-only calls** (to Silicon Accounts with the app's credentials, or to another app with a proof) belong in the
   service, not here; the web frontend only ever acts as the signed-in account.
 
-## 8. Add Arc components
+## 8. Add Silicon UI components
 
-Everything free in Arc is already in `components/arc/` with the Silicon edits. To add a newer one, or one Arc adds
+Everything free in Arc is already in `components/silicon-ui/` with the Silicon edits. To add a newer one, or one Arc adds
 later, from `web/`:
 
 ```sh
-pnpm dlx shadcn@latest add @uiarc/<name>      # lands in components/arc/<name>/ (components.json registers @uiarc)
+pnpm dlx shadcn@latest add @silicon-ui/<name>      # lands in components/silicon-ui/<name>/ (components.json registers @uiarc)
 ```
 
-then make the same four kinds of edit the vendored set has (silicon-accounts/web/README.md, "Arc UI, Local edits"):
+then make the same four kinds of edit the vendored set has (silicon-accounts/web/README.md, "Silicon UI, Local edits"):
 
 1. **Squircles**: the element gets `data-sq="surface"` (or `"clip"` for photos and containers whose children paint into
    the corners); its `border-radius` becomes `--sq-r`, its background and border colours `--sq-fill` and `--sq-stroke`.
