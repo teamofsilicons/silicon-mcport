@@ -768,6 +768,11 @@ mod tests {
         let mapping =
             crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOwn,{target},carbon\n"))
                 .unwrap();
+        let incomplete =
+            crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOther,{target},carbon\n"))
+                .unwrap();
+        assert!(migrate_account_uuids(&path, &incomplete, true).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert_eq!(
             migrate_account_uuids(&path, &mapping, false).unwrap()["new_mappings"],
             1

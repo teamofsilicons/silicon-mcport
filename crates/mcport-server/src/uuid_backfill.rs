@@ -114,6 +114,10 @@ pub fn migrate(store: &Store, mapping: &Mapping, apply: bool) -> Result<Value> {
         let mut stmt=db.prepare("SELECT old_uuid,new_uuid,kind FROM account_uuid_migrations")?;
         let ledger:Mapping=stmt.query_map([],|r|Ok((r.get(0)?,Link {new_uuid:r.get(1)?,kind:r.get(2)?})))?.collect::<rusqlite::Result<_>>()?;
         let fresh=uuid_mapping::fresh(mapping,&ledger).map_err(Error::bad)?;
+        let mut identities=db.prepare("SELECT uuid FROM accounts UNION SELECT custodian_uuid FROM accounts WHERE custodian_uuid IS NOT NULL UNION SELECT accounts_uuid FROM identity_links UNION SELECT silicon_uuid FROM silicon_allowances UNION SELECT account_uuid FROM silicon_allowances UNION SELECT created_by FROM silicon_allowances")?;
+        for account in identities.query_map([], |r|r.get::<_,String>(0))? {
+            uuid_mapping::require_covered(&account?,mapping,&ledger).map_err(Error::bad)?;
+        }
         let kinds:Vec<_>=tx.counts()?.into_iter().map(|(kind,_,_)|kind).collect();
         let all=tx.records(&kinds.iter().map(String::as_str).collect::<Vec<_>>())?;
         for (old,link) in &fresh {
@@ -261,6 +265,10 @@ mod tests {
             .unwrap();
         store.allow("Bot", "Ada", "Ada").unwrap();
         let map = mapping();
+        let mut incomplete = map.clone();
+        incomplete.remove("Bot");
+        assert!(migrate(store, &incomplete, true).is_err());
+        assert!(!store.retired_account_uuid("Ada").unwrap());
         let preview = migrate(store, &map, false).unwrap();
         assert_eq!(preview["new_mappings"], 2);
         assert!(!store.retired_account_uuid("Ada").unwrap());
@@ -362,6 +370,20 @@ mod tests {
         f.silicon(SILICON, "si:bot", CARBON);
         assert_eq!(f.as_(CARBON, "GET", "/api/v1/me", None).await.0, 200);
         assert_eq!(f.as_(SILICON, "GET", "/api/v1/me", None).await.0, 200);
+        let old_fence = store.account("Bot").unwrap().unwrap();
+        let migrated = store.account(SILICON).unwrap().unwrap();
+        for subject in ["Bot", SILICON] {
+            let (status, body) = f.webhook(&crate::test_support::event(
+                &format!("retired-{subject}"),
+                "silicon.custodian_changed",
+                &crate::test_support::at(1),
+                json!({"uuid":subject,"from":{"uuid":CARBON,"id":"c:ada"},"to":{"uuid":"Ada","id":"c:ada"}}),
+            )).await;
+            assert_eq!(status, 200, "{body}");
+            assert_eq!(body["ignored"], "account_uuid_migrated");
+        }
+        assert_eq!(store.account("Bot").unwrap().unwrap(), old_fence);
+        assert_eq!(store.account(SILICON).unwrap().unwrap(), migrated);
     }
     #[test]
     fn target_collision_and_pending_work_roll_back() {

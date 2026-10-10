@@ -9,6 +9,25 @@ pub struct Link {
 }
 pub type Mapping = BTreeMap<String, Link>;
 
+pub fn canonical(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(i, b)| {
+            if [8, 13, 18, 23].contains(&i) {
+                b == b'-'
+            } else {
+                b.is_ascii_digit() || (b'a'..=b'f').contains(&b)
+            }
+        })
+        && b"89ab".contains(&value.as_bytes()[19])
+}
+
+pub fn require_covered(value: &str, mapping: &Mapping, ledger: &Mapping) -> Result<(), String> {
+    if !canonical(value) && !mapping.contains_key(value) && !ledger.contains_key(value) {
+        return Err("Existing legacy account reference is absent from the Accounts export".into());
+    }
+    Ok(())
+}
+
 pub fn parse(text: &str) -> Result<Mapping, String> {
     let mut lines = text.lines();
     if lines.next() != Some("old_uuid,new_uuid,kind") {

@@ -140,6 +140,18 @@ impl Registry {
             ));
         }
         let fresh = fresh(mapping, &self.account_uuid_migrations).map_err(DaemonError::Config)?;
+        for account in std::iter::once(&self.host.owner_uuid).chain(
+            self.connections
+                .values()
+                .flat_map(|c| c.personal_accounts.keys()),
+        ) {
+            mcport_core::uuid_mapping::require_covered(
+                account,
+                mapping,
+                &self.account_uuid_migrations,
+            )
+            .map_err(DaemonError::Config)?;
+        }
         for link in fresh.values() {
             if self.host.owner_uuid == link.new_uuid
                 || self

@@ -267,6 +267,8 @@ into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
 
 Use the **single persisted Accounts export**, exact header `old_uuid,new_uuid,kind`, with canonical lowercase UUIDv4 targets and carbon/silicon kinds. Do not generate another mapping per app. Finish the original IAM identity linking before this backfill; keep historical mappings for audit, and never replay an old IAM mapping that targets retired account IDs.
 
+The server and daemon registry previews fail when a legacy cached account, custodian, allowance, identity link or local provider-account key is absent from the export or persisted mapping. Already canonical accounts are allowed. Signed inbound webhooks naming a retired subject or custodian are acknowledged as ignored and cannot modify cache tombstones or restore former custody. MCPort has no outgoing signed account-event queue; inbound receipts retain only IDs/type/timestamps, while execution journals and provider result bytes remain unchanged.
+
 1. Drain calls, stop every host daemon and the API, and back up the service data directory (`mcport.sqlite` with WAL checkpointed and `master.key`) together with each CLI home. Keep journal files; they prevent repeated side effects.
 2. Preview with the candidate binaries and the offline runtime environment:
    ```sh

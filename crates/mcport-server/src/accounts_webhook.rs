@@ -78,6 +78,42 @@ pub async fn receive(
     let occurred_ms = event
         .occurred_at
         .map(|at| (at.unix_timestamp_nanos() / 1_000_000) as i64);
+    let subject = match &event.payload {
+        WebhookPayload::AccountIdChanged(data) => Some(data.uuid.as_str()),
+        WebhookPayload::AccountUpdated(data) => Some(data.uuid.as_str()),
+        WebhookPayload::CustodianChanged(data) => Some(data.uuid.as_str()),
+        WebhookPayload::MembershipSignedOut(data) => Some(data.uuid.as_str()),
+        WebhookPayload::MembershipAccessRemoved(data) => Some(data.uuid.as_str()),
+        WebhookPayload::AccountDeleted(data) => Some(data.uuid.as_str()),
+        _ => None,
+    };
+    if let Some(uuid) = subject
+        && app.store.retired_account_uuid(uuid)?
+    {
+        app.store
+            .record_webhook(&event.event_id, &event.event_type, occurred_ms)?;
+        return Ok(Json(
+            json!({"received": true, "ignored": "account_uuid_migrated"}),
+        ));
+    }
+    let custodian = match &event.payload {
+        WebhookPayload::AccountUpdated(data) => data
+            .account
+            .as_ref()
+            .and_then(|a| a.custodian.as_ref())
+            .map(|c| c.uuid.as_str()),
+        WebhookPayload::CustodianChanged(data) => data.to.as_ref().map(|c| c.uuid.as_str()),
+        _ => None,
+    };
+    if let Some(uuid) = custodian
+        && app.store.retired_account_uuid(uuid)?
+    {
+        app.store
+            .record_webhook(&event.event_id, &event.event_type, occurred_ms)?;
+        return Ok(Json(
+            json!({"received": true, "ignored": "account_uuid_migrated"}),
+        ));
+    }
     handle(&app, &event, occurred_ms.unwrap_or(now() * 1000)).await?;
     app.store
         .record_webhook(&event.event_id, &event.event_type, occurred_ms)?;
