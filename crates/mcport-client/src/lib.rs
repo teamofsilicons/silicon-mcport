@@ -15,7 +15,7 @@
 //! // A Silicon: SLT from `silicon-accounts login --app mcport -q`.
 //! let slt = std::env::var("SLT")?;
 //! let tokens = SignIn::new(DEFAULT_ACCOUNTS_URL, APP_ID)?.exchange_slt(&slt).await?;
-//! let client = Client::new("https://backend.mcport.teamofsilicons.com")?;
+//! let client = Client::new("https://api.mcport.teamofsilicons.com")?;
 //! let context = RequestContext::authenticated(tokens.access_token.expose());
 //! let connections = client.connections(&context).await?;
 //! # Ok(()) }

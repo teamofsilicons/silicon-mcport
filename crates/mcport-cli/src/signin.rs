@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::io::{self, IsTerminal, Read, Write};
 use std::time::Duration;
 
-pub const DEFAULT_BACKEND: &str = "https://backend.mcport.teamofsilicons.com";
+pub const DEFAULT_BACKEND: &str = "https://api.mcport.teamofsilicons.com";
 pub const WEBSITE: &str = "https://mcport.teamofsilicons.com";
 pub const REPOSITORY: &str = "https://github.com/teamofsilicons/silicon-mcport";
 /// Refresh when the access token has less than this left.

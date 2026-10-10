@@ -9,7 +9,7 @@
 //! ```no_run
 //! # async fn example() -> Result<(), mcport_api::Error> {
 //! use mcport_api::{Client, RequestContext};
-//! let client = Client::new("https://backend.mcport.teamofsilicons.com")?;
+//! let client = Client::new("https://api.mcport.teamofsilicons.com")?;
 //! let context = RequestContext::authenticated("<Silicon Accounts access token for mcport>");
 //! let me = client.me(&context).await?;
 //! let connections = client.connections(&context).await?;
@@ -894,7 +894,7 @@ impl Client {
     }
 }
 
-/// The canonical form of a backend URL (`https://backend.mcport.teamofsilicons.com`,
+/// The canonical form of a backend URL (`https://api.mcport.teamofsilicons.com`,
 /// no trailing slash or `/api/v1`), checked the way [`Client::new`] checks it: HTTPS,
 /// or HTTP on this machine only, without credentials, query or fragment. Pure: it
 /// builds no HTTP client and touches no network, so it suits offline commands.
@@ -1030,12 +1030,12 @@ mod tests {
     fn canonical_backend_urls_match_the_client_and_need_no_http_client() {
         for (input, expected) in [
             (
-                "https://backend.mcport.teamofsilicons.com",
-                "https://backend.mcport.teamofsilicons.com",
+                "https://api.mcport.teamofsilicons.com",
+                "https://api.mcport.teamofsilicons.com",
             ),
             (
                 "https://Backend.MCPort.teamofsilicons.com/",
-                "https://backend.mcport.teamofsilicons.com",
+                "https://api.mcport.teamofsilicons.com",
             ),
             ("http://127.0.0.1:4241/api/v1", "http://127.0.0.1:4241"),
             ("https://example.test/proxy/", "https://example.test/proxy"),

@@ -6,7 +6,7 @@ ACCOUNTS_URL=https://accounts.teamofsilicons.com
 MCPORT_APP_ID=mcport
 # The mcport app's secret from Silicon Accounts (server only; never in the website).
 MCPORT_APP_SECRET=
-# The whsec_ secret of mcport's webhook (https://backend.mcport.teamofsilicons.com/webhooks/accounts).
+# The whsec_ secret of mcport's webhook (https://api.mcport.teamofsilicons.com/webhooks/accounts).
 MCPORT_ACCOUNTS_WEBHOOK_SECRET=
 MCPORT_BIND=127.0.0.1:4380
 MCPORT_PUBLIC_URL=https://your-mcport-host.example

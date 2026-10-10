@@ -1,7 +1,7 @@
 # Using MCPort
 
 Install the CLI with `silicon-apps install mcport`; Silicon Apps keeps it current. From a checkout, `cargo build -p
-mcport-cli --release` builds `target/release/mcport`. The CLI talks to `https://backend.mcport.teamofsilicons.com` and
+mcport-cli --release` builds `target/release/mcport`. The CLI talks to `https://api.mcport.teamofsilicons.com` and
 signs in at `https://accounts.teamofsilicons.com` unless told otherwise: the backend is `--backend`, then `MCPORT_URL`,
 then `mcport config set backend <url>`; Silicon Accounts is `--accounts-url`, then `ACCOUNTS_URL`, then `mcport config
 set accounts <url>`. Plain `http://` is accepted only for this machine.

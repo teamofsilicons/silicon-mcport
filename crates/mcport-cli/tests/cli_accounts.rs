@@ -257,6 +257,14 @@ fn mcport(home: &Path, origin: &str, args: &[&str]) -> Command {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Do not inherit user application configuration; Windows still needs these
+    // OS paths to initialize its networking and certificate facilities.
+    #[cfg(windows)]
+    for name in ["SystemRoot", "WINDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
     command
 }
 async fn run(command: Command) -> Output {
@@ -360,8 +368,8 @@ fn discovery_answers_offline_in_an_empty_home_and_writes_nothing() {
             "app_id": "mcport",
             "client_id": "mcport",
             "accounts_url": "https://accounts.teamofsilicons.com",
-            "api_url": "https://backend.mcport.teamofsilicons.com",
-            "backend_url": "https://backend.mcport.teamofsilicons.com",
+            "api_url": "https://api.mcport.teamofsilicons.com",
+            "backend_url": "https://api.mcport.teamofsilicons.com",
             "website_url": "https://mcport.teamofsilicons.com",
             "version": env!("CARGO_PKG_VERSION"),
             "device_flow": true,
@@ -420,7 +428,8 @@ async fn a_silicon_signs_in_with_a_short_lived_token_on_stdin() {
     .await;
     assert!(
         login.status.success(),
-        "{}",
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&login.stdout),
         String::from_utf8_lossy(&login.stderr)
     );
     let login = json_of(&login);
@@ -880,7 +889,7 @@ fn backend_and_accounts_settings_keep_their_precedence() {
     let fresh = show(&[], &["config", "show", "--json"]);
     assert_eq!(
         fresh["backend_url"],
-        "https://backend.mcport.teamofsilicons.com"
+        "https://api.mcport.teamofsilicons.com"
     );
     assert_eq!(fresh["accounts_url"], "https://accounts.teamofsilicons.com");
     assert_eq!(fresh["signed_in"], Value::Null);

@@ -155,7 +155,7 @@ follow the MCP's own capabilities.
 
 State lives under `${SILICON_HOME:-$HOME}/.mcport/dir` (owner-only). `mcport config home /existing/dir` switches to
 another base without copying sign-ins or host registries. The backend is `--backend`, then `MCPORT_URL`, then `mcport
-config set backend <url>`, then `https://backend.mcport.teamofsilicons.com`. Silicon Accounts is `--accounts-url`, then
+config set backend <url>`, then `https://api.mcport.teamofsilicons.com`. Silicon Accounts is `--accounts-url`, then
 `ACCOUNTS_URL`, then `mcport config set accounts <url>`, then `https://accounts.teamofsilicons.com`. Plain `http://`
 works only for this machine. `mcport config show` prints the settings and who is signed in.
 

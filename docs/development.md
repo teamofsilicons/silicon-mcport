@@ -70,7 +70,7 @@ deployment.
 The `mcport` app's sign-in setup at Silicon Accounts needs `device_flow` (the CLI's `mcport login`), `public_client`
 (the CLI exchanges Silicons' short-lived tokens and refreshes with `client_id` alone), the website's
 `/auth/callback` in `redirect_uris`, and only the profile. Its webhook points at
-`https://backend.mcport.teamofsilicons.com/webhooks/accounts`. MCPort accepts no proofs from other apps yet; the scopes
+`https://api.mcport.teamofsilicons.com/webhooks/accounts`. MCPort accepts no proofs from other apps yet; the scopes
 `mcport.connections.read` and `mcport.tools.call` are reserved. The [cutover runbook](migration/cutover.md) has the
 exact calls.
 

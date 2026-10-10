@@ -26,7 +26,7 @@ use serde_json::json;
 # async fn example(slt: &str) -> Result<(), Box<dyn std::error::Error>> {
 let tokens = SignIn::new(DEFAULT_ACCOUNTS_URL, APP_ID)?.exchange_slt(slt).await?;
 println!("signed in as {} ({})", tokens.account.id, tokens.account.uuid);
-let client = Client::new("https://backend.mcport.teamofsilicons.com")?;
+let client = Client::new("https://api.mcport.teamofsilicons.com")?;
 let context = RequestContext::authenticated(tokens.access_token.expose());
 let result = client
     .call_tool(&context, "notes", "search", json!({"query": "release"}))
@@ -71,7 +71,7 @@ use std::time::Duration;
 
 # async fn example(sign_in: &mcport_client::accounts::SignIn, tokens: mcport_client::accounts::Tokens) -> Result<(), Box<dyn std::error::Error>> {
 let file = SessionFile::new("/trusted/state/mcport-sign-in.json");
-file.save(&StoredSignIn::new(sign_in, "https://backend.mcport.teamofsilicons.com", "slt", tokens))?;
+file.save(&StoredSignIn::new(sign_in, "https://api.mcport.teamofsilicons.com", "slt", tokens))?;
 // Later, in any process: a token valid for at least a minute, refreshed if needed.
 let current = file.fresh(Duration::from_secs(60)).await?;
 # let _ = current;

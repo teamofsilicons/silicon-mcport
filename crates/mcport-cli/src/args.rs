@@ -7,7 +7,7 @@ Then: mcport connection ls, mcport tool ls <connection>, mcport tool call <conne
 
 Before signing in: mcport accounts --json (offline), mcport login status --json, mcport docs
 Install and updates: silicon-apps install mcport (Silicon Apps keeps it current)
-Backend: https://backend.mcport.teamofsilicons.com unless --backend, MCPORT_URL or mcport config set backend says otherwise
+Backend: https://api.mcport.teamofsilicons.com unless --backend, MCPORT_URL or mcport config set backend says otherwise
 Repository: https://github.com/teamofsilicons/silicon-mcport
 Documentation: https://github.com/teamofsilicons/silicon-mcport/tree/main/docs
 Rust package: https://crates.io/crates/mcport-client
@@ -26,7 +26,7 @@ pub struct Cli {
     /// Print compact machine-readable JSON, including structured errors.
     #[arg(long, global = true)]
     pub json: bool,
-    /// MCPort backend URL; overrides MCPORT_URL, then saved configuration, then https://backend.mcport.teamofsilicons.com.
+    /// MCPort backend URL; overrides MCPORT_URL, then saved configuration, then https://api.mcport.teamofsilicons.com.
     #[arg(
         long = "backend",
         env = "MCPORT_URL",

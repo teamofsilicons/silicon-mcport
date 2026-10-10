@@ -8,7 +8,7 @@ only ever talks to the website's own origin and never sees a token or the app se
 Silicons can also sign in there with a short-lived token from
 `silicon-accounts login --app mcport -q`; the website's server exchanges it.
 
-The service at `https://backend.mcport.teamofsilicons.com` deploys separately
+The service at `https://api.mcport.teamofsilicons.com` deploys separately
 ([README.md](README.md)); it no longer serves the website.
 
 ## Project settings
@@ -34,7 +34,7 @@ wildcard is ever registered). Mark `APP_SECRET` and `SESSION_SECRET` sensitive.
 | `APP_ID` | `mcport` |
 | `APP_SECRET` | the `mcport` app secret from Silicon Accounts: the same secret the service holds as `MCPORT_APP_SECRET`, copied from Secrets Manager `silicon-mcport/production-runtime`; never in the repository |
 | `ACCOUNTS_URL` | `https://accounts.teamofsilicons.com` |
-| `APP_API_URL` | `https://backend.mcport.teamofsilicons.com` |
+| `APP_API_URL` | `https://api.mcport.teamofsilicons.com` |
 | `PUBLIC_URL` | `https://mcport.teamofsilicons.com` |
 | `SESSION_SECRET` | a new `openssl rand -base64 48` for this environment only |
 | `ACCOUNTS_API_URL`, `EXTRA_IMG_ORIGINS` | leave unset |
@@ -62,7 +62,7 @@ with `Cache-Control: private, no-store`.
 Tool results and files stay on the service. For a file, the website asks the service for
 a one-time, 60-second ticket (`POST /api/v1/calls/{call}/assets/{index}/ticket`) and the
 browser downloads it straight from the service's absolute ticket URL
-(`https://backend.mcport.teamofsilicons.com/api/v1/downloads/{ticket}`), so no body
+(`https://api.mcport.teamofsilicons.com/api/v1/downloads/{ticket}`), so no body
 larger than Vercel's function limit passes through the website. Small JSON goes through
 the site's `/api` proxy. Tool calls can take up to the service's deadline; a call interrupted by the network
 has an unknown outcome: check Activity before repeating it.
