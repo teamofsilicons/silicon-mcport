@@ -301,6 +301,9 @@ async fn run(cli: Cli) -> Result<Value> {
                 "Unknown setting {key}. Supported settings: backend, accounts, telemetry. Use mcport config home <location> to change the storage home."
             ))),
         },
+        Command::MigrateAccountUuids { file, apply } => {
+            local::migrate_account_uuids(&store, &backend, &file, apply)
+        }
         Command::Daemon(command) => local::daemon_command(&store, &backend, command).await,
         command => {
             let session = signin::signed_in(&store, &backend, false).await?;

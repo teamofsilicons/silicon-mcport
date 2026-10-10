@@ -18,6 +18,7 @@ mod store;
 #[cfg(test)]
 mod test_support;
 mod tls;
+mod uuid_backfill;
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, State},
@@ -43,6 +44,14 @@ struct Cli {
 enum Command {
     /// Serve the API (the default when no command is given).
     Serve,
+    /// Preview/apply an Accounts UUID export. Stop service and daemons first; back up the store.
+    MigrateAccountUuids {
+        #[arg(long)]
+        file: PathBuf,
+        /// Commit changes; defaults to a rolled-back preview.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Print the pre-0.3.0 principal ids stored records belong to, as JSON (input
     /// for a link-identities mapping file). Changes nothing.
     LegacyPrincipals,
@@ -282,6 +291,7 @@ async fn main() -> anyhow::Result<()> {
     }
     match cli.command.unwrap_or(Command::Serve) {
         Command::Serve => serve(config).await,
+        Command::MigrateAccountUuids { file, apply } => uuid_backfill::run(config, &file, apply),
         Command::LegacyPrincipals => identity::print_principals(config),
         Command::LinkIdentities {
             file,

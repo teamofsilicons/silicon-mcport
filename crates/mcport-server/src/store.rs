@@ -15,7 +15,7 @@ use std::{path::Path, sync::Mutex};
 /// their own value and are never read again (they are not deleted).
 pub const ENV: &str = "production";
 /// Schema version written to `PRAGMA user_version` by this release.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// All record bodies, including provider grants, jobs and results, are encrypted.
 /// AAD binds ciphertext to its record and owner; indexes never contain secrets.
@@ -116,6 +116,7 @@ impl Store {
              ALTER TABLE records ADD COLUMN legacy_owner_id TEXT;
              CREATE INDEX IF NOT EXISTS owner_records ON records(owner_id,kind);",
             "ALTER TABLE accounts ADD COLUMN signed_in_at INTEGER NOT NULL DEFAULT 0;",
+            "CREATE TABLE account_uuid_migrations(old_uuid TEXT PRIMARY KEY NOT NULL,new_uuid TEXT UNIQUE NOT NULL,kind TEXT NOT NULL,migrated_at INTEGER NOT NULL);",
         ];
         for (index, step) in STEPS.iter().enumerate() {
             let version = index as i64 + 1;
@@ -687,6 +688,25 @@ impl RawTx<'_, '_> {
             }
             Err(error) => Err(error.into()),
         }
+    }
+    /// Re-seal changed identity columns using the original environment and retain audit columns.
+    pub fn remap_identity(
+        &self,
+        record: &RawRecord,
+        id: &str,
+        org: &str,
+        owner: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
+        let cipher = self.store.encrypt(
+            value,
+            &Store::aad(&record.kind, id, &record.environment, org, owner),
+        )?;
+        self.tx.execute(
+            "UPDATE records SET id=?,org_id=?,owner_id=?,value=? WHERE rowid=?",
+            params![id, org, owner, cipher, record.rowid],
+        )?;
+        Ok(())
     }
     /// Insert a new record unless (`kind`, `id`) exists. Returns whether it was inserted.
     pub fn insert(

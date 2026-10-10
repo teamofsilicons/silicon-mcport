@@ -112,6 +112,8 @@ pub struct RegisteredConnection {
 #[serde(deny_unknown_fields)]
 pub struct Registry {
     pub version: u32,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub account_uuid_migrations: mcport_core::uuid_mapping::Mapping,
     pub host: HostConfig,
     pub connections: BTreeMap<String, RegisteredConnection>,
 }
@@ -120,9 +122,49 @@ impl Registry {
     pub fn new(host: HostConfig) -> Self {
         Self {
             version: REGISTRY_VERSION,
+            account_uuid_migrations: BTreeMap::new(),
             host,
             connections: BTreeMap::new(),
         }
+    }
+    /// Re-key declared account references without touching endpoints, credentials or journal IDs.
+    /// The caller holds the registry and daemon locks and persists the result atomically.
+    pub fn migrate_account_uuids(
+        &mut self,
+        mapping: &mcport_core::uuid_mapping::Mapping,
+    ) -> Result<usize, DaemonError> {
+        use mcport_core::uuid_mapping::{fresh, mapped};
+        if self.is_legacy() {
+            return Err(DaemonError::Config(
+                "Migrate the old host registry to Accounts before changing account UUIDs".into(),
+            ));
+        }
+        let fresh = fresh(mapping, &self.account_uuid_migrations).map_err(DaemonError::Config)?;
+        for link in fresh.values() {
+            if self.host.owner_uuid == link.new_uuid
+                || self
+                    .connections
+                    .values()
+                    .any(|c| c.personal_accounts.contains_key(&link.new_uuid))
+            {
+                return Err(DaemonError::Config(
+                    "Target account already occurs in registry; merging credentials is forbidden"
+                        .into(),
+                ));
+            }
+        }
+        self.host.owner_uuid = mapped(&fresh, &self.host.owner_uuid).to_owned();
+        for c in self.connections.values_mut() {
+            let mut accounts = BTreeMap::new();
+            for (old, account) in std::mem::take(&mut c.personal_accounts) {
+                accounts.insert(mapped(&fresh, &old).to_owned(), account);
+            }
+            c.personal_accounts = accounts;
+        }
+        let count = fresh.len();
+        self.account_uuid_migrations.extend(fresh);
+        self.validate()?;
+        Ok(count)
     }
     /// Written before 0.3.0: personal accounts are keyed by the callers' old ids.
     pub fn is_legacy(&self) -> bool {

@@ -53,6 +53,14 @@ pub enum Command {
         after_help = "Example: mcport accounts --json\nWorks before sign-in, without a network or a home directory, and always exits 0.\nRelated: mcport login --help, mcport login status --json"
     )]
     Accounts,
+    /// Re-key this home's stopped host registries using a coordinated Accounts UUID export. Offline.
+    MigrateAccountUuids {
+        #[arg(long)]
+        file: std::path::PathBuf,
+        /// Apply the previewed export and forget affected sign-ins; defaults to dry run.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Hidden alias of `accounts` for runtimes released before Silicon Accounts.
     #[command(hide = true)]
     Iam,

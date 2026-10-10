@@ -3,6 +3,13 @@
 //!
 //! The account `uuid` (JWT `sub`) is permanent and is what every record stores.
 //! The public id (`c:…`/`si:…`) can change and is only displayed.
+/// Exact immutable key: canonical UUID for new Accounts, legacy base62 until the coordinated backfill.
+pub(crate) fn valid_account_uuid(value: &str) -> bool {
+    (!value.is_empty() && value.len() <= 64 && value.bytes().all(|b| b.is_ascii_alphanumeric()))
+        || (value.len() == 36
+            && uuid::Uuid::parse_str(value).is_ok_and(|u| u.hyphenated().to_string() == value))
+}
+
 use crate::{
     error::{Error, Result},
     state::{App, hash, now},

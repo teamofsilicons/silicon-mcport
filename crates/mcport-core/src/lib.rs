@@ -421,3 +421,5 @@ pub struct DirectoryEntry {
     pub created_at: i64,
     pub updated_at: i64,
 }
+
+pub mod uuid_mapping;

@@ -288,3 +288,35 @@ pub async fn migrate_host(
     });
     Ok(plan)
 }
+
+/// Every stopped registry in this home's selected backend, then discard the old sign-in.
+pub fn migrate_account_uuids(
+    store: &Store,
+    backend: &str,
+    file: &Path,
+    apply: bool,
+) -> Result<Value> {
+    let mapping =
+        mcport_client::uuid_mapping::parse(&fs::read_to_string(file)?).map_err(CliError::Input)?;
+    let paths = registry_files(store, backend)?;
+    // Validate every registry before writing any; each registry is crash-safe and replayable.
+    for path in &paths {
+        mcport_client::local::migrate_account_uuids(path, &mapping, false)?;
+    }
+    let mut hosts = Vec::new();
+    for path in &paths {
+        hosts.push(mcport_client::local::migrate_account_uuids(
+            path, &mapping, apply,
+        )?);
+    }
+    let session = mcport_client::session::SessionFile::new(store.sign_in_path(backend));
+    let expired = session
+        .load()?
+        .is_some_and(|s| mapping.contains_key(&s.account.uuid));
+    if apply && expired {
+        session.remove()?;
+    }
+    Ok(
+        json!({"apply":apply,"hosts":hosts,"sign_in_expired":expired,"next":"After coordinated server cutover, sign in again and start the stopped daemons"}),
+    )
+}

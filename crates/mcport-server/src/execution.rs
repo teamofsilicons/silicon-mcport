@@ -402,7 +402,9 @@ pub async fn execute(
         if k.is_empty() || k.len() > 255 {
             return Err(Error::bad("Idempotency key must contain 1–255 characters."));
         }
-        Some(hash(&json!([a.uuid(), c.id, k]).to_string()))
+        Some(hash(
+            &json!([app.store.replay_account_uuid(a.uuid())?, c.id, k]).to_string(),
+        ))
     } else {
         None
     };

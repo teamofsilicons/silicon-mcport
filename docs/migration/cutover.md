@@ -262,3 +262,24 @@ into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
   the hidden `iam` alias and the host jobs' transition fields (after every host reports `registry_version: 2`).
 - When IAM is retired, the IAM-era session and refresh rows (encrypted IAM refresh tokens) can be purged; 0.3.0 never
   reads them. No purge command exists yet; ask for one when needed.
+
+## Coordinated 128-bit Accounts UUID backfill
+
+Use the **single persisted Accounts export**, exact header `old_uuid,new_uuid,kind`, with canonical lowercase UUIDv4 targets and carbon/silicon kinds. Do not generate another mapping per app. Finish the original IAM identity linking before this backfill; keep historical mappings for audit, and never replay an old IAM mapping that targets retired account IDs.
+
+1. Drain calls, stop every host daemon and the API, and back up the service data directory (`mcport.sqlite` with WAL checkpointed and `master.key`) together with each CLI home. Keep journal files; they prevent repeated side effects.
+2. Preview with the candidate binaries and the offline runtime environment:
+   ```sh
+   mcport-server migrate-account-uuids --file accounts-uuid-export.csv
+   mcport --backend https://backend.mcport.teamofsilicons.com migrate-account-uuids --file accounts-uuid-export.csv --json
+   ```
+   Repeat the CLI command on every host machine/home. Version 1 registries must complete `host migrate` before this step. Existing target identities, collisions, changed mapping history and pending calls are errors, not merge requests.
+3. Apply the **same file** to Accounts, all dependent services and stopped registries within the coordinated outage:
+   ```sh
+   mcport-server migrate-account-uuids --file accounts-uuid-export.csv --apply
+   mcport --backend https://backend.mcport.teamofsilicons.com migrate-account-uuids --file accounts-uuid-export.csv --apply --json
+   ```
+   Each server transaction/registry write is atomic. Multiple local registries are individually replayable; if one fails, leave daemons stopped, correct the cause and rerun the same export. A replay must report no new mappings. The CLI forgets affected revoked sign-ins, retains provider credentials, and does not start daemons implicitly.
+4. Deploy/start the matching service and CLI, sign in again, then start host daemons. Verify owner/custodian/invitee views, personal/shared provider calls, a structured result and a retry of a pre-cutover idempotency key. Old subject JWTs must return 401. Saved provider credentials should still work without exposing them.
+
+Rollback before accepting new traffic means restoring **Accounts and every dependent database/home from the same snapshot**. Never reverse the CSV against live data or restore only one app. Public connection/host/call IDs, private encryption keys, endpoint configuration, provider secrets and result content do not change in this backfill. The mapping ledger and old-subject denial fences are retained permanently for replay safety and audit.

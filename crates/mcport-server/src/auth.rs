@@ -111,10 +111,7 @@ fn access_token(headers: &HeaderMap) -> Result<String> {
 pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
     let token = access_token(headers)?;
     let claims = app.accounts.verify(&token).await?;
-    if claims.sub.is_empty()
-        || claims.sub.len() > 64
-        || !claims.sub.bytes().all(|b| b.is_ascii_alphanumeric())
-    {
+    if !crate::accounts::valid_account_uuid(&claims.sub) {
         return Err(Error::new(
             401,
             "invalid_token",
@@ -130,6 +127,9 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
             SIGN_IN_AGAIN,
         )
     })?;
+    if app.store.retired_account_uuid(&claims.sub)? {
+        return Err(signed_out());
+    }
     let iat = claims.iat.unwrap_or(0);
     // `iat` is in whole seconds, so a token issued in the very second of a
     // revocation may predate it (an STK rotation just ended it) or follow it (a new
@@ -264,6 +264,47 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::{Value, json};
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn canonical_account_uuids_survive_auth_custody_and_webhooks() {
+        let f = fixture().await;
+        let owner = "bd5d6e33-3eec-470f-9a28-2efb2c1ef1c9";
+        let child = "3ab13a61-b343-40c1-ad13-54b1a071a10a";
+        f.carbon(owner, "c:uuid-owner");
+        f.silicon(child, "si:uuid-child", owner);
+        let (status, body) = f.as_(child, "GET", "/api/v1/me", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["uuid"], child);
+        assert_eq!(body["data"]["custodian"]["uuid"], owner);
+        let (status, body) = f
+            .as_(
+                owner,
+                "POST",
+                "/api/v1/connections",
+                Some(crate::test_support::connection(
+                    "uuid-connection",
+                    "none",
+                    "circle",
+                )),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["owner"]["uuid"], owner);
+        let (status, body) = f.as_(child, "GET", "/api/v1/connections", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.to_string().contains("uuid-connection"));
+        let (status, body) = f
+            .webhook(&crate::test_support::event(
+                "evt-uuid-delete",
+                "account.deleted",
+                &crate::test_support::at(0),
+                json!({"uuid":owner,"kind":"carbon","id":"c:uuid-owner"}),
+            ))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (_, body) = f.as_(child, "GET", "/api/v1/connections", None).await;
+        assert!(!body.to_string().contains("uuid-connection"));
+    }
 
     #[tokio::test]
     async fn bearer_tokens_are_verified_locally_and_name_the_account() {

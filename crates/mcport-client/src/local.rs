@@ -687,6 +687,33 @@ pub async fn stop(registry_path: &Path) -> Result<Value> {
     )
 }
 
+/// Offline UUID cutover for one host. A running daemon is refused, never killed.
+/// Journal files contain job IDs and outcomes, so they are preserved byte for byte.
+pub fn migrate_account_uuids(
+    path: &Path,
+    mapping: &crate::uuid_mapping::Mapping,
+    apply: bool,
+) -> Result<Value> {
+    let _registry_lock = lock_registry(path)?;
+    let daemon_lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_file_name("daemon.lock"))?;
+    daemon_lock
+        .try_lock_exclusive()
+        .map_err(|_| invalid("Stop this daemon before account UUID migration"))?;
+    let mut registry = Registry::load(path)?;
+    let count = registry.migrate_account_uuids(mapping)?;
+    if apply && count > 0 {
+        registry.save(path)?;
+    }
+    Ok(
+        json!({"apply":apply,"host_id":registry.host.host_id,"new_mappings":count,"already_applied":mapping.len()-count}),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -717,6 +744,75 @@ mod tests {
         let mut connection = connection(mode);
         connection.can_manage = false;
         connection
+    }
+
+    #[test]
+    fn uuid_registry_backfill_preserves_secrets_and_journal_and_refuses_running_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.json");
+        let mut original = registry();
+        let conn = connection("per-user");
+        register_connection(&mut original, &conn, &scope(), BTreeMap::new()).unwrap();
+        connect_account(
+            &mut original,
+            &conn,
+            &scope(),
+            json!({"kind":"bearer","secret":"local-provider-secret"}),
+        )
+        .unwrap();
+        original.save(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let journal=br#"{"jobs":{"job":{"started_at":1,"result":{"account_uuid":"Own"},"delivered":true}}}"#;
+        std::fs::write(dir.path().join("journal.json"), journal).unwrap();
+        let target = "f858d0b5-98ba-4a4d-8ce5-114e93136f23";
+        let mapping =
+            crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOwn,{target},carbon\n"))
+                .unwrap();
+        assert_eq!(
+            migrate_account_uuids(&path, &mapping, false).unwrap()["new_mappings"],
+            1
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.path().join("daemon.lock"))
+            .unwrap();
+        lock.try_lock_exclusive().unwrap();
+        assert!(migrate_account_uuids(&path, &mapping, true).is_err());
+        FileExt::unlock(&lock).unwrap();
+        migrate_account_uuids(&path, &mapping, true).unwrap();
+        let migrated = Registry::load(&path).unwrap();
+        assert_eq!(migrated.host.owner_uuid, target);
+        assert_eq!(migrated.host.host_token, original.host.host_token);
+        assert_eq!(
+            migrated.connections[&conn.id].personal_accounts[target]
+                .bearer_token
+                .as_deref(),
+            Some("local-provider-secret")
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("journal.json")).unwrap(),
+            journal
+        );
+        let migrated_bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            migrate_account_uuids(&path, &mapping, true).unwrap()["new_mappings"],
+            0
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), migrated_bytes);
+        let conflict =
+            crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOwn,{target},silicon\n"))
+                .unwrap();
+        assert!(migrate_account_uuids(&path, &conflict, true).is_err());
+        let mut collision = original.clone();
+        collision
+            .connections
+            .get_mut(&conn.id)
+            .unwrap()
+            .personal_accounts
+            .insert(target.into(), LocalAccount::default());
+        assert!(collision.migrate_account_uuids(&mapping).is_err());
     }
 
     #[test]

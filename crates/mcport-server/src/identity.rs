@@ -92,9 +92,9 @@ pub fn parse_mapping(text: &str) -> std::result::Result<Mapping, String> {
                 "line {number}: iam_principal_id is empty or invalid."
             ));
         }
-        if uuid.is_empty() || uuid.len() > 64 || !uuid.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        if !crate::accounts::valid_account_uuid(uuid) {
             return Err(format!(
-                "line {number}: accounts_uuid `{uuid}` is not a Silicon Accounts uuid (letters and digits, case-sensitive, e.g. zQo)."
+                "line {number}: accounts_uuid `{uuid}` is not a Silicon Accounts uuid (canonical 128-bit UUID or a case-sensitive legacy key)."
             ));
         }
         let public_id = fields
@@ -501,6 +501,17 @@ pub fn link(store: &Store, mapping: &Mapping, known: &Known, commit: bool) -> Re
     store.raw_transaction(commit, |tx| link_in(tx, mapping, known, commit))
 }
 fn link_in(tx: &RawTx<'_, '_>, mapping: &Mapping, known: &Known, commit: bool) -> Result<Value> {
+    let uuid_cutovers: i64 =
+        tx.connection()
+            .query_row("SELECT count(*) FROM account_uuid_migrations", [], |r| {
+                r.get(0)
+            })?;
+    if uuid_cutovers > 0 {
+        return Err(Error::bad(
+            "Accounts UUID backfill is already applied; legacy identity imports cannot be replayed after it",
+        ));
+    }
+
     // Aliases of one legacy identity may agree; different identities must never
     // be folded into one account silently, even when that account has no data.
     let mut owners: BTreeMap<&str, &str> = BTreeMap::new();
