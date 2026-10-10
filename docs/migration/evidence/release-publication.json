@@ -1,0 +1,401 @@
+{
+  "verified_at": "2026-10-10T15:01:09.073208+00:00",
+  "tag": {
+    "name": "v0.3.0",
+    "object": {
+      "sha": "0575016f3278f0dfa68b3ff047836a3841cf3585",
+      "type": "commit",
+      "url": "https://api.github.com/repos/teamofsilicons/silicon-mcport/git/commits/0575016f3278f0dfa68b3ff047836a3841cf3585"
+    }
+  },
+  "release": {
+    "assets": [
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237231",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:15Z",
+        "digest": "sha256:089c87234c8738fd3b4a548f2e4be32e8c8a9cdf9c714114fabe1df220aafe54",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciOv",
+        "label": "",
+        "name": "mcport-0.3.0-linux-aarch64.tar.gz",
+        "size": 7907713,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:18Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-aarch64.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237445",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:19Z",
+        "digest": "sha256:9899c8841094945fa8f418665f031728b97685e5ecc17471556f2a7905602e64",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciSF",
+        "label": "",
+        "name": "mcport-0.3.0-linux-aarch64.tar.gz.sha256",
+        "size": 100,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:19Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-aarch64.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237226",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:15Z",
+        "digest": "sha256:3bdfaccccb23659493c7b120eab6e3c32322f34ee061169e301647a0f1f36bd5",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciOq",
+        "label": "",
+        "name": "mcport-0.3.0-linux-armv7hf.tar.gz",
+        "size": 7465028,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:18Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-armv7hf.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237457",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:19Z",
+        "digest": "sha256:3280df325653538b5d6fd16f4c01995cbe4fcc9bc3925ddecb6b1f50b82783b0",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciSR",
+        "label": "",
+        "name": "mcport-0.3.0-linux-armv7hf.tar.gz.sha256",
+        "size": 100,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:19Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-armv7hf.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237223",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:15Z",
+        "digest": "sha256:497ff9e1c4a643cb98069c4ba4784e2b5ef18aa1ed608dfb9054ac0793fc74a3",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciOn",
+        "label": "",
+        "name": "mcport-0.3.0-linux-i686.tar.gz",
+        "size": 8119550,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:18Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-i686.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237507",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:20Z",
+        "digest": "sha256:720f4ac86e5c1baa2ecfb7ba328f6041781495990b3e55765167fb3475adca1a",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciTD",
+        "label": "",
+        "name": "mcport-0.3.0-linux-i686.tar.gz.sha256",
+        "size": 97,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:20Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-i686.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237221",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:15Z",
+        "digest": "sha256:971451e26afe54ec32e30f4a594c96395195917a5a90d5178e11f5fed26c9b7c",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciOl",
+        "label": "",
+        "name": "mcport-0.3.0-linux-x86_64.tar.gz",
+        "size": 8472193,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:18Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-x86_64.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237517",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:20Z",
+        "digest": "sha256:ccac3a6adac3122c8e2603589dbc9cacdb6c953f49372e47736e491eaaf20e35",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciTN",
+        "label": "",
+        "name": "mcport-0.3.0-linux-x86_64.tar.gz.sha256",
+        "size": 99,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:20Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-linux-x86_64.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237222",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:15Z",
+        "digest": "sha256:904353ac8d1ce0fcd023eaad76901e6a1c21b1751195df850a517f092b0b3647",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciOm",
+        "label": "",
+        "name": "mcport-0.3.0-macos-aarch64.tar.gz",
+        "size": 7738800,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:18Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-macos-aarch64.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237563",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:21Z",
+        "digest": "sha256:47051683d26f30f1e0c117af83894aaf79d13b3d30bb1f2ec48a52e88b895dbb",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciT7",
+        "label": "",
+        "name": "mcport-0.3.0-macos-aarch64.tar.gz.sha256",
+        "size": 100,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:21Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-macos-aarch64.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237431",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:18Z",
+        "digest": "sha256:5c76ec60c3329b4d0902f9353dbfdbca179473327ffedaeed6ebbaf12ba1d828",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciR3",
+        "label": "",
+        "name": "mcport-0.3.0-macos-x86_64.tar.gz",
+        "size": 8288428,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:21Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-macos-x86_64.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237569",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:21Z",
+        "digest": "sha256:0ea4f521db0d821a934d971b970ddc09cfb6172876b4f87e92b76757f14d7a77",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUB",
+        "label": "",
+        "name": "mcport-0.3.0-macos-x86_64.tar.gz.sha256",
+        "size": 99,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:21Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-macos-x86_64.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237448",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:19Z",
+        "digest": "sha256:ac99e95f60a52f474d5dbb9e5aa89070d11762bb9dedc99ac57dd7e64128658b",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciSI",
+        "label": "",
+        "name": "mcport-0.3.0-windows-aarch64.tar.gz",
+        "size": 7793512,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-windows-aarch64.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237579",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:ff6aa8da5f155f4781cb2c59f6cd2109a4690bc310e8f8c67e0581529d8b8a96",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUL",
+        "label": "",
+        "name": "mcport-0.3.0-windows-aarch64.tar.gz.sha256",
+        "size": 102,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-windows-aarch64.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237444",
+        "contentType": "application/x-gtar",
+        "createdAt": "2026-10-10T14:59:19Z",
+        "digest": "sha256:9f398559f6e489e38598ca756aa2409b55a0618ce1a4bdee71dfb2e1507a26eb",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciSE",
+        "label": "",
+        "name": "mcport-0.3.0-windows-x86_64.tar.gz",
+        "size": 8317317,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-windows-x86_64.tar.gz"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237582",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:02c6dd85b3380e638518300364e8a75816b565f15a8d6c6547a00345198c8fc5",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUO",
+        "label": "",
+        "name": "mcport-0.3.0-windows-x86_64.tar.gz.sha256",
+        "size": 101,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-0.3.0-windows-x86_64.tar.gz.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237606",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:d6847380cedaf4e53d49bb5cb4c917a67036784770b5e5dfedc480e84e5ab75c",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUm",
+        "label": "",
+        "name": "mcport-linux-aarch64.json",
+        "size": 10635,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-linux-aarch64.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237612",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:1e32b476bade5f07e5b9d07daf2f7518b5457cec555c565d97a0969a4f29b168",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUs",
+        "label": "",
+        "name": "mcport-linux-x86_64.json",
+        "size": 10631,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-linux-x86_64.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237617",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:ce45938f6807ee6fa9fc8fb3e217f3219426aba1735e97526191a6e4f3a05bf8",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUx",
+        "label": "",
+        "name": "mcport-macos-aarch64.json",
+        "size": 10633,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:23Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-macos-aarch64.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237616",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:bfc16eb6654c0d9b291f61c3f0ac4ac63d0efaebb8da98534714fd60fe35164e",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUw",
+        "label": "",
+        "name": "mcport-macos-x86_64.json",
+        "size": 10633,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:23Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-macos-x86_64.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237632",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:23Z",
+        "digest": "sha256:d524391e67aacb3ec124f40bb4234adaaa598ea6952cfa17388d048dc2043002",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciVA",
+        "label": "",
+        "name": "mcport-windows-aarch64.json",
+        "size": 10746,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:23Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-windows-aarch64.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237633",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:23Z",
+        "digest": "sha256:38b5aa69dc10d7d65691623abb38a5788923e957f9b7c61421d4ef4c7a891692",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciVB",
+        "label": "",
+        "name": "mcport-windows-x86_64.json",
+        "size": 10744,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:23Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/mcport-windows-x86_64.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237602",
+        "contentType": "application/json",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:fe839baf7749c7166c996de3357288ba30bf2834a7df420d28f60af37c6cd630",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUi",
+        "label": "",
+        "name": "release.json",
+        "size": 585,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/release.json"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/teamofsilicons/silicon-mcport/releases/assets/628237585",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-10-10T14:59:22Z",
+        "digest": "sha256:b1f5ee13810f7f945855fded55d627d9c8a091d35472801ed9791a3df5328f23",
+        "downloadCount": 0,
+        "id": "RA_kwDOU6qUWs4lciUR",
+        "label": "",
+        "name": "SHA256SUMS",
+        "size": 798,
+        "state": "uploaded",
+        "updatedAt": "2026-10-10T14:59:22Z",
+        "url": "https://github.com/teamofsilicons/silicon-mcport/releases/download/v0.3.0/SHA256SUMS"
+      }
+    ],
+    "isDraft": false,
+    "tagName": "v0.3.0",
+    "targetCommitish": "0575016f3278f0dfa68b3ff047836a3841cf3585",
+    "url": "https://github.com/teamofsilicons/silicon-mcport/releases/tag/v0.3.0"
+  },
+  "crates": {
+    "mcport-core": {
+      "version": "0.3.0",
+      "yanked": false,
+      "checksum": "6a0a507e6eb25d760d8001e1e19ea88c05dcb3652813c808dc62a93b14b592b8"
+    },
+    "mcport-api": {
+      "version": "0.3.0",
+      "yanked": false,
+      "checksum": "450b0003db8060e1e1eb05c4f427f1d170df6144ec96be05df5f93ccfd12dbdb"
+    },
+    "mcport-mcp": {
+      "version": "0.3.0",
+      "yanked": false,
+      "checksum": "95f954fb828588313abce0ca74bf7e07103d1d3368dbd45bae7ae5571b3fd344"
+    },
+    "mcport-daemon": {
+      "version": "0.3.0",
+      "yanked": false,
+      "checksum": "6f434a2365f9d81d5aea462dfaf5364c2447adf74fdd6759ab7e4e9db0527628"
+    },
+    "mcport-client": {
+      "version": "0.3.0",
+      "yanked": false,
+      "checksum": "4d0f7d2beb9d98385fd247a9e2a7d6d1d4c8380fe689673fd38fc6d461ad3718"
+    },
+    "mcport-cli": {
+      "version": "0.3.0",
+      "yanked": false,
+      "checksum": "33d83c590dc722723b128fa8d8f24f0f51ed7688eb5282ce78ea9f19e4b96268"
+    }
+  },
+  "public": [
+    {
+      "url": "https://api.mcport.teamofsilicons.com/health",
+      "status": 200
+    },
+    {
+      "url": "https://api.mcport.teamofsilicons.com/api/v1/me",
+      "status": 401
+    },
+    {
+      "url": "https://mcport.teamofsilicons.com/",
+      "status": 200
+    }
+  ]
+}

@@ -13,5 +13,10 @@
   "content_blocks": 1,
   "structured_content": true,
   "result_sha256": "f6b62d50ded5b949bc2eff89817f6671b3848edae54f774dd67d60eaa2c12294",
-  "legacy_iam_adoption": false
+  "legacy_iam_adoption": false,
+  "cleanup": {
+    "disposable_connection_deleted": true,
+    "final_connections": 0,
+    "historical_call_evidence_retained": true
+  }
 }

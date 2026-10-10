@@ -610,3 +610,7 @@ The actual Silicon UI registry now supplies all 62 component/foundation items. A
 An owner-only DeepWiki connection now verifies a real remote MCP handshake, tool discovery and read_wiki_structure call, including structuredContent. The public documentation provider needs no credentials; no legacy provider credentials were copied. Prior authenticated-provider/local-daemon lifecycle evidence remains a separate local proof.
 
 Production Accounts-generated webhooks were configured centrally and signed deliveries succeeded. Exact native CLI archives passed six native runner proofs; the Apps catalog was published centrally. Existing IAM services and data remain separate and running.
+
+## Final release record — 2026-10-10
+
+The production backend and Silicon UI website, native Apps catalog, GitHub release, and crates.io packages are live. Final source pins, merged checks, real account/product evidence, backup isolation, cleanup and verification limits are recorded in [release-2026-10-10.md](release-2026-10-10.md). This supersedes earlier pending-production statuses.
