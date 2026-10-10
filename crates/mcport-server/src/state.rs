@@ -45,7 +45,9 @@ const REMOVED_VARIABLES: [&str; 8] = [
     "ACCOUNTS_ISSUER",
 ];
 
-#[derive(Clone, Debug)]
+/// Service configuration. `Debug` redacts the secrets it holds (app secret, webhook
+/// secret, Postmark token), so logging a configuration never prints them.
+#[derive(Clone)]
 pub struct Config {
     pub bind: String,
     pub app_id: String,
@@ -62,6 +64,28 @@ pub struct Config {
     pub upstream_origins: HashSet<String>,
     pub postmark_token: Option<String>,
     pub postmark_from: String,
+}
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redacted = |set: bool| if set { "<redacted>" } else { "<not set>" };
+        f.debug_struct("Config")
+            .field("bind", &self.bind)
+            .field("app_id", &self.app_id)
+            .field("app_secret", &redacted(!self.app_secret.is_empty()))
+            .field("accounts_url", &self.accounts_url)
+            .field("accounts_api_url", &self.accounts_api_url)
+            .field(
+                "accounts_webhook_secret",
+                &redacted(self.accounts_webhook_secret.is_some()),
+            )
+            .field("public_url", &self.public_url)
+            .field("web_url", &self.web_url)
+            .field("data_dir", &self.data_dir)
+            .field("upstream_origins", &self.upstream_origins)
+            .field("postmark_token", &redacted(self.postmark_token.is_some()))
+            .field("postmark_from", &self.postmark_from)
+            .finish()
+    }
 }
 
 /// Accept `https://` anywhere and `http://` only for this machine (local stacks).
@@ -288,6 +312,26 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_output_never_contains_the_secrets() {
+        let mut config = Config::local("/tmp/mcport-debug", "http://127.0.0.1:9");
+        config.app_secret = "sa_app_mcport_very_secret_value".into();
+        config.accounts_webhook_secret = Some("whsec_also_very_secret_value".into());
+        config.postmark_token = Some("postmark-token-secret-value".into());
+        let printed = format!("{config:?}");
+        for secret in [
+            "sa_app_mcport_very_secret_value",
+            "whsec_also_very_secret_value",
+            "postmark-token-secret-value",
+        ] {
+            assert!(!printed.contains(secret), "{printed}");
+        }
+        assert!(printed.contains("app_secret: \"<redacted>\""), "{printed}");
+        assert!(printed.contains("http://127.0.0.1:9"), "{printed}");
+        config.postmark_token = None;
+        assert!(format!("{config:?}").contains("postmark_token: \"<not set>\""));
+    }
 
     #[test]
     fn accounts_urls_require_https_except_on_this_machine() {
