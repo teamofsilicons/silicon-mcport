@@ -1,42 +1,77 @@
 # Website on Vercel
 
-The website can run as a static Vercel deployment with `/api` proxied to the separately hosted Rust backend. This preparation chooses no backend, Vercel project or domain and deploys nothing.
+The website at `https://mcport.teamofsilicons.com` is a Next.js app in `web/`, deployed
+to the existing Vercel project. It is a backend for the browser: its server signs Carbons
+in through Silicon Accounts' hosted pages, keeps the sign-in in a sealed httpOnly cookie,
+refreshes it, and calls the MCPort service with `Authorization: Bearer`. The browser
+only ever talks to the website's own origin and never sees a token or the app secret.
+Silicons can also sign in there with a short-lived token from
+`silicon-accounts login --app mcport -q`; the website's server exchanges it.
 
-Use project **Root Directory `web`**, Node.js **24**, framework **Other**, install command `npm ci`, and build command `npm run build:vercel`. Keep Output Directory unset: the build writes Vercel's `.vercel/output` format rather than deploying `dist` directly. This follows the existing Honeycomb/Hook workspace convention and Vercel's [Build Output API](https://vercel.com/docs/build-output-api/configuration).
+The service at `https://backend.mcport.teamofsilicons.com` deploys separately
+([README.md](README.md)); it no longer serves the website.
 
-Supply these values after the backend server and frontend origin are chosen:
+## Project settings
 
-| Setting | Where | Value |
-|---|---|---|
-| `MCPORT_BACKEND_ORIGIN` | Vercel build environment | Reachable backend HTTPS origin, without credentials, path, query or fragment. No default is selected. |
-| `MCPORT_PUBLIC_URL` | Rust backend environment | Backend's public HTTPS origin, used by CLI discovery, provider OAuth and client metadata. |
-| `MCPORT_WEB_URL` | Rust backend environment | Exact stable Vercel/custom frontend HTTPS origin, with no trailing slash or path. |
-| IAM browser callback | MCPort application registration | The frontend origin followed by `/auth/callback`, for the supported Carbon/Silicon login flows. |
+| Setting | Value |
+|---|---|
+| Root Directory | `web` |
+| Framework Preset | Next.js |
+| Node.js | 24 |
+| Install / build | the preset's defaults (`pnpm install --frozen-lockfile`, `pnpm build`) |
+| Output | the preset's default; no rewrites, no Build Output API |
 
-The backend still needs its IAM application configuration, protected persistent storage and service secrets from `environment.example`. None of those secrets belong in the frontend or a `VITE_*` variable. Vercel receives only the chosen backend origin for these routing rules. Configure it separately for each deployment environment and rebuild after changing it.
+Every value below is read per request, so one build serves any environment.
 
-To verify the output locally after choosing that origin:
+## Environment variables
 
-```sh
-cd web
-npm ci
-# Set MCPORT_BACKEND_ORIGIN in this build environment first.
-npm run build:vercel
-npm test
-```
+Set them for Production. Set them for Preview only with a fixed preview domain whose
+callback is registered (an arbitrary per-commit `*.vercel.app` URL is not, and no
+wildcard is ever registered). Mark `APP_SECRET` and `SESSION_SECRET` sensitive.
 
-The build rejects missing or malformed backend configuration. It prepares files only. A successful local build does not prove backend reachability or Vercel cookie forwarding.
+| Variable | Production value |
+|---|---|
+| `APP_ID` | `mcport` |
+| `APP_SECRET` | the `mcport` app secret from Silicon Accounts: the same secret the service holds as `MCPORT_APP_SECRET`, copied from Secrets Manager `silicon-mcport/production-runtime`; never in the repository |
+| `ACCOUNTS_URL` | `https://accounts.teamofsilicons.com` |
+| `APP_API_URL` | `https://backend.mcport.teamofsilicons.com` |
+| `PUBLIC_URL` | `https://mcport.teamofsilicons.com` |
+| `SESSION_SECRET` | a new `openssl rand -base64 48` for this environment only |
+| `ACCOUNTS_API_URL`, `EXTRA_IMG_ORIGINS` | leave unset |
 
-## Auth and routing
+The variables of the previous static website (`MCPORT_BACKEND_ORIGIN` and any `VITE_*`)
+are no longer read; delete them from the project.
 
-The browser keeps calling same-origin `/api/v1/...` with HttpOnly cookies. [External rewrites](https://vercel.com/docs/routing/rewrites) send `/api` to the configured backend before any static-file or SPA fallback. API responses are `private, no-store` and CDN caching is disabled. Static assets use immutable caching; callbacks and page responses use `no-store`. Missing assets stay 404 instead of returning HTML.
+## Silicon Accounts
 
-The proxy must preserve the browser's `Origin`, cookies, `X-MCPort-Test`, and every separate `Set-Cookie` header. Login completion, refresh and logout each return multiple cookies. Host-only cookies then belong to the frontend origin; no cross-site cookie or broad CORS exception is needed. Provider consent and callback remain on the backend's `/oauth/start` and `/oauth/callback`; do not rewrite them to the SPA. Keep the backend's attachment response headers intact.
+The `mcport` app's sign-in setup must list `https://mcport.teamofsilicons.com/auth/callback`
+in `redirect_uris` and `https://mcport.teamofsilicons.com` in `allowed_origins`. Arrays
+replace, so read the current setup and send it back whole with its version; the exact
+commands are in the [cutover runbook](../docs/migration/cutover.md).
 
-The existing website requests a 60-second tool deadline. Vercel's external proxy [waits up to 120 seconds for the initial response](https://vercel.com/changelog/cdn-origin-timeout-increased-to-two-minutes). A proxy interruption can still leave a tool outcome unknown: inspect Activity and the provider before retrying. An unstructured proxy 502/504 now preserves that warning without replaying the tool call. Longer CLI requests should use the backend directly.
+## Headers
 
-## Preview and verification
+The site sets its own Content Security Policy on every page: scripts by nonce,
+`connect-src 'self'` (the browser calls only this site), images from this site, Silicon
+Accounts (`ACCOUNTS_URL`, for profile photos) and Iris, `frame-ancestors 'none'`. Add no
+Vercel header rules that weaken it. API answers pass through the site's `/api` routes
+with `Cache-Control: private, no-store`.
 
-A fully working preview cannot be made independently of a backend. Local `npm run build` can prepare the static UI, but login and MCP actions require a reachable backend configured for the exact frontend origin. Use a stable preview alias with a dedicated backend configuration. An arbitrary per-commit `*.vercel.app` URL will not match the fixed callback/origin checks; do not add wildcard trust to bypass this.
+## Large results
 
-After an authorized deployment, verify the actual URL: reload a connection deep link and `/auth/callback`; check `/api/v1/iam` returns backend JSON; complete Carbon/Silicon login, refresh, logout and re-login; confirm all session cookies stay HttpOnly/Secure; run a real tool and download a result; and inspect API cache headers. Include a controlled proxy failure when checking unknown-outcome recovery. Current checks cover generated configuration and adapter behavior, not a live Vercel deployment.
+Tool results and files stay on the service. For a file, the website asks the service for
+a one-time, 60-second ticket (`POST /api/v1/calls/{call}/assets/{index}/ticket`) and the
+browser downloads it straight from the service's absolute ticket URL
+(`https://backend.mcport.teamofsilicons.com/api/v1/downloads/{ticket}`), so no body
+larger than Vercel's function limit passes through the website. Small JSON goes through
+the site's `/api` proxy. Tool calls can take up to the service's deadline; a call interrupted by the network
+has an unknown outcome: check Activity before repeating it.
+
+## Verify a deployment
+
+After an authorised deployment, on the real URL: sign in as a Carbon through Silicon
+Accounts, reload a connection deep link, sign out and back in; sign in as a Silicon with a
+short-lived token; run a tool and download a result; check that `/api/v1/me` (through the
+site) names the account and that no response sets a token in a cookie readable by scripts.
+`grep -r sa_app_ .next/static` on the build output must find nothing. Local builds prove
+the configuration, not a live deployment.
