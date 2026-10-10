@@ -201,14 +201,15 @@ impl Accounts {
         // the first fetch and age-based refreshes do not count against it.
         let mut last_refetch = self.jwks_fetch.lock().await;
         if let Some(cached) = &*self.jwks.read().await {
-            if unknown_kid && last_refetch.is_some_and(|at| at.elapsed() < JWKS_REFETCH_INTERVAL) {
+            if last_refetch.is_some_and(|at| at.elapsed() < JWKS_REFETCH_INTERVAL) {
                 return Ok(cached.keys.clone());
             }
             if !unknown_kid && cached.fetched.elapsed() < JWKS_MAX_AGE {
                 return Ok(cached.keys.clone());
             }
         }
-        if unknown_kid {
+        // Back off after every attempt, including a failed age-based refresh.
+        if unknown_kid || self.jwks.read().await.is_some() {
             *last_refetch = Some(Instant::now());
         }
         match self.client.jwks().await {

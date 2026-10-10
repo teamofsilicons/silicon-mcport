@@ -11,7 +11,7 @@
 use crate::{
     accounts::AccountRow,
     connections::{credential_key, grant_key, policy_key},
-    error::Result,
+    error::{Error, Result},
     identity_store,
     state::{App, Config, hash, now},
     store::{ENV, RawRecord, RawTx, Store},
@@ -501,6 +501,35 @@ pub fn link(store: &Store, mapping: &Mapping, known: &Known, commit: bool) -> Re
     store.raw_transaction(commit, |tx| link_in(tx, mapping, known, commit))
 }
 fn link_in(tx: &RawTx<'_, '_>, mapping: &Mapping, known: &Known, commit: bool) -> Result<Value> {
+    // Aliases of one legacy identity may agree; different identities must never
+    // be folded into one account silently, even when that account has no data.
+    let mut owners: BTreeMap<&str, &str> = BTreeMap::new();
+    for link in mapping.links.values() {
+        let old_id = link.public_id.as_str();
+        if let Some(previous) = owners.insert(&link.uuid, old_id)
+            && previous != old_id
+        {
+            return Err(Error::bad(format!(
+                "Account {} is mapped from different legacy identities ({previous} and {old_id}); nothing changed.",
+                link.uuid
+            )));
+        }
+        if let Some(account) = known.get(&link.uuid) {
+            let expected = if old_id.starts_with("si:") {
+                Some("silicon")
+            } else if old_id.starts_with("c:") {
+                Some("carbon")
+            } else {
+                None
+            };
+            if expected.is_some_and(|kind| kind != account.kind) {
+                return Err(Error::bad(format!(
+                    "Legacy identity {old_id} and account {} have different kinds; nothing changed.",
+                    link.uuid
+                )));
+            }
+        }
+    }
     let source = format!("mapping:{}", &mapping.sha256[..12]);
     let private_reset = tx.migrate_private_visibility()?;
     // Grants this command created in an earlier run are recomputed from scratch.
@@ -1568,7 +1597,7 @@ mod tests {
     }
 
     #[test]
-    fn principals_mapped_to_one_account_keep_the_first_record_and_report_the_rest() {
+    fn different_principals_cannot_be_mapped_to_one_account() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("mcport.sqlite"), &KEY).unwrap();
         for principal in ["c:saket", "c:saket-old"] {
@@ -1586,30 +1615,29 @@ mod tests {
         let mapping =
             parse_mapping("iam_principal_id,accounts_uuid\nc:saket,zQo\nc:saket-old,zQo\n")
                 .unwrap();
-        let report = link(
+        let before = snapshot(&store);
+        let error = link(
             &store,
             &mapping,
             &known(&[("zQo", "carbon", "c:saket", None)]),
             true,
         )
-        .unwrap();
+        .unwrap_err();
+        assert!(error.1.message.contains("different legacy identities"));
         assert_eq!(
-            report["duplicates_kept_unlinked"].as_array().unwrap().len(),
-            1
+            snapshot(&store),
+            before,
+            "the refused mapping changes nothing"
         );
-        let settings: Value = store
-            .get("settings", &crate::operations::settings_key("zQo"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(settings["telemetry"], true, "the first record wins");
-        assert!(
-            store
-                .get::<Value>(
-                    "settings",
-                    &hash(&json!([ENV, "tos", "c:saket-old"]).to_string())
-                )
-                .unwrap()
-                .is_some()
-        );
+        let mismatch = parse_mapping("iam_principal_id,accounts_uuid\nc:saket,zQo\n").unwrap();
+        let error = link(
+            &store,
+            &mismatch,
+            &known(&[("zQo", "silicon", "si:other", None)]),
+            true,
+        )
+        .unwrap_err();
+        assert!(error.1.message.contains("different kinds"));
+        assert_eq!(snapshot(&store), before);
     }
 }

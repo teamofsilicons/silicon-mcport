@@ -197,7 +197,7 @@ impl Store {
     pub fn forget_allowances(&self, uuid: &str) -> Result<usize> {
         let db = self.db.lock().map_err(|_| Error::internal())?;
         Ok(db.execute(
-            "DELETE FROM silicon_allowances WHERE silicon_uuid=?1 OR account_uuid=?1",
+            "DELETE FROM silicon_allowances WHERE silicon_uuid=?1 OR account_uuid=?1 OR created_by=?1",
             [uuid],
         )?)
     }

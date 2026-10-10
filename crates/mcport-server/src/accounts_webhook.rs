@@ -113,12 +113,15 @@ async fn handle(app: &App, event: &WebhookEvent, at_ms: i64) -> Result<()> {
                         return None;
                     }
                     row.kind = account.kind.as_str().into();
-                    if !account.id.is_empty() {
+                    // Profile versions do not order id/custodian events. A late
+                    // profile may improve the name, but never undo a newer transfer.
+                    if at_ms >= row.synced_at_ms && !account.id.is_empty() {
                         row.id.clone_from(&account.id);
                     }
                     row.display_name.clone_from(&account.display_name);
                     row.pfp_url = Some(account.pfp_url.clone()).filter(|url| !url.is_empty());
-                    if row.is_silicon()
+                    if at_ms >= row.synced_at_ms
+                        && row.is_silicon()
                         && let Some(custodian) = &account.custodian
                     {
                         row.custodian_uuid = Some(custodian.uuid.clone());
@@ -236,9 +239,11 @@ pub fn delete_account_data(app: &App, uuid: &str) -> Result<()> {
         app.store.delete(&kind, &id)?;
     }
     for grant in app.store.list::<GrantRecord>("grant", None)? {
-        if grant.account_uuid == uuid {
-            app.store
-                .delete("grant", &grant_key(&grant.connection_id, uuid))?;
+        if grant.account_uuid == uuid || grant.created_by.as_deref() == Some(uuid) {
+            app.store.delete(
+                "grant",
+                &grant_key(&grant.connection_id, &grant.account_uuid),
+            )?;
             execution::invalidate_connection(app, &grant.connection_id)?;
         }
     }
@@ -251,10 +256,10 @@ pub fn delete_account_data(app: &App, uuid: &str) -> Result<()> {
         }
     }
     for grant in app.store.list::<EntryGrant>("directory_grant", None)? {
-        if grant.account_uuid == uuid {
+        if grant.account_uuid == uuid || grant.created_by == uuid {
             app.store.delete(
                 "directory_grant",
-                &crate::directory::entry_grant_key(&grant.entry_id, uuid),
+                &crate::directory::entry_grant_key(&grant.entry_id, &grant.account_uuid),
             )?;
         }
     }
@@ -449,6 +454,17 @@ mod tests {
             "from":{"uuid":"Ada","id":"c:ada"},"to":{"uuid":"Bob","id":"c:bob"}}),
         );
         assert_eq!(f.webhook(&moved).await.0, StatusCode::OK);
+        // A high profile version is still older than the transfer; it must not
+        // reinstate the former custodian or an earlier public id.
+        let late = event(
+            "evt_profile_before_transfer",
+            "account.updated",
+            &at(0),
+            json!({"uuid":"Scout", "account": {"uuid":"Scout", "membership_id":"mcport:Scout",
+                "kind":"silicon", "id":"si:scout", "display_name":"Scout renamed", "pfp_url":"",
+                "version":99, "custodian":{"uuid":"Ada","id":"c:ada"}}}),
+        );
+        assert_eq!(f.webhook(&late).await.0, StatusCode::OK);
         assert_eq!(
             f.as_("Ada", "GET", &format!("/api/v1/connections/{id}"), None)
                 .await

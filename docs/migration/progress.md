@@ -542,3 +542,11 @@ Gotchas:
 - Scenarios build on each other: `--only 4` alone fails; use `--only 1,2,3,4`.
 - serde_json sorts object keys: compare webhook answers as JSON, not text (`{"duplicate":true,"received":true}`).
 - Every process this stage started was stopped at the end (`.mig/pids/` empty; nothing listens on 4240–4259).
+
+## 2026-10-10 — Resumed backend review fixes
+
+Fixed the recovered review's late-profile replay: profile versions no longer overwrite an id or custodian learned from a newer event. Added a transfer regression that delivers a high-version older profile. Identity linking now refuses distinct legacy public identities targeting one account and mismatched Carbon/Silicon kinds, without changing records. New hosts cannot query legacy identity mappings; only hosts preserved by the migration can use that endpoint. Connections whose owner removed app access cannot execute MCP calls, including calls from a custodian. Deletion removes grants and allowances the deleted account created as well as those naming it. Failed age-based JWKS refreshes now share the unknown-key backoff.
+
+Validation: `cargo test --locked -p mcport-server` (75 passed), `cargo clippy --locked -p mcport-server --all-targets -- -D warnings`, `cargo fmt --all` (2 Rust build jobs, debug and incremental off).
+
+Still outstanding: daily reconciliation of deletion when no webhook arrives, out-of-order access-removal handling, legacy production-version cutover documentation, additional regression coverage for freeze/deleted-sharer behavior, actual shared Accounts E2E rerun, and the complete Next.js frontend. This section records a checkpoint, not completion of the migration.

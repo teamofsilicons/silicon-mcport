@@ -253,6 +253,14 @@ pub async fn legacy_accounts(
             "Run mcport host migrate on the host's machine, signed in as the host's owner.",
         ));
     }
+    if h.legacy_org().is_none() {
+        return Err(Error::new(
+            403,
+            "not_legacy_host",
+            "This host has no pre-migration registry.",
+            "Only a host preserved by the identity migration can read its legacy mappings.",
+        ));
+    }
     let legacy_owner_id = h.legacy_owner();
     let mut keys = h.reported_account_keys();
     keys.extend(legacy_owner_id.clone());
@@ -1041,9 +1049,8 @@ mod tests {
         let path = format!("/api/v1/hosts/{host}/legacy-accounts");
         // A host created after 0.3.0 has no old keys.
         let (status, body) = f.as_("Ada", "GET", &path, None).await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-        assert_eq!(body["data"]["legacy"], false);
-        assert_eq!(body["data"]["accounts"], json!([]));
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["error"]["code"], "not_legacy_host");
         // A host registered before 0.3.0: its old owner key and what its daemon reported.
         f.app
             .store

@@ -316,6 +316,18 @@ pub async fn execute(
     Json(input): Json<RpcInput>,
 ) -> Result<Json<Value>> {
     let (c, _) = con::resolve(&app, &a.account, &name, false).await?;
+    if app
+        .store
+        .account(&c.owner_uuid)?
+        .is_some_and(|owner| !owner.active())
+    {
+        return Err(Error::new(
+            403,
+            "connection_owner_inactive",
+            "The connection's owner ended MCPort access, so this connection cannot run.",
+            "The owner must sign in again before anyone can use its tools.",
+        ));
+    }
     if !matches!(
         input.method.as_str(),
         "tools/list"
