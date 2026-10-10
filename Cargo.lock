@@ -1702,6 +1702,7 @@ dependencies = [
  "axum",
  "fs2",
  "mcport-api",
+ "mcport-client",
  "mcport-daemon",
  "mcport-mcp",
  "reqwest",
