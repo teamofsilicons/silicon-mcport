@@ -154,3 +154,12 @@
   --overlay: rgb(2 4 10 / .62);
   --wash: radial-gradient(70% 60% at 50% 0%, rgb(31 95 184 / .22), transparent 70%);
 }
+
+/* App layout compatibility: Silicon UI defines role-based spacing and corner tokens. */
+:root {
+ --space-1:var(--space-tight); --space-2:var(--space-related); --space-3:var(--space-group);
+ --space-4:var(--space-inset); --space-5:var(--space-comfort); --space-6:var(--space-section);
+ --space-8:var(--space-block); --space-10:calc(var(--space-comfort) * 2); --space-12:var(--space-page);
+ --space-16:var(--space-stage); --space-20:var(--space-screen); --space-24:calc(var(--space-page) * 2);
+ --radius-panel:var(--radius-container); --radius-surface:var(--radius-container); --radius-pill:var(--radius-full);
+}
