@@ -1453,7 +1453,7 @@ mod tests {
     }
     #[tokio::test]
     async fn oidc_appended_discovery_and_root_resource_fallback_use_challenge_scope_and_cimd() {
-        let (f, a, c, _provider, _origin, iam) = fixture().await;
+        let (f, a, c, _provider, _origin, provider_server) = fixture().await;
         let (app, discovery, origin, server) = discovery_fixture(&f.app, &c).await;
         let issuer = format!("{origin}/tenant");
         discovery.challenge(r#"Basic realm="ignore, this", Bearer scope="read:one read:two""#);
@@ -1495,11 +1495,11 @@ mod tests {
         );
         assert!(discovery.registrations.lock().unwrap().is_empty());
         server.abort();
-        iam.abort();
+        provider_server.abort();
     }
     #[tokio::test]
     async fn discovery_does_not_fallback_after_issuer_mismatch_or_redirect() {
-        let (f, _a, c, _provider, _origin, iam) = fixture().await;
+        let (f, _a, c, _provider, _origin, provider_server) = fixture().await;
         let (app, discovery, origin, server) = discovery_fixture(&f.app, &c).await;
         let issuer = format!("{origin}/tenant");
         discovery.reply(
@@ -1542,11 +1542,11 @@ mod tests {
         );
         assert_eq!(discovery.requests.lock().unwrap().len(), 2);
         server.abort();
-        iam.abort();
+        provider_server.abort();
     }
     #[tokio::test]
     async fn registration_order_and_application_type_respect_configured_public_url() {
-        let (f, _a, c, _provider, _origin, iam) = fixture().await;
+        let (f, _a, c, _provider, _origin, provider_server) = fixture().await;
         let (mut app, discovery, origin, server) = discovery_fixture(&f.app, &c).await;
         let metadata = metadata(&origin, &origin);
         discovery.reply(
@@ -1595,12 +1595,12 @@ mod tests {
             "web"
         );
         server.abort();
-        iam.abort();
+        provider_server.abort();
     }
     #[tokio::test]
     async fn client_metadata_route_is_public_and_never_uses_request_host() {
         use tower::ServiceExt;
-        let (f, _a, c, _provider, _origin, iam) = fixture().await;
+        let (f, _a, c, _provider, _origin, provider_server) = fixture().await;
         let (app, _discovery, _origin, server) = discovery_fixture(&f.app, &c).await;
         let response = crate::router(app)
             .oneshot(
@@ -1630,6 +1630,6 @@ mod tests {
         assert_eq!(json["token_endpoint_auth_method"], "none");
         assert!(json.get("client_secret").is_none());
         server.abort();
-        iam.abort();
+        provider_server.abort();
     }
 }

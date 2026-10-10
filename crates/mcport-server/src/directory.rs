@@ -397,7 +397,7 @@ async fn update_entry(
     )?;
     Ok(view(app, entry, access))
 }
-/// Run once before serving. The catalog has no organization or test-environment owner.
+/// Run once before serving. Catalog entries belong to no account.
 pub fn seed(app: &App) -> Result<()> {
     let snapshot: Snapshot = serde_json::from_str(include_str!("../catalog/community.json"))?;
     if snapshot.repository != "https://github.com/wong2/awesome-mcp-servers"

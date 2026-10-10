@@ -170,7 +170,7 @@ impl Store {
     /// committed IDs are never reused, including after deletion or environment cleanup.
     /// A replay key is private and is scoped by the caller before reaching this API.
     /// The closure must not call the store. The boolean reports a new record.
-    #[allow(clippy::too_many_arguments)] // Explicit tenant fields bind encrypted values and replay lookup.
+    #[allow(clippy::too_many_arguments)] // Explicit scope fields (environment, owner namespace, owner) bind encrypted values and replay lookup.
     pub fn create_public<T: Serialize + DeserializeOwned>(
         &self,
         kind: &str,
@@ -242,7 +242,7 @@ impl Store {
         tx.commit()?;
         Ok((value, true))
     }
-    #[allow(clippy::too_many_arguments)] // Explicit tenant/AAD fields keep each write auditable.
+    #[allow(clippy::too_many_arguments)] // Explicit scope/AAD fields keep each write auditable.
     pub fn put<T: Serialize>(
         &self,
         kind: &str,
