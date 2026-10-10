@@ -376,10 +376,9 @@ def up(cfg, args):
     service, service_started = start_service(cfg, secret)
     outcome, event = test_delivery(cfg)
     if outcome != "delivered":
-        if not service_started:
-            raise Failure(f"The running service did not accept a test delivery ({outcome}). It may hold an older "
-                          "webhook secret: run dev_accounts.py restart.")
-        print(f"dev-accounts: the test delivery failed ({outcome}); making a new webhook secret.", file=sys.stderr)
+        # Most often the secret changed at Silicon Accounts (rotated elsewhere): make a new one, restart with it.
+        print(f"dev-accounts: the test delivery failed ({outcome}); making a new webhook secret and restarting the service.",
+              file=sys.stderr)
         secret = new_secret(cfg)
         stop(cfg, "service")
         service, service_started = start_service(cfg, secret)
