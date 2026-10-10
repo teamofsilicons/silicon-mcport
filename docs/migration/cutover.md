@@ -43,19 +43,16 @@ a 0.2.0 host registry, and the packaging with real builds (see [progress.md](pro
           "allowed_origins": [<every origin you read>, "https://mcport.teamofsilicons.com"]}'
    ```
 
-   Webhook: point it at the service and keep the `whsec_` secret the first save returns. If the answer's `secret` is
-   `null`, a webhook existed already and kept its secret; rotate it to get one you hold
-   (`POST /v1/apps/mcport/webhook/rotate-secret`, same credentials). Do not register the service's `/oauth/callback`
-   (that is provider OAuth).
+   Webhook secret: generate it now, without a URL, so the service can hold it before it starts; the URL is set in
+   step 4 of the cutover, once the 0.3.0 service answers at it (a later `PUT` keeps this secret). Store the answer's
+   `whsec_…` as `MCPORT_ACCOUNTS_WEBHOOK_SECRET` (next section). Do not register the service's `/oauth/callback` with
+   Silicon Accounts (that is provider OAuth).
 
    ```sh
    # run at cutover (or the day before)
-   curl -s -X PUT -u "mcport:$MCPORT_APP_SECRET" https://accounts.teamofsilicons.com/v1/apps/mcport/webhook \
-     -H 'Content-Type: application/json' -H 'Idempotency-Key: mcport-cutover-webhook-1' \
-     -d '{"url": "https://backend.mcport.teamofsilicons.com/webhooks/accounts", "events": null}'
+   curl -s -X POST -u "mcport:$MCPORT_APP_SECRET" https://accounts.teamofsilicons.com/v1/apps/mcport/webhook/generate-secret \
+     -H 'Idempotency-Key: mcport-cutover-webhook-secret-1'
    ```
-
-   Until the 0.3.0 service runs, deliveries to that URL fail and are retried; that is expected.
 2. **Accounts for every user.** Each Carbon and Silicon that used MCPort needs a Silicon Accounts account, and each
    Silicon its custodian set. Known: `c:saket` → `zQo`.
 3. **Mapping file.** On a copy of the production database (never the live file), list the ids to map:
@@ -84,11 +81,10 @@ a 0.2.0 host registry, and the packaging with real builds (see [progress.md](pro
    cat checks/*.json      # each binary's three commands passed on a runner that could execute it
    ```
 
-   Then, as an author of
-   `mcport` at Silicon Apps, make sure the app has a listing: `silicon-apps setup mcport show`. If it has none yet, save
-   its details and access (`silicon-apps setup mcport details --description-file description.txt --tags tools,mcp`,
-   `silicon-apps setup mcport access --visibility public`), following the publishing guide on
-   developers.teamofsilicons.com. Upload the four Linux archives and create a **development** release:
+   Then, as an author of `mcport` at Silicon Apps, make sure the app has a listing: `silicon-apps setup mcport show`.
+   If it has none yet, save its details and access (`silicon-apps setup mcport details --description-file
+   description.txt --tags tools,mcp`, `silicon-apps setup mcport access --visibility public`), following the publishing
+   guide on developers.teamofsilicons.com. Upload the four Linux archives and create a **development** release:
 
    ```sh
    # run at cutover (or the day before): a development release reaches only `mcport>dev` installs
@@ -116,8 +112,10 @@ a 0.2.0 host registry, and the packaging with real builds (see [progress.md](pro
 
 ## Runtime environment
 
-`/etc/mcport/runtime.env` already exists (`runtime_from_secret.py` only creates it). Edit it as root (mode 0600) after
-the installer's backup, or before installing, keeping a copy:
+`/etc/mcport/runtime.env` already exists (`runtime_from_secret.py` only creates it). First keep the IAM-era file, which
+a rollback to 0.2.x needs (the installer's backup holds whatever the file contains when the installer runs):
+`sudo cp -p /etc/mcport/runtime.env /var/backups/mcport/runtime.env.0.2` (`# run at cutover`). Then edit it as root
+(mode 0600) before installing, so the 0.3.0 service starts with the right secrets:
 
 - set `MCPORT_APP_SECRET` to the **Silicon Accounts** `mcport` app secret (it currently holds the IAM app secret);
 - add `ACCOUNTS_URL="https://accounts.teamofsilicons.com"` and `MCPORT_ACCOUNTS_WEBHOOK_SECRET="whsec_…"`;
@@ -157,12 +155,17 @@ into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
    Compare the report with the rehearsal, then run it again without `--dry-run`. It runs in one transaction; a failure
    changes nothing. Uuids are checked against Silicon Accounts (lookups with the app secret); `--offline` skips that
    (then custodians are unknown and every principal with evidence of use outside the owner keeps an explicit grant).
-4. Start it: `sudo systemctl start mcport.service` (`# run at cutover`). Check `/health` reports 0.3.0, then send a
-   test delivery and see it delivered (or `journalctl -u mcport.service` shows the ping):
+4. Start it: `sudo systemctl start mcport.service` (`# run at cutover`). Check `/health` reports 0.3.0, point the
+   Silicon Accounts webhook at it (the `PUT` keeps the secret generated before the day; its answer's `secret` is `null`
+   for that reason), and send a test delivery: it must show as delivered (or `journalctl -u mcport.service` shows the
+   ping). A `401` there means the runtime's `MCPORT_ACCOUNTS_WEBHOOK_SECRET` is not that secret.
 
    ```sh
    # run at cutover
    curl -s https://backend.mcport.teamofsilicons.com/health
+   curl -s -X PUT -u "mcport:$MCPORT_APP_SECRET" https://accounts.teamofsilicons.com/v1/apps/mcport/webhook \
+     -H 'Content-Type: application/json' -H 'Idempotency-Key: mcport-cutover-webhook-1' \
+     -d '{"url": "https://backend.mcport.teamofsilicons.com/webhooks/accounts", "events": null}'
    curl -s -X POST -u "mcport:$MCPORT_APP_SECRET" -H 'Idempotency-Key: mcport-cutover-ping-1' \
      https://accounts.teamofsilicons.com/v1/apps/mcport/webhook/test
    ```
@@ -183,7 +186,7 @@ into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
 
 7. **Prove** (each step on the real deployment): a Carbon signs in on the website and with `mcport login`, and sees its
    connections; one of its Silicons signs in with `silicon-accounts login --app mcport -q | mcport login --slt-stdin` and
-   sees the connections shared with its custodian's Silicons; an invitee calls a shared connection; the Carbon's Mac
+   sees the Carbon's `circle` connections ("you and the Silicons you look after"); an invitee calls a shared connection; the Carbon's Mac
    daemon still runs a local call; `mcport --version` from a fresh `silicon-apps install mcport` on Linux prints
    `mcport 0.3.0`; a sign-out at Silicon Accounts makes the next sensitive call answer `sign_in_revoked`; a download from
    the website comes from a one-time ticket on the service.
@@ -233,9 +236,9 @@ into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
 
 ## Rollback
 
-- **Service, before step 4:** nothing has served linked data. Stop, restore the installer's backup (data directory,
-  key and runtime file together) and the previous release with the installer's documented recovery
-  ([deploy/README.md](../../deploy/README.md)). **After step 4**, a rollback means the same restore and losing what was
+- **Service, before step 4:** nothing has served linked data. Stop, restore the installer's backup (data directory and
+  key together) and the previous release with the installer's documented recovery
+  ([deploy/README.md](../../deploy/README.md)), and put back the IAM-era `runtime.env.0.2` kept before the edit. **After step 4**, a rollback means the same restore and losing what was
   created since; re-running `link-identities` with a corrected mapping (service stopped) is usually the better fix,
   since it recomputes every record from its preserved original.
 - **Website:** Vercel's instant rollback to the previous static deployment, with `MCPORT_BACKEND_ORIGIN` restored. It
