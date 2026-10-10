@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-10",
+  "parallel_accounts_service": {
+    "app": "mcport",
+    "source_revision": "2553d2a4f605d0efa1cee2648ee47aca745fd8be",
+    "archive_sha256": "4b4c73b568112915101b69bc560d34c51c5e0b8b901c642493f69b9488d0d59e",
+    "binary_sha256": "5d5d6b64ad53f332bd41f0673165df477dd81ca290eb53d41b9a0eec9d970c9b",
+    "new_api_ready": true,
+    "app_credential_preflight": true,
+    "legacy_pid_unchanged": true,
+    "legacy_proxy_prefix_preserved": true,
+    "public_url": "https://api.mcport.teamofsilicons.com",
+    "isolated_data": "/var/lib/mcport-accounts",
+    "health": {
+      "source_revision": "2553d2a4f605d0efa1cee2648ee47aca745fd8be",
+      "status": "ok",
+      "version": "0.3.0"
+    }
+  },
+  "public_checks": [
+    {
+      "url": "https://api.mcport.teamofsilicons.com/health",
+      "status": 200,
+      "expected_status": 200,
+      "matches": true
+    },
+    {
+      "url": "https://api.mcport.teamofsilicons.com/api/v1/me",
+      "status": 401,
+      "expected_status": 401,
+      "matches": true
+    },
+    {
+      "url": "https://mcport.teamofsilicons.com/auth/session",
+      "status": 200,
+      "expected_status": 200,
+      "matches": true,
+      "body": {
+        "signed_in": false
+      }
+    },
+    {
+      "url": "https://mcport.teamofsilicons.com/api/v1/me",
+      "status": 401,
+      "expected_status": 401,
+      "matches": true
+    },
+    {
+      "url": "https://mcport.teamofsilicons.com/auth/sign-in?return_to=%2Fsettings",
+      "status": 303,
+      "expected_status": 303,
+      "matches": true,
+      "authorize_origin": "https://accounts.teamofsilicons.com",
+      "app_id": [
+        "mcport"
+      ],
+      "redirect_uri": [
+        "https://mcport.teamofsilicons.com/auth/callback"
+      ],
+      "pkce": [
+        "S256"
+      ],
+      "http_only_cookie": true
+    }
+  ],
+  "screenshots": "/Users/codanium/Documents/silicon/.migration/live/mcport-production-home.png",
+  "legacy_iam_preserved": true,
+  "existing_silicons_reenrolled": false,
+  "authenticated_production_journey": "pending genuine account sign-in; no impersonation",
+  "notes": "Production uses fresh Accounts storage. Prior controlled local speech providers do not prove paid providers."
+}

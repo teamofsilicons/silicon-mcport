@@ -592,3 +592,13 @@ After restart, both old JWTs returned 401, both fresh device sign-ins used the m
 Repacked the current native CLI, including its new registry migration command: `.mig/candidate-uuid/mcport-0.3.0-macos-aarch64.tar.gz`, SHA256 `2b4d290022f64d760008c1db4c0df3641a95c926949fcb336c8c6d79fffe9032`. Empty-home Apps discovery passed. No production changes, publishing or pushing. Final shutdown/restart inventory is in shared `.migration/cutover/services-waveform-mcport-apps.md`.
 
 Final cleanup: this task's API, provider/stub, website and daemon processes are stopped; the final migrated state is backed up. The native archive above uses the current **unoptimized development profile with debug information disabled**, and is local test evidence rather than an optimized release artifact.
+
+## Production parallel Accounts release — 2026-10-10
+
+The user's later production authorization supersedes the local-only status above. The further instruction to move apps without shifting existing Silicons is implemented as a parallel service: `https://api.mcport.teamofsilicons.com` uses a fresh Accounts store and independent encryption keys. The original IAM service, its data, old Honeycomb packages and existing fleet credentials remain in place. No IAM principal is imported, re-enrolled or assigned custody.
+
+The optimized ARM64 backend from `2553d2a4f605d0efa1cee2648ee47aca745fd8be` is running as `mcport-accounts`, with a genuine Accounts app-credential preflight, readiness200 and anonymous401. The existing website now serves the Next.js/Arc UI and points only to the new API. Browser automation verified the public landing page with no JavaScript errors; sign-in uses the correct hosted Accounts callback, S256 PKCE and httpOnly pending cookies. Accounts-generated webhook secrets are installed; central registration/receipt confirmation is tracked separately.
+
+Separate daily backups preserve the new database with its matching encryption keys and configuration. Initial snapshots were verified and uploaded to private encrypted S3 storage. Legacy writer PIDs were unchanged throughout activation. See [parallel deployment instructions](../../deploy/parallel/README.md) and [sanitized production evidence](evidence/production-parallel.json). The production operator retains exact receipts and screenshots under `.migration/live/mcport-accounts` and `.migration/live/mcport-production-home.png`.
+
+Authenticated production product journeys still require a genuine post-cutover account sign-in. Health, public UI and credential preflights are not claimed as proof of paid speech-provider compatibility or authenticated external MCP tool execution. Prior real configured local integration evidence remains valid within its stated local scope.
