@@ -1,6 +1,15 @@
 name: Native backend candidate
 on:
   workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Optional successful CLI release run to verify on native catalog runners
+        required: false
+        default: ''
+      source_revision:
+        description: Exact CLI candidate source commit
+        required: false
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -9,6 +18,7 @@ concurrency:
 # The bundle is the service alone; the website is a separate Next.js deployment.
 jobs:
   server:
+    if: inputs.candidate_run == ''
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 70
     env:
@@ -47,6 +57,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   assemble:
+    if: inputs.candidate_run == ''
     needs: [server]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -80,3 +91,55 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 # Candidate only: no production credentials, upload, installation or deployment.
+  catalog-proof:
+    if: inputs.candidate_run != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, target: linux-x86_64 }
+          - { runner: ubuntu-24.04-arm, target: linux-aarch64 }
+          - { runner: macos-15-intel, target: macos-x86_64 }
+          - { runner: macos-15, target: macos-aarch64 }
+          - { runner: windows-2025, target: windows-x86_64 }
+          - { runner: windows-11-arm, target: windows-aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify candidate provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > candidate.json
+          python - <<'PYPROOF'
+          import json, os
+          r=json.load(open('candidate.json'))
+          assert r['head_sha']==os.environ['SOURCE_REVISION'] and r['conclusion']=='success'
+          assert r['path']=='.github/workflows/release.yml'
+          PYPROOF
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcport-silicon-apps-release
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run }}
+      - name: Execute exact packaged bytes
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          archive=$(find candidate -name "mcport-*-$TARGET.tar.gz")
+          python scripts/native_catalog_proof.py --app mcport --archive "$archive" --target "$TARGET" --source-revision "$SOURCE_REVISION" --candidate-run "$CANDIDATE_RUN" --output "proof/mcport-$TARGET.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcport-catalog-proof-${{ matrix.target }}
+          path: proof/
+          if-no-files-found: error
