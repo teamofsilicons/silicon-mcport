@@ -411,3 +411,134 @@ Gotchas:
 - `silicon-apps` here is signed in to production: the packager strips its session variables and gives it an empty home;
   never call it with the default home for anything but `--version`.
 - `dist/apps/` (gitignored) holds this stage's six local archives; `target/mig-apps` holds the release builds.
+
+## 2026-10-10 — Stage 4 (end to end against Silicon Accounts): done
+
+The service, CLI and host daemon were run end to end with real Silicon Accounts tokens on the shared local stack, in
+eight scripted scenarios; two defects they exposed were fixed in the service; the real-binary regression journey moved
+to a fake Silicon Accounts and runs in CI again. Decisions E1–E15 are in [decisions.md](decisions.md); cutover step 9
+and a note in step 7 were added to [cutover.md](cutover.md); contract notes at the end of
+[understanding-proposal.md](understanding-proposal.md).
+
+What changed:
+- `scripts/dev-accounts.sh` / `dev-accounts-stop.sh` → `scripts/dev_accounts.py up|down|restart|status`: MCP fixtures
+  on 127.0.0.1:4242, `mcport-server` on 127.0.0.1:4241 (SQLite data in `.local/dev-accounts/server`; no Postgres, E1)
+  against a loopback Silicon Accounts; webhook registered with mcport's app credentials, secret kept 0600 outside git,
+  a test ping must be delivered (a stale secret is replaced and the service restarted); idempotent; pids per
+  `MCPORT_DEV_PIDS` (here `.mig/pids`).
+- `scripts/e2e-accounts.sh` → `tests/e2e/accounts_stack.py` (eight scenarios, 125 checks) with
+  `tests/e2e/stack/mint.mts` (identities through the stack's testkit).
+- Service fixes: names and photos from the user base (E10, `d8ad585`); same-second revocation ties settled by
+  introspection, deferred work and tickets treat them as later (E11, `c14424c`). +2 unit tests; the stub's lookups now
+  answer like Silicon Accounts.
+- `tests/e2e`: `accounts_fake.py` + `ed25519.py` (+ `test_accounts_fake.py`), `run.py` and `directory_journey.py`
+  ported (102 checks), `fixtures.py` without the old identity fake, `serve.py` on the same stack, README rewritten;
+  `checks.yml` runs the journey again and keeps its logs on failure; `scripts/README.md`, `docs/development.md`,
+  `deploy/testing.md` updated.
+
+Commits: `d8ad585` names and photos · `c14424c` same-second revocations · `010a4d4` dev stack and stack scenarios ·
+`c91950e` journey on a fake Silicon Accounts, CI · `3968011` stale-secret recovery · (this record).
+
+Tests (all with `CARGO_TARGET_DIR=target/mig`):
+
+| Command | Result |
+|---|---|
+| `MCPORT_E2E_BASE=4250 python3 scripts/check.py --skip-web --e2e-run-dir …` (after the Rust changes) | exit 0: fmt; 161 Rust tests incl. doctests (server 73); clippy `-D warnings`; 41 script tests; discovery `passed`; 7 e2e fixture tests; journey 102 checks |
+| `cargo test --locked -p mcport-server` (after each fix) | 72, then 73 pass |
+| `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` (HEAD) | 41 pass |
+| `python3 -m unittest discover -s tests/e2e -p 'test_*.py'` (HEAD; `python3 -S`: the `cryptography` cross-check skips) | 7 pass |
+| `python3 -I tests/e2e/run.py --no-build --base 4250` (HEAD) | 102 checks pass in 125 s; nothing left listening on 4250–4253 |
+| `scripts/e2e-accounts.sh` (shared stack, run `1791605986`) | 125 checks pass, exit 0 |
+| `scripts/dev-accounts.sh` twice, then after rotating the secret at the stack | started → reused (`started: false/false`, ping delivered) → `HTTP 401 … invalid_webhook_signature`, new secret, service restarted, ping delivered |
+| PyYAML `safe_load` of `checks.yml` | parses; steps as intended (actionlint is not installed here) |
+
+### The eight scenarios, real outputs (trimmed), run `1791605986`
+
+Identities: `c:mcport-e2e-c1-1791605986` = `Qfj` (Carbon), `si:mcport-e2e-s1-1791605986` = `sy2` and
+`si:mcport-e2e-s2-1791605986` = `jwd` in its care, `c:mcport-e2e-c2-1791605986` = `VPW` (unrelated Carbon).
+
+1. **Carbon on the API** (hosted sign-in, `--redirect http://localhost:4240/auth/callback --exchange`): `GET /api/v1/me`
+   → `{"uuid":"Qfj","id":"c:mcport-e2e-c1-1791605986","kind":"carbon","display_name":"Mcport E2e C1 1791605986","pfp_url":"http://127.0.0.1:9594/pfp/carbon?id=Qfj","custodian":null,…}`;
+   no token → `401 authentication_required`; broken signature → 401; `POST /api/v1/connections` → `M3e`
+   (`access: owner`, `visibility: invited`); list, read, `PATCH` (live) with version, stale version → 409; a tool call
+   through `/mcp` recorded with caller `Qfj`, status `completed`; `DELETE` → `{deleted:true}`, then 404 `not_found`.
+2. **Silicon on the CLI**: `printf %s "$SLT" | mcport login --slt-stdin --json` →
+   `{"authenticated":true,"kind":"silicon","uuid":"sy2","custodian":{"uuid":"Qfj",…},"method":"slt",…}`; the sign-in
+   file is 0600 and holds no `slt_`; `login status --json` → `"verified":true`; `connection new s1-notes` (`ARc`),
+   `connection ls`, `tool ls` (echo, write, whoami), `tool call … echo` → `"hello from a Silicon"` (call `zpa`),
+   `activity ls`/`show`, `connection set --description`; `asset ls`/`get` (0600 PNG) and `asset link` (downloads once
+   without a token, then 404 `download_expired`); forced expiry → one refresh (refresh token rotated), three concurrent
+   commands → all exit 0 and the sign-in survives; `access new … --account c:mcport-e2e-nobody-…` → 404
+   `unknown_account`; `logout --json` → `{"revoked":true,"signed_out":true,"uuid":"sy2",…}`; `login status --json` →
+   `{"authenticated":false}`.
+3. **Device flow**: `mcport login --json` printed the code and `http://localhost:9590/device`; `mint.mts approve` → 204;
+   the CLI ended `{"authenticated":true,"kind":"carbon","method":"device","uuid":"Qfj",…}`; `connection ls` shows `ARc`
+   with `access: custodian` and owner `display_name: "mcport-e2e-s1-1791605986"` plus photo (E10). A second code denied
+   at Silicon Accounts (`POST /v1/device/SBTX-AP7V/deny` → 204) → `{"error":{"code":"device_denied",…}}`, exit 1,
+   still signed out.
+4. **Custodian, circle and sharing**: the Silicon signed in again with `silicon-accounts login --app mcport -q | mcport
+   login --slt-stdin`; the custodian manages `ARc` (visibility → `circle`, switched `echo` off → the Silicon's call
+   `tool_disabled`, on again), sees the Silicon's activity and result, and its own call there is recorded as its own;
+   the second Silicon (created with the Carbon's first-party token) sees `ARc` as `circle` and uses it; the unrelated
+   Carbon sees nothing, `tool ls ARc` → 404 `not_found`; shared by `c:` id → `invited`, it calls (the owner does not
+   see that call); unshared → 404 again and its earlier result is hidden; sharing by uuid works and shows the id;
+   `access new c2-tools --account si:…` →
+   `{"code":"silicon_not_reachable",…,"recovery":"Ask si:mcport-e2e-s1-1791605986 or its custodian to allow c:mcport-e2e-c2-1791605986 (mcport allow add c:mcport-e2e-c2-1791605986), then share again."}`;
+   the custodian's `allow add … --silicon si:…` → allowed, share reaches the Silicon; the Silicon's `allow rm` → new
+   shares refused, the old one stays; a Carbon is reachable without an allowance; a Carbon's circle connection reaches
+   its Silicons, not other Carbons. Provider accounts: per-user `c1-bearer` → `provider_authentication_required` until
+   the Silicon connects its own; the custodian inspects it (no secret) and disconnects it; the unrelated Carbon gets 404.
+   Directory: the Silicon's personal entry is managed by its custodian, hidden from others until shared by id, used to
+   make a connection, hidden again when unshared. Host: `host new` + a stdio MCP (`FIXTURE_ACCOUNT=stdio-e2e`) →
+   ready; the Silicon's call answers `stdio-e2e`; `daemon status` → `registry_version: 2`; `daemon stop` → the call
+   answers `host_offline`; `daemon start` → works; `host rm` → deleted. Settings are per account (telemetry off for the
+   Carbon only); a report with no mail service → `status: delivery_failed` with an id.
+5. **Webhooks**: the custodian's `POST /v1/me/silicons/sy2/id` (twice) → the service showed each new id; the Silicon's
+   own `login status` shows it, same uuid; Silicon Accounts' replay of the first `account.id_changed` (same `event_id`)
+   → delivered with HTTP 200 and the newest id stayed; a self-signed `ping` → `{"received":true}`, again →
+   `{"duplicate":true,"received":true}`; another secret → `401 invalid_webhook_signature`; a 15-minute-old timestamp
+   or a changed body → 401. `silicon-accounts --json apps remove mcport` (the Silicon's first-party sign-in) → its
+   previous access token → `401 signed_out`, live route 401, CLI → `sign_in_ended` ("…revoked at …
+   (access_removed); sign in again."); meanwhile the custodian still sees `ARc` and the other Silicon does not; a new
+   sign-in restores both. `mcport logout` (Silicon 2): the old token still reads (local JWT, `app_revoked` ignored) but
+   the live route answers `sign_in_revoked`. Custodian rename → `account.updated` shows the new display name. STK
+   rotation → older token `signed_out`, CLI `sign_in_ended`, new STK signs in. Transfer to the unrelated Carbon
+   (accepted with its first-party token) → it manages `EMS` as custodian, the old custodian loses it at once, the
+   Silicon no longer sees the old circle. `DELETE /v1/me/silicons/jwd` → its token `account_deleted`, `EMS` gone.
+   `DELETE /v1/me` (unrelated Carbon) → the connections it had shared disappear for the Silicon and the Carbon it shared
+   with. A refresh token redeemed elsewhere → the CLI's own refresh is a reuse: `sign_in_ended` ("This refresh token was
+   already used once…"), the copy's access token → `signed_out`, its refresh token `invalid_grant`.
+6. **Proofs**: `Authorization: Proof sap_not-a-real-proof` and a real User verification proof issued by `interface`
+   for `mcport` (scope `mcport.connections.read`) → both `401 proof_not_accepted` (E7); the proof was revoked.
+7. **Discovery from a packed archive**: `scripts/package-apps.sh 0.3.0 macos-aarch64 target/mig/debug/mcport
+   --output-dir <run>/package` → `{"archive_checked":true,"discovery":"passed here","silicon_apps":"0.2.0",…}`; the
+   archive holds `apps.yaml` (this target only) and `bin/mcport`; extracted, in an empty home: `--help`, `accounts
+   --json` (`"app_id":"mcport"`, `"version":"0.3.0"`) and `login status --json` (`{"authenticated":false}`) exit 0;
+   nothing written.
+8. **Restart**: `dev_accounts.py restart` → `{"restarted": true, "service": 32326}`; the Carbon's and the Silicon's
+   stored sign-ins work without signing in again; scenario 1's API token is still accepted; the Silicon's token from
+   before it removed MCPort is still refused (`signed_out`, persisted); the earlier `ping` event id still answers
+   `{"duplicate":true,"received":true}`; a new Silicon Accounts test ping → delivered.
+
+The defects: run `1791603267`'s transcript showed every `owner`, `caller` and `account` with `"display_name":""` and
+no photo although the stack's user base had both (`GET /v1/apps/mcport/users/{uuid}`); the scenario 1 and 3 checks added
+for it pass since E10. Run `1791603867` failed scenario 5 ("the old token to be refused after the STK rotation: not
+within 25 s") because the Silicon signed in and its STK was rotated within the same second; it passes since E11.
+
+Left for later stages:
+- **Web stages:** the Next.js website and its BFF; the website's own end-to-end checks (sign-in through the hosted
+  pages, the Silicon token form, download tickets) can reuse `scripts/dev-accounts.sh` (website slot 4240).
+- **CI on GitHub:** the journey has run on macOS here; its first Linux run happens on the first push (stdio and host
+  daemon paths are the same code).
+- **Contract:** paste `understanding-proposal.md` into `UNDERSTANDING.md` (Carbon only).
+
+Blocked on: nothing.
+
+Gotchas:
+- mcport's webhook secret on the shared stack now lives in `.local/dev-accounts/webhook-secret`; S25's
+  `.mig/accept/webhook-secret` is stale. `dev-accounts.sh` heals a stale secret by itself.
+- Two `membership.signed_out` deliveries from 02:23 (the CLI stage, while no service listened) were still retrying at
+  the stack; they reach whatever runs on 4241 later and are harmless.
+- Scenarios build on each other: `--only 4` alone fails; use `--only 1,2,3,4`.
+- serde_json sorts object keys: compare webhook answers as JSON, not text (`{"duplicate":true,"received":true}`).
+- Every process this stage started was stopped at the end (`.mig/pids/` empty; nothing listens on 4240–4259).

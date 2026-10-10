@@ -109,6 +109,11 @@ a 0.2.0 host registry, and the packaging with real builds (see [progress.md](pro
 8. **Clients.** Installed `mcport` 0.1.x/0.2.x CLIs cannot sign in to 0.3.0 (their sign-in routes answer 410
    `client_update_required`, naming `silicon-apps install mcport` and the new sign-in commands). Tell MCPort's Carbons
    and the custodians of its Silicons the date and what each will run (see "CLI and host daemons").
+9. **End-to-end checks of the candidate.** `checks.yml` at the reviewed revision must be green: it now runs the
+   real-binary journey against a fake Silicon Accounts (`tests/e2e/run.py`). Then run the scenarios with real tokens
+   against the test Silicon Accounts stack, with the candidate's binaries (`MCPORT_SERVER_BIN`, `MCPORT_CLI_BIN`):
+   `scripts/e2e-accounts.sh` ([tests/e2e/README.md](../../tests/e2e/README.md)); all eight scenarios must pass. The
+   2026-10-10 runs are in [progress.md](progress.md).
 
 ## Runtime environment
 
@@ -189,7 +194,9 @@ into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
    sees the Carbon's `circle` connections ("you and the Silicons you look after"); an invitee calls a shared connection; the Carbon's Mac
    daemon still runs a local call; `mcport --version` from a fresh `silicon-apps install mcport` on Linux prints
    `mcport 0.3.0`; a sign-out at Silicon Accounts makes the next sensitive call answer `sign_in_revoked`; a download from
-   the website comes from a one-time ticket on the service.
+   the website comes from a one-time ticket on the service. Owners and callers show with their display names and
+   photos once they have signed in to 0.3.0 (names come from MCPort's user base at Silicon Accounts; until an account's
+   first sign-in, MCPort shows its id).
 
 ## CLI and host daemons
 

@@ -123,3 +123,12 @@ Required commands:
 - Using the Application, after the first paragraph: "The website keeps each sign-in on its own server and calls the
   backend for the signed-in account; the browser never holds a token. Files from results download through short-lived
   links from the backend."
+
+## End-to-end stage additions (2026-10-10)
+
+- Login (the replacement section above), after "shows its current `c:`/`si:` id": "Names and photos are the ones each
+  account shares with MCPort when it signs in; an account that never signed in to MCPort is shown by its id."
+- Silicon Accounts and Silicon Apps (the replacement section above), the testing paragraph: "Testing uses a separate
+  MCPort backend connected to a test Silicon Accounts deployment, with test accounts and fixture MCPs; nothing falls
+  back to production. Every change runs the real CLI, daemon and backend end to end against a faithful stand-in for
+  Silicon Accounts; before a release the same journeys run with real tokens against the test deployment."
