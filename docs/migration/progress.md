@@ -602,3 +602,11 @@ The optimized ARM64 backend from `2553d2a4f605d0efa1cee2648ee47aca745fd8be` is r
 Separate daily backups preserve the new database with its matching encryption keys and configuration. Initial snapshots were verified and uploaded to private encrypted S3 storage. Legacy writer PIDs were unchanged throughout activation. See [parallel deployment instructions](../../deploy/parallel/README.md) and [sanitized production evidence](evidence/production-parallel.json). The production operator retains exact receipts and screenshots under `.migration/live/mcport-accounts` and `.migration/live/mcport-production-home.png`.
 
 Authenticated production product journeys still require a genuine post-cutover account sign-in. Health, public UI and credential preflights are not claimed as proof of paid speech-provider compatibility or authenticated external MCP tool execution. Prior real configured local integration evidence remains valid within its stated local scope.
+
+## Production verification and Silicon UI — 2026-10-10
+
+The actual Silicon UI registry now supplies all 62 component/foundation items. App-owned aliases retain existing numeric layout spacing. TypeScript, lint, production build and 44 web tests pass. Signed-in desktop/mobile browser checks use genuine Accounts credentials against the new production API through a local BFF harness; all 6 primary pages pass WCAG serious/critical checks, with no page errors or mobile overflow. This harness reuses an authenticated session; the genuine SLT exchange was verified separately by the release CLI.
+
+An owner-only DeepWiki connection now verifies a real remote MCP handshake, tool discovery and read_wiki_structure call, including structuredContent. The public documentation provider needs no credentials; no legacy provider credentials were copied. Prior authenticated-provider/local-daemon lifecycle evidence remains a separate local proof.
+
+Production Accounts-generated webhooks were configured centrally and signed deliveries succeeded. Exact native CLI archives passed six native runner proofs; the Apps catalog was published centrally. Existing IAM services and data remain separate and running.
