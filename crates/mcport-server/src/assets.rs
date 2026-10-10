@@ -317,11 +317,12 @@ pub async fn redeem(State(app): State<App>, Path(value): Path<String>) -> Result
                 "Ask for a new download link.",
             )
         })?;
-    // A sign-out after the ticket was issued ends it too.
+    // A sign-out after the ticket was issued ends it too; one in the same second
+    // (times are whole seconds) counts as after.
     let viewer = app
         .store
         .account(&ticket.viewer_uuid)?
-        .filter(|viewer| viewer.active() && viewer.revoked_before <= ticket.issued_at)
+        .filter(|viewer| viewer.active() && viewer.revoked_before < ticket.issued_at)
         .ok_or_else(Error::missing)?;
     let record = authorized(&app, &viewer, &ticket.call_id).await?;
     let asset = embedded(record.invocation.result.as_ref().expect("checked result"))
@@ -569,7 +570,8 @@ mod tests {
         let (status, body) = f.call("GET", path, None, None).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "download_expired");
-        // A ticket issued before its holder signed out everywhere does not outlive that.
+        // A ticket issued before its holder signed out everywhere does not outlive
+        // that, even when both happen within the same second.
         let (_, body) = f
             .as_("Ada", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
             .await;
@@ -578,8 +580,7 @@ mod tests {
             .unwrap()
             .trim_start_matches("http://127.0.0.1:4241")
             .to_owned();
-        crate::accounts_webhook::revoke(&f.app, "Ada", (crate::state::now() + 1) * 1000, None)
-            .unwrap();
+        crate::accounts_webhook::revoke(&f.app, "Ada", crate::state::now() * 1000, None).unwrap();
         assert_eq!(
             f.call("GET", &path, None, None).await.0,
             StatusCode::NOT_FOUND

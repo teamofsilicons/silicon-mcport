@@ -131,45 +131,70 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
         )
     })?;
     let iat = claims.iat.unwrap_or(0);
-    let mut verdict = None;
-    let mut lookup = false;
-    let row = app.store.update_account(&claims.sub, |current| {
-        let mut row = current
-            .clone()
-            .unwrap_or_else(|| AccountRow::new(&claims.sub, kind));
-        if current.is_none() {
-            lookup = true;
+    // `iat` is in whole seconds, so a token issued in the very second of a
+    // revocation may predate it (an STK rotation just ended it) or follow it (a new
+    // sign-in right after). Silicon Accounts knows which: introspection decides.
+    let mut confirmed = false;
+    let (mut account, lookup) = loop {
+        let mut verdict = None;
+        let mut lookup = false;
+        let mut tie = false;
+        let row = app.store.update_account(&claims.sub, |current| {
+            let mut row = current
+                .clone()
+                .unwrap_or_else(|| AccountRow::new(&claims.sub, kind));
+            if current.is_none() {
+                lookup = true;
+            }
+            if row.status == "deleted" {
+                verdict = Some(deleted());
+                return None;
+            }
+            if iat < row.revoked_before {
+                verdict = Some(signed_out());
+                return None;
+            }
+            if iat == row.revoked_before && row.revoked_before > 0 && !confirmed {
+                tie = true;
+                return None;
+            }
+            // A token issued after access was removed means the account signed in again.
+            row.status = "active".into();
+            row.kind = kind.into();
+            if let Some(id) = claims.id.as_deref().filter(|id| !id.is_empty())
+                && iat.saturating_mul(1000) >= row.synced_at_ms
+            {
+                row.id = id.into();
+            }
+            if claims.fid.is_some() && claims.fid != row.last_fid {
+                // A new sign-in: confirm custodian and profile with Accounts.
+                row.last_fid.clone_from(&claims.fid);
+                lookup = true;
+            }
+            if now() - row.looked_up_at > ACCOUNT_MAX_AGE {
+                lookup = true;
+            }
+            Some(row)
+        })?;
+        if let Some(error) = verdict {
+            return Err(error);
         }
-        if row.status == "deleted" {
-            verdict = Some(deleted());
-            return None;
+        if tie {
+            app.accounts
+                .ensure_active(&token, &claims.sub)
+                .await
+                .map_err(|error| {
+                    if error.1.code == "sign_in_revoked" {
+                        signed_out()
+                    } else {
+                        error
+                    }
+                })?;
+            confirmed = true;
+            continue;
         }
-        if iat < row.revoked_before {
-            verdict = Some(signed_out());
-            return None;
-        }
-        // A token issued after access was removed means the account signed in again.
-        row.status = "active".into();
-        row.kind = kind.into();
-        if let Some(id) = claims.id.as_deref().filter(|id| !id.is_empty())
-            && iat.saturating_mul(1000) >= row.synced_at_ms
-        {
-            row.id = id.into();
-        }
-        if claims.fid.is_some() && claims.fid != row.last_fid {
-            // A new sign-in: confirm custodian and profile with Accounts.
-            row.last_fid.clone_from(&claims.fid);
-            lookup = true;
-        }
-        if now() - row.looked_up_at > ACCOUNT_MAX_AGE {
-            lookup = true;
-        }
-        Some(row)
-    })?;
-    if let Some(error) = verdict {
-        return Err(error);
-    }
-    let mut account = row.ok_or_else(Error::internal)?;
+        break (row.ok_or_else(Error::internal)?, lookup);
+    };
     if lookup {
         match accounts::refresh(app, &account.uuid, false).await {
             // Lookups carry no name or photo; the caller shared them by signing in.
@@ -192,7 +217,8 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
 
 /// Revalidate work accepted earlier for `uuid` at `since` (Unix seconds): the
 /// account must still exist and must not have been signed out or lost access
-/// after the work was accepted.
+/// after the work was accepted. Times are whole seconds, so a revocation in the
+/// same second as the work counts as after it (signing in again and retrying works).
 pub fn for_account(app: &App, uuid: &str, since: i64) -> Result<Auth> {
     let account = app.store.account(uuid)?.ok_or_else(|| {
         Error::new(
@@ -202,7 +228,7 @@ pub fn for_account(app: &App, uuid: &str, since: i64) -> Result<Auth> {
             "Start the work again while signed in.",
         )
     })?;
-    if !account.active() || account.revoked_before > since {
+    if !account.active() || account.revoked_before > 0 && account.revoked_before >= since {
         return Err(Error::new(
             403,
             "access_changed",
@@ -460,6 +486,57 @@ mod tests {
         let (status, body) = f.call("GET", "/api/v1/me", Some(&fresh), None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"]["code"], "account_deleted");
+    }
+
+    #[tokio::test]
+    async fn a_token_from_the_second_of_a_revocation_is_settled_by_introspection() {
+        let f = fixture().await;
+        f.carbon("Ca1", "c:ada");
+        let second = now() - 30;
+        let before = f.token_with("Ca1", |c| c["iat"] = json!(second));
+        let after = f.token_with("Ca1", |c| c["iat"] = json!(second));
+        assert_eq!(
+            f.call("GET", "/api/v1/me", Some(&before), None).await.0,
+            StatusCode::OK
+        );
+        // An STK rotation half a second after `before` was issued, in the same second.
+        crate::accounts_webhook::revoke(&f.app, "Ca1", second * 1000 + 500, None).unwrap();
+        f.stub.inactive.lock().unwrap().insert(before.clone());
+        let introspections = f.stub.introspections.load(Ordering::SeqCst);
+        let (status, body) = f
+            .call("GET", "/api/v1/connections", Some(&before), None)
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(body["error"]["code"], "signed_out");
+        // A new sign-in in that same second is confirmed active and accepted.
+        let (status, body) = f
+            .call("GET", "/api/v1/connections", Some(&after), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            f.stub.introspections.load(Ordering::SeqCst),
+            introspections + 2
+        );
+        // Tokens from other seconds need no introspection.
+        let older = f.token_with("Ca1", |c| c["iat"] = json!(second - 1));
+        assert_eq!(
+            f.call("GET", "/api/v1/me", Some(&older), None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            f.as_("Ca1", "GET", "/api/v1/me", None).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            f.stub.introspections.load(Ordering::SeqCst),
+            introspections + 2
+        );
+        // Work accepted in the second of a revocation counts as accepted before it.
+        assert_eq!(
+            for_account(&f.app, "Ca1", second).err().unwrap().1.code,
+            "access_changed"
+        );
+        assert!(for_account(&f.app, "Ca1", second + 1).is_ok());
     }
 
     #[tokio::test]
