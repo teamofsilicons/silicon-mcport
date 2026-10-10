@@ -290,3 +290,122 @@ Gotchas:
 - Never run `mcport login` here with the default `ACCOUNTS_URL` against a backend that does not answer discovery: it
   would start a device sign-in at production Silicon Accounts. Always set `ACCOUNTS_URL=http://localhost:9590`.
 - zsh does not split `$args`; use `${=args}` when looping over command strings.
+
+## 2026-10-10 — Stage 3 (packaging, CI, deployment configuration, docs): done
+
+Everything around the code now says and does Silicon Accounts and Silicon Apps; a release is one tag away and each
+production step is a reviewed command in [cutover.md](cutover.md). Nothing was pushed, uploaded, released or deployed.
+Decisions P1–P21 are in [decisions.md](decisions.md); contract additions at the end of
+[understanding-proposal.md](understanding-proposal.md).
+
+What changed:
+- **Packages:** `honeycomb.yaml`, `scripts/package.py` (+ its tests) and `scripts/requirements.txt` deleted.
+  `packaging/apps.yaml.in` + `scripts/package-apps.sh` (bash entry point) → `scripts/package_apps.py` (stdlib only) build
+  `dist/apps/mcport-<version>-<target>.tar.gz` + `.sha256` per target: version = workspace version; the bytes must be
+  an executable for the target (static ELF on Linux, hard-float on ARMv7, thin Mach-O, PE console program); whenever the
+  machine can run it (or through `PACKAGE_APPS_EMULATOR`), `--version`, `--help`, `accounts --json` and
+  `login status --json` must answer as Silicon Apps' workers require in an empty home with nothing written; then
+  `silicon-apps validate` + `pack` (empty Apps home, no session), archive opened and re-checked from the extracted copy;
+  never overwrites. `--check-only [--record]`, `--checked-record`, `--require-discovery`, `--allow-dynamic` (dev only).
+- **CI:** `release.yml` (tag `v*` = CLI version, or by hand): 8 targets — static musl Linux via `cargo-zigbuild==0.23.4`
+  + `ziglang==0.15.2` (x86_64, i686, aarch64 native on ubuntu-24.04-arm, armv7hf checked through qemu-arm) and the
+  existing macOS/Windows runners; tests on each runner's host target; `--check-only` per binary; a packaging job with
+  `silicon-apps-cli` 0.2.0 that re-checks Linux archives (natively/qemu), packs macOS/Windows on their records, writes
+  `SHA256SUMS` and uploads `mcport-silicon-apps-release`. `checks.yml`: no PyYAML, `check.py --skip-e2e`; `check.py`
+  also runs the discovery commands against the debug CLI. `backend.yml`: no web job.
+- **Deploy:** the backend bundle is the service alone (`package_backend.py`, `install.py` refuses `web/dist`, tests
+  updated); `deploy/mcport.service` description; `deploy/vercel.md` rewritten for the Next.js website (kit variable
+  names, callback/origin at Silicon Accounts, CSP, download tickets, verification); `deploy/aws/README.md` names Silicon
+  Accounts; `deploy/README.md` says the website deploys separately.
+- **Docs:** `scripts/README.md` (packages, release workflow, publishing), `docs/development.md` (releases),
+  `README.md` (links), `docs/architecture.md` (replay index without testing environments), `tests/e2e/README.md`
+  (status: predates 0.3.0, left out of CI). Service wording: a test handle and two comments (P20).
+- **Migration records:** `cutover.md` rewritten end to end (order and dependencies, Silicon Accounts calls, mapping,
+  bundle, CLI packages and a development release before the day, website environment, runtime env, the cutover in
+  seven steps, Silicons still on the Honeycomb CLI, rollback for service/website/CLI, after); 11 commands marked
+  `# run at cutover`.
+
+Commits: `c85982b` packaging + CI · `fbc9633` service-only bundle · `a831b4f` website deployment · `686042a` docs ·
+`d94f1eb` service wording · `bc806c5` `--allow-dynamic` and bash in CI · (this record).
+
+Tests (all with `CARGO_TARGET_DIR=target/mig`):
+
+| Command | Result |
+|---|---|
+| `python3 scripts/check.py --skip-e2e --skip-web` (fmt, workspace tests, clippy `-D warnings`, script tests, discovery check), at `bc806c5` | pass, exit 0: 156 tests + 3 doctests (server 71, daemon 18, mcp 12, cli 11 + 15, client 11 + 8, api 10), 41 script tests, discovery `passed` on the debug CLI (`--check-only --allow-dynamic … host`) |
+| `python3 -m unittest discover -s scripts/tests -p 'test_*.py'` (after the last change) | 41 pass (package_apps 19, backend bundle 19, directory import 3); the 3 package-flow tests ran the real `silicon-apps` 0.2.0 |
+| `python3 -m unittest discover -s tests/e2e -p 'test_*.py'` | 4 pass (fixture self-tests; not part of `--skip-e2e` runs) |
+| `cd web && npm ci && npm test && npm run build` (the old web, as CI still runs it) | 38 tests pass, build ok (`node_modules`/`dist` removed afterwards) |
+| `actionlint` 1.7.12 with shellcheck 0.11.0 on `.github/workflows/*.yml`; `shellcheck scripts/package-apps.sh` | clean |
+| PyYAML `safe_load` of the three workflows | parse (jobs: version/native/package; check; server/assemble) |
+| `openapi-spec-validator` on `docs/openapi.yaml` | valid, OpenAPI 3.1.0, 36 paths (unchanged) |
+
+Local release builds (`target/mig-apps`, release profile; `.mig/logs/ship-build-release.log`): `aarch64-apple-darwin`
+(cargo, 1m57s cold), `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `i686-unknown-linux-musl`,
+`armv7-unknown-linux-musleabihf` (cargo zigbuild, ~2 min each; aws-lc-sys builds for all four) and
+`x86_64-apple-darwin` (cargo). `file` and the packager agree: four "statically linked" ELF executables (ARM e_flags
+`0x5000400`: EABI5, hard-float) and two thin Mach-O executables.
+
+Packaging proofs (real binaries, real `silicon-apps` 0.2.0, empty Apps home):
+1. `scripts/package-apps.sh 0.3.0 <target> <binary>` for all six → six archives, each holding exactly `apps.yaml`
+   (only its target) and `bin/mcport` (0755); `.sha256` files and a `SHA256SUMS` verify (`shasum -a 256 -c`). The
+   macOS arm64 run: discovery `passed here` and `archive_checked: true`; the others: "not run: this machine (Darwin arm64)
+   cannot run a <target> binary" (this Mac has no Rosetta, Docker or qemu-user), with the warning to check on a matching
+   machine — CI does that. Packing twice gave byte-identical archives (macOS arm64 `f6fe1f97d588…`, linux-x86_64
+   `6accd0a6e132…`).
+2. Each archive extracted into an empty directory → `silicon-apps validate` → `valid` with its single target.
+3. From the extracted macOS archive, in an empty `HOME`/`SILICON_HOME` with `env -i`: `--help` exit 0 (3153 bytes),
+   `accounts --json` exit 0 (`"app_id":"mcport"`, `"version":"0.3.0"`, `"install":"silicon-apps install mcport"`),
+   `login status --json` exit 0 `{"authenticated":false}`, 0 files written. The same three under Silicon Apps' macOS
+   worker policy (`sandbox-exec` with `runner/server.py`'s exact profile): exit 0, 0, 0; 0 scratch files.
+4. Refusals: version `0.3.1` ("does not match the workspace version 0.3.0"); a Mach-O named `linux-x86_64` ("not a Linux
+   (ELF) executable"); arm64 Mach-O named `macos-x86_64` ("CPU type 0x100000c, not x86_64"); `--require-discovery` on a
+   Linux binary here ("no --checked-record was given"); `--check-only` of the x86_64 Mach-O here ("cannot run a
+   macos-x86_64 binary"); a second packaging of the same target ("never overwritten").
+5. Production Silicon Apps, read anonymously with an empty home (P19): `silicon-apps show mcport` → 404 `not_found` (no
+   public listing yet); `GET /v1/capabilities` → live workers `linux-x86_64`, `linux-i686`, `linux-aarch64`,
+   `linux-armv7hf`; Windows and macOS `not_configured`.
+
+Sweep (`git grep -n -i -E 'iam|honeycomb|org_id|organi[sz]ation|\borg\b|tenant'`), every remaining hit intentional:
+- `web/` (61 hits, 9 files): the old Vite website, replaced wholesale by the web stages.
+- `tests/e2e/` (fixtures.py, run.py, serve.py, test_fixtures.py, directory_journey.py, README.md): the pre-0.3.0 journey
+  and its fake identity service; left for the end-to-end stage to move to Silicon Accounts fixtures (P12), flagged in
+  its README.
+- `docs/history/` (60 hits) and `docs/migration/`: historical records and this migration's notes.
+- `understanding/UNDERSTANDING.md`: Carbon-only; replacement text is in `understanding-proposal.md`.
+- `crates/mcport-server/src/identity.rs`, `identity_store.rs`, `store.rs`, `main.rs`: the `link-identities` mapping
+  (`iam_principal_id,accounts_uuid`, per the brief), the `identity_links` table, the legacy `org_id` column and
+  `tenant_records` index, the 410 answers for `/api/v1/iam` and `/webhooks/iam`; `state.rs`: the IAM-era variables it
+  ignores with a warning; `hosts.rs`, `mcport-core`, `mcport-daemon`, `mcport-client/src/local.rs`: the `org_id`
+  transition fields and registry v1 migration for daemons released before 0.3.0; `connections.rs`, `directory.rs`,
+  `operations.rs`: legacy-record comments and tests; `auth.rs`: tests of the removed routes; `oauth.rs`: `/tenant` is a
+  provider's multi-tenant issuer path in OAuth discovery tests (generic OAuth, not an account grouping).
+- `crates/mcport-cli`: the hidden `iam --json` alias (brief: one minor release), tests that help and guides never name
+  the removed concepts, legacy sign-in fixtures, the `--visibility org` refusal.
+- `crates/mcport-server/catalog/community.json`: third-party MCP descriptions ("content organization", "tenants").
+- `deploy/aws/production.json`, `deploy/aws/README.md` (`CAPABILITY_IAM`): AWS IAM, not the Silicon identity service;
+  `deploy/aws/deploy.md`: the old variables to remove at cutover.
+- `docs/API.md`, `docs/openapi.yaml`: the documented 410s and transition fields.
+
+Left for later stages:
+- **End-to-end stage:** move `tests/e2e` (fixtures.py's identity fake → a Silicon Accounts fake: JWKS, device flow,
+  public-client SLT exchange, refresh/revoke, lookups, signed webhooks; run.py's journey → the 0.3.0 CLI), then drop
+  `--skip-e2e` from `checks.yml`. Scenario 7 can use `scripts/package-apps.sh` (macOS arm64 runs the commands here).
+- **Web stages:** replace `web/` with the Next.js kit; add the web job to `checks.yml` (pnpm) in place of check.py's npm
+  steps; keep `deploy/vercel.md` accurate if a variable name changes; the website's Silicon short-lived-token form.
+- **CI on GitHub:** the release workflow has not run (nothing may be pushed); the first run proves the Linux discovery
+  checks (natively and under qemu) and the Windows path handling.
+- **Contract:** paste `understanding-proposal.md` into `UNDERSTANDING.md` (Carbon only).
+
+Blocked on: nothing. (Linux binaries cannot run on this Mac — no Docker, no qemu-user, no Rosetta — so their discovery
+checks run in CI.)
+
+Gotchas:
+- Bash calls start in the session's primary directory (another worktree with its own `rust-toolchain.toml`): always
+  `cd` into this worktree first, or `rustup`/`cargo` act on the wrong toolchain (P21).
+- This worktree uses the `stable` toolchain (1.98.0); release targets must be installed there.
+- zigbuild needs `CARGO_ZIGBUILD_ZIG_PATH=$HOME/.local/share/uv/tools/ziglang/lib/python3.14/site-packages/ziglang/zig`
+  and `$HOME/.local/bin` on `PATH` (cargo-zigbuild) on this Mac.
+- `silicon-apps` here is signed in to production: the packager strips its session variables and gives it an empty home;
+  never call it with the default home for anything but `--version`.
+- `dist/apps/` (gitignored) holds this stage's six local archives; `target/mig-apps` holds the release builds.

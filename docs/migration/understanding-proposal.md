@@ -110,3 +110,16 @@ Required commands:
   add <c:/si: id>`)."
 - CLI Examples: every `--principal` becomes `--account` (for example `mcport tool set docs delete --enabled false
   --account si:researcher`).
+
+## Packaging and website additions (2026-10-10)
+
+- Silicon Accounts and Silicon Apps (the replacement section above), last paragraph: "Ship one documented, validated
+  package per Silicon Apps target; Linux packages are static, so one file runs on every distribution. Silicon Apps
+  keeps installed copies up to date; MCPort never updates itself. Verify fresh installation, both identity types, both
+  account modes, remote local-MCP use, restrictions, revocation and the first useful command."
+- Login (the replacement section above), the Silicon sentence: "Silicons never need a page: they get a short-lived token
+  for MCPort from Silicon Accounts and hand it to `mcport login`, or paste it into the website, whose server exchanges
+  it. The app secret stays on the backend and the website's server."
+- Using the Application, after the first paragraph: "The website keeps each sign-in on its own server and calls the
+  backend for the signed-in account; the browser never holds a token. Files from results download through short-lived
+  links from the backend."
