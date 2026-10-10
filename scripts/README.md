@@ -8,10 +8,25 @@ python3 scripts/check.py
 
 `check.py` runs Rust formatting, the workspace tests, strict Clippy, the script tests
 (`scripts/tests`), the three Silicon Apps discovery commands against the CLI the tests just
-built, the web tests and build, and the real-binary end-to-end journey in `tests/e2e`.
-`--skip-web` and `--skip-e2e` narrow it; CI passes `--skip-e2e` until that journey signs in
-with Silicon Accounts fixtures. It installs nothing: use Python 3.11+ (standard library
-only), Node 24+ and the current stable Rust toolchain.
+built, the web tests and build, and the real-binary end-to-end journey in `tests/e2e`
+(against a fake Silicon Accounts; `MCPORT_E2E_BASE` picks its four ports). `--skip-web` and
+`--skip-e2e` narrow it; CI runs all of it. It installs nothing: use Python 3.11+ (standard
+library only), Node 24+ and the current stable Rust toolchain.
+
+## Running against a local Silicon Accounts stack
+
+```sh
+MCPORT_TEST_STACK=/path/to/test-stack.json scripts/dev-accounts.sh [--build]   # start (idempotent)
+scripts/e2e-accounts.sh                                                        # eight scenarios, real tokens
+scripts/dev-accounts-stop.sh                                                   # stop
+```
+
+`dev-accounts.sh` (`dev_accounts.py up`) starts the MCP fixtures on 127.0.0.1:4242 and the
+service on 127.0.0.1:4241 against a Silicon Accounts on this machine, registers mcport's
+webhook there with the app's credentials and proves a signed test delivery; `restart` and
+`status` are the other commands. `e2e-accounts.sh` needs a silicon-accounts checkout
+(`SILICON_ACCOUNTS_DIR`, for its testkit, and `SILICON_ACCOUNTS_CLI`); see
+[tests/e2e/README.md](../tests/e2e/README.md).
 
 ## Silicon Apps packages
 

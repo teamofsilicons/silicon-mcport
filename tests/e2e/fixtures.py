@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Loopback-only IAM 5.2.1 wire protocol and MCP fixtures; never part of the app.
+"""Loopback-only MCP providers (public, bearer, OAuth-protected, desktop-local, stdio) and their OAuth
+authorization server, for the end-to-end journey; never part of the app.
 
-The application still uses the official IAM SDK and production authorization code.
-All credentials in this file are conspicuously fake and valid only in this process.
+Silicon Accounts is faked separately (accounts_fake.py). All credentials in this file are conspicuously fake and
+valid only in this process.
 """
 import argparse
 import base64
 import hashlib
-import html
 import json
 import os
-import secrets
 import socket
 import sys
 import threading
@@ -19,47 +18,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
-TEST_ID = "11111111-1111-4111-8111-111111111111"
-TEST_KEY = "0123456789abcdefghijklmnopqrstuv"
-APP_ID = "mcport"
-APP_SECRET = "fixture-app-secret"
-TEST_SECRET = "fixture-test-app-secret"
-ACTORS = {
-    "owner": {"principal_id": "c:owner", "identity_kind": "carbon", "org_id": "tos"},
-    "silicon": {"principal_id": "si:researcher", "identity_kind": "silicon", "org_id": "tos"},
-    "stranger": {"principal_id": "c:stranger", "identity_kind": "carbon", "org_id": "tos"},
-    "crossorg": {"principal_id": "c:outsider", "identity_kind": "carbon", "org_id": "other"},
-}
-
 
 class Fixtures:
     def __init__(self, origin):
         self.origin = origin
         self.lock = threading.RLock()
-        self.slts = {}
-        self.tokens = {}
-        self.idempotency = {}
-        self.revoked = set()
         self.oauth_codes = {}
         self.oauth_tokens = {}
         self.oauth_exchanges = []
         self.calls = []
         self.requests = []
         self.clients = {}
-
-    def mint_slt(self, role, environment="production"):
-        if role not in ACTORS or environment not in ("production", TEST_ID):
-            raise ValueError("Unknown fixture role or environment")
-        slt = "oac_" + secrets.token_urlsafe(32)
-        self.slts[slt] = {"actor": ACTORS[role].copy(), "environment": environment, "expires": time.time() + 300}
-        return slt
-
-    def pair(self, grant):
-        access = "oat_fixture_" + uuid.uuid4().hex
-        refresh = "ort_fixture_" + uuid.uuid4().hex
-        self.tokens[access] = dict(grant, expires=time.time() + 3600, kind="access")
-        self.tokens[refresh] = dict(grant, expires=time.time() + 86400, kind="refresh")
-        return {"access_token": access, "refresh_token": refresh, "token_type": "Bearer", "expires_in": 3600, "scope": "self.identity.read", "org_id": grant["actor"]["org_id"]}
 
     def oauth_pair(self, grant, grant_type):
         access = "provider_fixture_" + uuid.uuid4().hex
@@ -139,8 +108,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Silicon-IAM-API-Version", "v1")
-        self.send_header("Vary", "Silicon-IAM-Supported-API-Versions")
         for key, item in (headers or {}).items():
             self.send_header(key, item)
         self.end_headers()
@@ -158,23 +125,6 @@ class Handler(BaseHTTPRequestHandler):
             return {key: values[0] for key, values in parse_qs(raw.decode()).items()}
         return json.loads(raw or b"{}")
 
-    def iam_environment(self):
-        if self.headers.get("Silicon-IAM-Supported-API-Versions") != "v1":
-            raise ValueError("Official IAM supported-version header is required")
-        try:
-            decoded = base64.b64decode(self.headers.get("Authorization", "").removeprefix("Basic ")).decode()
-        except (ValueError, UnicodeDecodeError):
-            raise ValueError("Application HTTP Basic authentication is required") from None
-        if decoded == APP_ID + ":" + APP_SECRET:
-            if self.headers.get("X-Testing-Environment-Key") or self.headers.get("X-Testing-Application"):
-                raise ValueError("Production app credential cannot authorize fixture testing")
-            return "production"
-        if decoded == APP_ID + ":" + TEST_SECRET:
-            expected_selector = "Basic " + base64.b64encode(decoded.encode()).decode()
-            if self.headers.get("X-Testing-Environment-Key") == TEST_KEY or self.headers.get("X-Testing-Application") == expected_selector:
-                return TEST_ID
-        raise ValueError("Invalid fixture application credential or testing selector")
-
     def do_DELETE(self):
         if urlparse(self.path).path.startswith("/mcp/"):
             self.send(204)
@@ -189,14 +139,6 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/fixture/stats":
             with self.fixture.lock:
                 return self.send(200, {"calls": self.fixture.calls, "requests": self.fixture.requests, "oauth_exchanges": self.fixture.oauth_exchanges})
-        if path == "/api/v1/application/testing-context":
-            try:
-                environment = self.iam_environment()
-                if environment != TEST_ID:
-                    raise ValueError("Not testing")
-            except ValueError as error:
-                return self.error(str(error), 401)
-            return self.send(200, {"environment_id": TEST_ID, "application": {"app_id": APP_ID, "base_url": "http://127.0.0.1:4380", "app_scope": {"iam": ["self.identity.read"], "external": []}, "webhook_scope": [], "testing_idle_days": 30}})
         if path in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp/oauth"):
             return self.send(200, {"resource": self.fixture.origin + "/mcp/oauth", "authorization_servers": [self.fixture.origin], "scopes_supported": ["mcp:tools"], "bearer_methods_supported": ["header"]})
         if path in ("/.well-known/oauth-authorization-server", "/.well-known/openid-configuration"):
@@ -216,23 +158,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.fixture.oauth_codes[code] = dict(query, expires=time.time() + 120)
             destination = redirect + ("&" if "?" in redirect else "?") + urlencode({"code": code, "state": query["state"]})
             return self.send(302, None, {"Location": destination})
-        if path == "/login":
-            kind = query.get("identity_kind", "carbon")
-            role = "silicon" if kind == "silicon" else "owner"
-            link = "/fixture/iam/approve?" + urlencode(dict(query, role=role))
-            document = "<!doctype html><title>Fixture IAM consent</title><h1>Local fixture IAM</h1><p>This is test consent using the official IAM wire protocol.</p><a href='" + html.escape(link, quote=True) + "'>Approve fixture login as " + html.escape(ACTORS[role]["principal_id"]) + "</a>"
-            return self.send(200, document, content_type="text/html")
-        if path == "/fixture/iam/approve":
-            redirect = query.get("redirect_uri", "")
-            if urlparse(redirect).hostname not in ("127.0.0.1", "localhost"):
-                return self.error("Fixture callback must use loopback")
-            with self.fixture.lock:
-                slt = self.fixture.mint_slt(query.get("role", "owner"))
-            parameters = {"slt": slt}
-            if query.get("state") and "state" not in parse_qs(urlparse(redirect).query):
-                parameters["state"] = query["state"]
-            destination = redirect + ("&" if "?" in redirect else "?") + urlencode(parameters)
-            return self.send(302, None, {"Location": destination})
         if path.startswith("/mcp/"):
             return self.send(405, None, {"Allow": "POST, DELETE"})
         self.error("Route not found", 404)
@@ -245,23 +170,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.error("Invalid request body")
         with self.fixture.lock:
             self.fixture.requests.append({"method": "POST", "path": path})
-        if path == "/fixture/slt":
-            try:
-                with self.fixture.lock:
-                    slt = self.fixture.mint_slt(body.get("role", "owner"), body.get("environment", "production"))
-                return self.send(200, {"slt": slt, "actor": ACTORS[body.get("role", "owner")]})
-            except ValueError as error:
-                return self.error(str(error))
-        if path == "/fixture/revoke":
-            pair = (body["principal_id"], body.get("environment", "production"))
-            with self.fixture.lock:
-                if body.get("revoked", True):
-                    self.fixture.revoked.add(pair)
-                else:
-                    self.fixture.revoked.discard(pair)
-            return self.send(200, {"updated": True})
-        if path.startswith("/api/v1/"):
-            return self.iam(path, body)
         if path == "/oauth/register":
             client = "client_fixture_" + uuid.uuid4().hex
             self.fixture.clients[client] = body
@@ -322,44 +230,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"jsonrpc": "2.0", "id": body["id"], "result": result})
         self.error("Route not found", 404)
 
-    def iam(self, path, body):
-        try:
-            environment = self.iam_environment()
-        except ValueError as error:
-            return self.error(str(error), 401, "unauthenticated")
-        if path == "/api/v1/app-auth/tokens":
-            key = self.headers.get("Idempotency-Key")
-            if not key or len(key) < 16 or body.get("app_id") != APP_ID:
-                return self.error("Valid idempotency key and app_id required")
-            cache_key = (environment, key, json.dumps(body, sort_keys=True))
-            with self.fixture.lock:
-                if cache_key in self.fixture.idempotency:
-                    return self.send(200, self.fixture.idempotency[cache_key])
-                if body.get("slt"):
-                    grant = self.fixture.slts.pop(body["slt"], None)
-                else:
-                    grant = self.fixture.tokens.pop(body.get("refresh_token"), None)
-                if not grant or grant["environment"] != environment or grant["expires"] < time.time():
-                    return self.error("Invalid, consumed or wrong-environment fixture credential", 401, "invalid_grant")
-                result = self.fixture.pair(grant)
-                self.fixture.idempotency[cache_key] = result
-                return self.send(200, result)
-        if path == "/api/v1/oauth/introspect":
-            with self.fixture.lock:
-                grant = self.fixture.tokens.get(body.get("token"))
-                if not grant or grant.get("kind") != "access" or grant["environment"] != environment or grant["expires"] < time.time():
-                    return self.send(200, {"active": False})
-                actor = grant["actor"]
-                if (actor["principal_id"], environment) in self.fixture.revoked or self.headers.get("X-Org-ID", actor["org_id"]) != actor["org_id"]:
-                    return self.send(200, {"active": False})
-            authorization = {"actor_type": actor["identity_kind"], "public_id": actor["principal_id"], "organization_id": "22222222-2222-4222-8222-222222222222", "org_id": actor["org_id"], "membership_id": actor["principal_id"] + "[" + actor["org_id"] + "]", "membership_version": 1, "authorization_epoch": 1, "audience": APP_ID, "testing_environment_id": None if environment == "production" else environment, "scopes": ["self.identity.read"], "org_role": "member", "tags": []}
-            return self.send(200, {"active": True, "public_id": actor["principal_id"], "actor_type": actor["identity_kind"], "client_id": APP_ID, "audience": APP_ID, "org_id": actor["org_id"], "membership_id": authorization["membership_id"], "expires_at": int(grant["expires"]), "authorization": authorization})
-        if path == "/api/v1/oauth/revoke":
-            with self.fixture.lock:
-                self.fixture.tokens.pop(body.get("token"), None)
-            return self.send(204)
-        self.error("Fixture IAM route not found", 404)
-
 
 def stdio():
     for line in sys.stdin:
@@ -376,15 +246,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=4390)
     parser.add_argument("--stdio", action="store_true")
-    parser.add_argument("--state", help="Write fixture-only endpoint and sample-SLT metadata")
+    parser.add_argument("--state", help="Write the fixture endpoints' URLs (JSON) here")
     args = parser.parse_args()
     if args.stdio:
         return stdio()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     origin = "http://127.0.0.1:" + str(server.server_address[1])
     server.fixture = Fixtures(origin)
-    samples = {role: server.fixture.mint_slt(role) for role in ACTORS}
-    metadata = {"origin": origin, "iam_url": origin, "public_mcp": origin + "/mcp/public", "bearer_mcp": origin + "/mcp/bearer", "oauth_mcp": origin + "/mcp/oauth", "local_mcp": origin + "/mcp/local", "test_id": TEST_ID, "test_key": TEST_KEY, "app_secret": APP_SECRET, "test_app_secret": TEST_SECRET, "sample_slts": samples}
+    metadata = {"origin": origin, "public_mcp": origin + "/mcp/public", "bearer_mcp": origin + "/mcp/bearer", "oauth_mcp": origin + "/mcp/oauth", "local_mcp": origin + "/mcp/local"}
     if args.state:
         from pathlib import Path
         path = Path(args.state)

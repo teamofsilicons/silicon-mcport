@@ -7,23 +7,32 @@ cargo fmt --all --check
 cargo test --locked --workspace
 cargo clippy --locked --workspace --all-targets -- -D warnings
 python3 -m unittest discover -s scripts/tests -p 'test_*.py'    # packaging, backend bundle and catalog scripts
-python3 scripts/check.py --skip-e2e                            # all of the above, the discovery commands and the web
+python3 tests/e2e/run.py                                       # the real binaries end to end (fake Silicon Accounts)
+python3 scripts/check.py                                       # all of the above, the discovery commands and the web
 ```
 
 The Rust tests need no database or network: the service uses temporary SQLite stores and in-process fixtures (a local
 Ed25519 JWKS for Silicon Accounts tokens, MCP providers, Postmark), the CLI tests run the real `mcport` binary against a
 stub Silicon Accounts and backend, and the client tests cover the device flow, short-lived token exchange, refresh
 rotation and the stored sign-in. `mcport-mcp` transport tests need Python 3 (`MCPORT_TEST_PYTHON=/abs/python3`).
+The end-to-end journey runs the real CLI, host daemon and service against a loopback fake Silicon Accounts and MCP
+fixtures; [tests/e2e/README.md](../tests/e2e/README.md) describes it and the scenarios against a real local stack.
 
-To run the whole thing, point the service at a Silicon Accounts deployment that has an `mcport` app (its secret, a
-webhook pointing at `<service>/webhooks/accounts`, `device_flow` and `public_client` on):
+To run the whole thing on this machine, start a local Silicon Accounts stack (the silicon-accounts testkit) that has
+an `mcport` app with `device_flow` and `public_client` on, then:
 
 ```sh
-ACCOUNTS_URL=http://localhost:9590 MCPORT_APP_SECRET=<app secret> \
-  MCPORT_ACCOUNTS_WEBHOOK_SECRET=<whsec_ secret> cargo run -p mcport-server     # serves 127.0.0.1:4380
-export MCPORT_URL=http://127.0.0.1:4380 ACCOUNTS_URL=http://localhost:9590
+MCPORT_TEST_STACK=/path/to/test-stack.json scripts/dev-accounts.sh --build   # service 127.0.0.1:4241, MCP fixtures 4242
+export MCPORT_URL=http://127.0.0.1:4241 ACCOUNTS_URL=http://localhost:9590
 cargo run -p mcport-cli -- login
+scripts/dev-accounts-stop.sh
 ```
+
+`dev-accounts.sh` is idempotent: it points mcport's webhook at the service with the app's credentials, keeps the
+signing secret in `.local/dev-accounts/webhook-secret` (0600, never committed) and proves a signed test delivery
+before it reports ready. `python3 scripts/dev_accounts.py --help` lists its settings (another stack file, port block,
+state directory, binary). It talks only to a Silicon Accounts on this machine. Against any other deployment, start
+`mcport-server` with the variables below.
 
 When the public Silicon Accounts URL (the token issuer) and the address the service should call differ, set
 `ACCOUNTS_API_URL` as well. The service no longer serves a website; the website is deployed on its own and calls the

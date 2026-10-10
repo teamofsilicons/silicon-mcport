@@ -49,6 +49,10 @@ deployment. Get MCPort access tokens the way real clients do:
    the Silicon's STK makes its older token answer `signed_out`; removing MCPort's
    access does the same for that account until it signs in again.
 
-The 2026-10-10 migration run of exactly this procedure, on a copy of a database
-written by MCPort 0.2.0 and re-keyed with `link-identities`, is recorded in
+On a machine that runs the Silicon Accounts testkit's local stack, `scripts/dev-accounts.sh`
+sets the backend and webhook up and `scripts/e2e-accounts.sh` proves all of this (and more:
+the device flow, provider accounts, host daemons, logout, refresh-token reuse, account
+deletion, restart safety) with real tokens; see [tests/e2e/README.md](../tests/e2e/README.md).
+The migration's runs of this procedure, including one on a copy of a database written by
+MCPort 0.2.0 and re-keyed with `link-identities`, are recorded in
 [docs/migration/progress.md](../docs/migration/progress.md).

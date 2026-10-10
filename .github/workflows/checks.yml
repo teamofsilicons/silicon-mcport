@@ -29,8 +29,16 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       # Formatting, workspace tests, strict Clippy, script and packaging tests, the three
-      # Silicon Apps discovery commands against the CLI the tests built, and the web.
-      # --skip-e2e: the real-binary journey in tests/e2e still drives the sign-in that
-      # 0.3.0 removed; it runs here again once it signs in with Silicon Accounts fixtures.
-      - name: Rust, scripts, discovery commands and web
-        run: python scripts/check.py --skip-e2e
+      # Silicon Apps discovery commands against the CLI the tests built, the web, and the
+      # real-binary end-to-end journey (tests/e2e) against a fake Silicon Accounts and MCP
+      # fixtures on loopback ports.
+      - name: Rust, scripts, discovery commands, web and end-to-end journey
+        run: python scripts/check.py --e2e-run-dir "$RUNNER_TEMP/mcport-e2e"
+      - name: Keep the end-to-end logs when it fails
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcport-e2e-logs
+          path: ${{ runner.temp }}/mcport-e2e
+          if-no-files-found: ignore
+          retention-days: 7
