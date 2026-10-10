@@ -84,17 +84,6 @@ pub struct Actor {
     pub org_id: String,
 }
 
-/// Session tokens issued by MCPort backends released before 0.3.0. 0.3.0 backends
-/// issue no sessions: callers send Silicon Accounts access tokens instead.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Session {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_at: i64,
-    pub actor: Actor,
-    pub environment: String,
-}
-
 /// A configured MCP and who may use it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Connection {
@@ -316,10 +305,14 @@ pub struct Invocation {
     pub error: Option<ApiError>,
 }
 
+/// MCPort's error body: `{"error":{"code","message","recovery","outcome_unknown"}}`.
+/// `recovery` says what to do next; bodies that name it `hint` (the Silicon Accounts
+/// style) are read the same way.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApiError {
     pub code: String,
     pub message: String,
+    #[serde(default, alias = "hint")]
     pub recovery: Option<String>,
     #[serde(default)]
     pub outcome_unknown: bool,

@@ -1,5 +1,7 @@
 //! Bounded protocol handshakes report MCP availability independently of host heartbeats.
 //! Probes never invoke tools, read resources, or reuse a different account's credentials.
+//! Health is keyed by connection and personal-account key (`""` for shared and
+//! unauthenticated connections), the same keys the registry uses.
 use super::*;
 
 type Key = (String, String);
@@ -28,12 +30,7 @@ impl Monitor {
                 vec![String::new()]
             };
             for principal in principals {
-                let actor = Actor {
-                    principal_id: principal.clone(),
-                    org_id: registry.host.org_id.clone(),
-                    ..Default::default()
-                };
-                if let Ok(endpoint) = endpoint_for(connection, &actor) {
+                if let Ok(endpoint) = endpoint_for(connection, &principal) {
                     desired.insert((id.clone(), principal), endpoint);
                 }
             }
@@ -89,7 +86,7 @@ impl Monitor {
             }
             // A stdio provider may allow only one live process. Inspect its
             // existing protocol session instead of starting a competing probe.
-            for ((session_connection, _, session_principal), session) in sessions {
+            for ((session_connection, session_principal), session) in sessions {
                 if session_connection != connection
                     || (!principal.is_empty() && session_principal != principal)
                 {

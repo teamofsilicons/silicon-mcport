@@ -1,9 +1,7 @@
-//! Persistent CLI context. The public Rust API client does not read or write this state.
-use fs2::FileExt;
+//! Persistent CLI context: the home, settings, sign-ins and host registries under
+//! `{home}/.mcport/dir`. The public Rust API client does not read or write this state.
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -32,6 +30,9 @@ pub struct Settings {
     #[serde(default = "default_telemetry")]
     pub telemetry: bool,
     pub backend_url: Option<String>,
+    /// Silicon Accounts for this home (development and test deployments).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts_url: Option<String>,
 }
 
 fn default_telemetry() -> bool {
@@ -42,6 +43,7 @@ impl Default for Settings {
         Self {
             telemetry: true,
             backend_url: None,
+            accounts_url: None,
         }
     }
 }
@@ -51,44 +53,10 @@ struct HomeOverride {
     home: PathBuf,
 }
 
-/// Credentials are retained only in a protected state file. Never serialize this in CLI output.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct StoredSession {
-    pub principal_id: String,
-    pub org_id: String,
-    pub access_token: String,
-    #[serde(default)]
-    pub refresh_token: Option<String>,
-    #[serde(default)]
-    pub expires_at: Option<i64>,
-    #[serde(default)]
-    pub identity: Value,
-}
-
-impl StoredSession {
-    pub fn key(&self) -> String {
-        format!("{}\n{}", self.principal_id, self.org_id)
-    }
-    pub fn public(&self) -> Value {
-        json!({"principal_id":self.principal_id,"org_id":self.org_id,"expires_at":self.expires_at,"identity":self.identity})
-    }
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct ContextSessions {
-    active: Option<String>,
-    sessions: BTreeMap<String, StoredSession>,
-}
-
-pub struct SessionGuard {
-    _lock: File,
-    path: PathBuf,
-    data: ContextSessions,
-}
-
 impl Store {
     pub fn discover() -> Result<Self, StoreError> {
         let original_home = std::env::var_os("SILICON_HOME")
+            .filter(|home| !home.is_empty())
             .map(PathBuf::from)
             .or_else(dirs::home_dir)
             .ok_or_else(|| {
@@ -100,6 +68,8 @@ impl Store {
         Self::at(original_home)
     }
 
+    /// Open the store under an existing home. Only reads (the optional home pointer);
+    /// directories are created when something is written.
     pub fn at(original_home: PathBuf) -> Result<Self, StoreError> {
         require_directory(&original_home)?;
         reject_symlink(&original_home.join(".mcport"))?;
@@ -139,94 +109,34 @@ impl Store {
         write_protected(&self.directory.join("settings.json"), settings)
     }
 
-    /// Exclusive lock is intentionally held across token refresh and rotation persistence.
-    /// Each backend/test context has its own lock; another context remains independent.
-    pub fn sessions(
-        &self,
-        backend: &str,
-        test_id: Option<&str>,
-    ) -> Result<SessionGuard, StoreError> {
-        let scope = context_key(backend, test_id);
-        let parent = self.directory.join("sessions");
-        secure_directory(&parent)?;
-        let lock = protected_open(&parent.join(format!("{scope}.lock")), false)?;
-        lock.lock_exclusive()?;
-        let path = parent.join(format!("{scope}.json"));
-        let data = read_optional(&path)?.unwrap_or_default();
-        Ok(SessionGuard {
-            _lock: lock,
-            path,
-            data,
-        })
+    /// The sign-in for one backend: `accounts/<key>.json` (+ `.lock`). One account per
+    /// home and backend; several identities on one machine use separate homes.
+    pub fn sign_in_path(&self, backend: &str) -> PathBuf {
+        self.directory
+            .join("accounts")
+            .join(format!("{}.json", context_key(backend)))
+    }
+    /// Create the sign-in directory (and `.mcport/dir`) owner-only before a sign-in
+    /// is written. Reading a sign-in never creates anything.
+    pub fn prepare_sign_in(&self, backend: &str) -> Result<PathBuf, StoreError> {
+        let path = self.sign_in_path(backend);
+        if let Some(parent) = path.parent() {
+            secure_directory(parent)?;
+        }
+        Ok(path)
+    }
+    /// Where mcport 0.2 and earlier kept sign-ins for this backend (no longer used).
+    pub fn legacy_sessions_path(&self, backend: &str) -> PathBuf {
+        self.directory
+            .join("sessions")
+            .join(format!("{}.json", context_key(backend)))
     }
 
-    pub fn context_path(&self, backend: &str, test_id: Option<&str>, suffix: &str) -> PathBuf {
+    pub fn context_path(&self, backend: &str, suffix: &str) -> PathBuf {
         self.directory
             .join("contexts")
-            .join(context_key(backend, test_id))
+            .join(context_key(backend))
             .join(suffix)
-    }
-}
-
-impl SessionGuard {
-    pub fn active(&self) -> Option<&StoredSession> {
-        self.data
-            .active
-            .as_ref()
-            .and_then(|key| self.data.sessions.get(key))
-    }
-    pub fn list(&self) -> Value {
-        let sessions: Vec<Value> = self
-            .data
-            .sessions
-            .iter()
-            .map(|(key, session)| {
-                let mut value = session.public();
-                value["selected"] = json!(self.data.active.as_ref() == Some(key));
-                value
-            })
-            .collect();
-        json!({"sessions":sessions})
-    }
-    pub fn save(&mut self, session: StoredSession) -> Result<(), StoreError> {
-        let key = session.key();
-        self.data.sessions.insert(key.clone(), session);
-        self.data.active = Some(key);
-        self.persist()
-    }
-    pub fn remove_active(&mut self) -> Result<(), StoreError> {
-        if let Some(key) = self.data.active.take() {
-            self.data.sessions.remove(&key);
-        }
-        // Do not implicitly switch identity when logging out.
-        self.persist()
-    }
-    pub fn select(&mut self, principal: &str, org: Option<&str>) -> Result<Value, StoreError> {
-        let matching: Vec<String> = self
-            .data
-            .sessions
-            .iter()
-            .filter(|(_, session)| {
-                session.principal_id == principal && org.is_none_or(|o| o == session.org_id)
-            })
-            .map(|(key, _)| key.clone())
-            .collect();
-        if matching.is_empty() {
-            return Err(StoreError::Invalid(format!(
-                "No stored session for {principal}. Run mcport login <slt> in this backend/test context first."
-            )));
-        }
-        if matching.len() > 1 {
-            return Err(StoreError::Invalid(format!(
-                "{principal} has multiple organization sessions. Pass --org <org-id>; use mcport session ls to inspect them."
-            )));
-        }
-        self.data.active = Some(matching[0].clone());
-        self.persist()?;
-        Ok(self.active().expect("selected existing session").public())
-    }
-    fn persist(&self) -> Result<(), StoreError> {
-        write_protected(&self.path, &self.data)
     }
 }
 
@@ -240,8 +150,10 @@ fn require_directory(path: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-pub fn context_key(backend: &str, test_id: Option<&str>) -> String {
-    let material = serde_json::to_vec(&(backend.trim_end_matches('/'), test_id))
+/// The directory key of one backend. It hashes `[backend, null]` exactly as mcport
+/// 0.2 did for production contexts, so existing host registries keep their paths.
+pub fn context_key(backend: &str) -> String {
+    let material = serde_json::to_vec(&(backend.trim_end_matches('/'), None::<&str>))
         .expect("serializable strings");
     format!("{:x}", Sha256::digest(material))
 }
@@ -314,6 +226,13 @@ fn protected_open(path: &Path, exclusive: bool) -> Result<File, StoreError> {
 }
 
 pub fn write_protected<T: Serialize>(path: &Path, value: &T) -> Result<(), StoreError> {
+    let mut body = serde_json::to_vec_pretty(value)?;
+    body.push(b'\n');
+    write_bytes_protected(path, &body)
+}
+
+/// Write `body` to `path` atomically, owner-only, never through a symbolic link.
+pub fn write_bytes_protected(path: &Path, body: &[u8]) -> Result<(), StoreError> {
     let parent = path
         .parent()
         .ok_or_else(|| StoreError::Invalid("State path has no parent".into()))?;
@@ -322,8 +241,7 @@ pub fn write_protected<T: Serialize>(path: &Path, value: &T) -> Result<(), Store
     let tmp = parent.join(format!(".write-{}", uuid::Uuid::new_v4()));
     let outcome = (|| {
         let mut file = protected_open(&tmp, true)?;
-        file.write_all(&serde_json::to_vec_pretty(value)?)?;
-        file.write_all(b"\n")?;
+        file.write_all(body)?;
         file.sync_all()?;
         fs::rename(&tmp, path)?;
         #[cfg(unix)]
@@ -341,66 +259,53 @@ pub fn write_protected<T: Serialize>(path: &Path, value: &T) -> Result<(), Store
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn session(principal: &str, org: &str, token: &str) -> StoredSession {
-        StoredSession {
-            principal_id: principal.into(),
-            org_id: org.into(),
-            access_token: token.into(),
-            refresh_token: None,
-            expires_at: None,
-            identity: json!({}),
-        }
-    }
+    use serde_json::{Value, json};
     #[test]
     fn home_switch_does_not_copy_credentials() {
         let original = tempfile::tempdir().unwrap();
         let other = tempfile::tempdir().unwrap();
         let store = Store::at(original.path().into()).unwrap();
-        store
-            .sessions("http://localhost:4380", None)
-            .unwrap()
-            .save(session("si:one", "tos", "secret"))
-            .unwrap();
+        let path = store.prepare_sign_in("http://127.0.0.1:4241").unwrap();
+        write_protected(&path, &json!({"secret":"token"})).unwrap();
         store.change_home(other.path()).unwrap();
         let switched = Store::at(original.path().into()).unwrap();
         assert_eq!(switched.home, fs::canonicalize(other.path()).unwrap());
-        assert!(
-            switched
-                .sessions("http://localhost:4380", None)
-                .unwrap()
-                .active()
-                .is_none()
-        );
+        assert!(!switched.sign_in_path("http://127.0.0.1:4241").exists());
         assert!(store.change_home(&other.path().join("missing")).is_err());
     }
     #[test]
-    fn sessions_are_backend_test_and_identity_scoped() {
+    fn sign_ins_are_per_backend_and_registry_paths_do_not_move() {
         let home = tempfile::tempdir().unwrap();
         let store = Store::at(home.path().into()).unwrap();
-        {
-            let mut slots = store.sessions("https://one.test", None).unwrap();
-            slots.save(session("c:one", "tos", "a")).unwrap();
-            slots.save(session("si:two", "tos", "b")).unwrap();
-            slots.select("c:one", Some("tos")).unwrap();
-            assert_eq!(slots.active().unwrap().access_token, "a");
-            assert!(!slots.list().to_string().contains("access_token"));
-            slots.remove_active().unwrap();
-            assert!(slots.active().is_none());
-        }
-        assert!(
-            store
-                .sessions("https://two.test", None)
-                .unwrap()
-                .active()
-                .is_none()
+        assert_ne!(
+            store.sign_in_path("https://one.test"),
+            store.sign_in_path("https://two.test")
+        );
+        assert_eq!(
+            store.sign_in_path("https://one.test/"),
+            store.sign_in_path("https://one.test")
+        );
+        // mcport 0.2 hashed [backend, test_id]; production contexts used null.
+        assert_eq!(
+            context_key("https://backend.mcport.teamofsilicons.com"),
+            format!(
+                "{:x}",
+                Sha256::digest(br#"["https://backend.mcport.teamofsilicons.com",null]"#)
+            )
         );
         assert!(
             store
-                .sessions("https://one.test", Some("test-1"))
-                .unwrap()
-                .active()
-                .is_none()
+                .legacy_sessions_path("https://one.test")
+                .ends_with(format!("sessions/{}.json", context_key("https://one.test")))
         );
+    }
+    #[test]
+    fn opening_a_store_writes_nothing() {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store::at(home.path().into()).unwrap();
+        assert_eq!(store.settings().unwrap().backend_url, None);
+        assert!(!home.path().join(".mcport").exists());
+        assert!(Store::at(home.path().join("missing")).is_err());
     }
     #[cfg(unix)]
     #[test]

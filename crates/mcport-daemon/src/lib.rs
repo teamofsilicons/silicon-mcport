@@ -32,17 +32,51 @@ pub enum DaemonError {
     AlreadyRunning,
 }
 
+/// The registry format this release writes. Version 2 keys the owner and personal
+/// provider accounts by Silicon Accounts uuid. Version 1 (written before 0.3.0) keyed
+/// them by the old ids; it still loads and runs until `mcport host migrate` rewrites it.
+pub const REGISTRY_VERSION: u32 = 2;
+
+/// The host a registry serves.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostConfig {
     pub backend_url: String,
     pub host_id: String,
     pub host_token: String,
+    /// Version 2: the owner's Silicon Accounts uuid.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner_uuid: String,
+    /// Version 1 only: the pre-0.3.0 environment, grouping value and owner id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub environment: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub org_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub owner_id: String,
     #[serde(default)]
     pub isi: Option<String>,
+}
+impl HostConfig {
+    /// A version 2 host registered by `owner_uuid`.
+    pub fn new(
+        backend_url: impl Into<String>,
+        host_id: impl Into<String>,
+        host_token: impl Into<String>,
+        owner_uuid: impl Into<String>,
+        isi: Option<String>,
+    ) -> Self {
+        Self {
+            backend_url: backend_url.into(),
+            host_id: host_id.into(),
+            host_token: host_token.into(),
+            owner_uuid: owner_uuid.into(),
+            environment: String::new(),
+            org_id: String::new(),
+            owner_id: String::new(),
+            isi,
+        }
+    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -69,6 +103,8 @@ pub struct RegisteredConnection {
     #[serde(default)]
     pub shared_account_disconnected: bool,
     #[serde(default)]
+    /// Each caller's own provider account, keyed by its Silicon Accounts uuid
+    /// (version 2) or its pre-0.3.0 id (version 1).
     pub personal_accounts: BTreeMap<String, LocalAccount>,
 }
 
@@ -83,9 +119,23 @@ pub struct Registry {
 impl Registry {
     pub fn new(host: HostConfig) -> Self {
         Self {
-            version: 1,
+            version: REGISTRY_VERSION,
             host,
             connections: BTreeMap::new(),
+        }
+    }
+    /// Written before 0.3.0: personal accounts are keyed by the callers' old ids.
+    pub fn is_legacy(&self) -> bool {
+        self.version < REGISTRY_VERSION
+    }
+    /// The key of the caller's personal provider account in this registry: its uuid,
+    /// or (version 1) the old id the service sends for registries not yet migrated.
+    /// Empty when the job does not name one; never falls back to a public id.
+    pub fn account_key<'a>(&self, actor: &'a Actor) -> &'a str {
+        if self.is_legacy() {
+            &actor.principal_id
+        } else {
+            &actor.uuid
         }
     }
     pub fn load(path: impl AsRef<Path>) -> Result<Self, DaemonError> {
@@ -133,8 +183,12 @@ impl Registry {
         Ok(())
     }
     fn validate(&self) -> Result<(), DaemonError> {
-        if self.version != 1 {
-            return Err(DaemonError::Config("unsupported registry version".into()));
+        if !matches!(self.version, 1 | REGISTRY_VERSION) {
+            return Err(DaemonError::Config(format!(
+                "registry version {} is not supported by this mcport ({}); install the current mcport",
+                self.version,
+                env!("CARGO_PKG_VERSION")
+            )));
         }
         let url = url::Url::parse(&self.host.backend_url)
             .map_err(|_| DaemonError::Config("backend URL is invalid".into()))?;
@@ -153,18 +207,31 @@ impl Registry {
                 "backend URL cannot contain credentials, query or fragment".into(),
             ));
         }
-        for value in [
-            &self.host.host_id,
-            &self.host.org_id,
-            &self.host.owner_id,
-            &self.host.host_token,
-            &self.host.environment,
-        ] {
-            if value.is_empty() {
-                return Err(DaemonError::Config(
-                    "host identity, environment and token are required".into(),
-                ));
-            }
+        let host = &self.host;
+        let (required, absent): (Vec<&String>, Vec<&String>) = if self.is_legacy() {
+            (
+                vec![&host.org_id, &host.owner_id, &host.environment],
+                vec![&host.owner_uuid],
+            )
+        } else {
+            (
+                vec![&host.owner_uuid],
+                vec![&host.org_id, &host.owner_id, &host.environment],
+            )
+        };
+        if host.host_id.is_empty()
+            || host.host_token.is_empty()
+            || required.iter().any(|value| value.is_empty())
+        {
+            return Err(DaemonError::Config(
+                "host id, owner and token are required".into(),
+            ));
+        }
+        if absent.iter().any(|value| !value.is_empty()) {
+            return Err(DaemonError::Config(format!(
+                "a version {} registry mixes owner fields of different registry versions",
+                self.version
+            )));
         }
         for connection in self.connections.values() {
             if !matches!(
@@ -266,9 +333,11 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
+/// The endpoint to run for a caller whose personal-account key in this registry is
+/// `account` (see [`Registry::account_key`]; empty when the job names none).
 fn endpoint_for(
     connection: &RegisteredConnection,
-    actor: &Actor,
+    account: &str,
 ) -> Result<Endpoint, HostJobResult> {
     if connection.auth_mode == "shared" && connection.shared_account_disconnected {
         return Err(error(
@@ -280,7 +349,7 @@ fn endpoint_for(
     let account=match connection.auth_mode.as_str() {
         "none"=>None,
         "shared"=>connection.shared_account.as_ref(), // Desktop MCP may use its existing local app account.
-        "per-user"=>Some(connection.personal_accounts.get(&actor.principal_id).ok_or_else(||error("provider_authentication_required","This caller has no account configured on the execution host. Personal authentication never falls back to a shared account.",false))?),
+        "per-user"=>Some(connection.personal_accounts.get(account).filter(|_| !account.is_empty()).ok_or_else(||error("provider_authentication_required","This caller has no account configured on the execution host. Personal authentication never falls back to a shared account.",false))?),
         _=>return Err(error("invalid_configuration","The local connection has an invalid account mode.",false)),
     };
     let mut endpoint = connection.endpoint.clone();
@@ -331,7 +400,7 @@ fn endpoint_for(
 
 fn reload_registry(path: &Path, previous: &Registry) -> Result<Registry, DaemonError> {
     let fresh = Registry::load(path)?;
-    if fresh.host != previous.host {
+    if fresh.host != previous.host || fresh.version != previous.version {
         return Err(DaemonError::Config(
             "host identity changed; restart the connector".into(),
         ));
@@ -353,7 +422,8 @@ struct ActiveJob {
 fn fingerprint(endpoint: &Endpoint) -> [u8; 32] {
     Sha256::digest(serde_json::to_vec(endpoint).expect("endpoint serialization")).into()
 }
-type SessionPool = HashMap<(String, String, String), Arc<tokio::sync::Mutex<SessionEntry>>>;
+/// Provider sessions per (connection, caller's account key).
+type SessionPool = HashMap<(String, String), Arc<tokio::sync::Mutex<SessionEntry>>>;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct JournalEntry {
@@ -382,6 +452,8 @@ impl Backend {
         capabilities.insert("active_jobs".into(), json!(active.len()));
         capabilities.insert("active_job_ids".into(), json!(active));
         capabilities.insert("max_concurrent_jobs".into(), json!(4));
+        // Version 2: personal accounts and health below are keyed by account uuid.
+        capabilities.insert("registry_version".into(), json!(registry.version));
         for (id, connection) in &registry.connections {
             capabilities.insert(id.clone(),json!({"account_owners":connection.personal_accounts.keys().collect::<Vec<_>>(),"shared_account":connection.shared_account.is_some(),"shared_account_disconnected":connection.shared_account_disconnected,"health":health.get(id)}));
         }
@@ -426,7 +498,7 @@ pub async fn run(
     let _cancel_on_exit = shutdown.clone().drop_guard();
     let registry_path = registry_path.as_ref().to_path_buf();
     let mut registry = Registry::load(&registry_path)?;
-    tracing::info!(source="daemon",operation="host.connect",host_id=%registry.host.host_id,environment=%registry.host.environment,outcome="starting");
+    tracing::info!(source="daemon",operation="host.connect",host_id=%registry.host.host_id,registry_version=registry.version,outcome="starting");
     let parent = registry_path
         .parent()
         .ok_or_else(|| DaemonError::Config("registry path has no parent".into()))?;
@@ -475,7 +547,6 @@ pub async fn run(
         context: HostContext {
             host_id: registry.host.host_id.clone(),
             host_token: registry.host.host_token.clone(),
-            environment: registry.host.environment.clone(),
             isi: registry.host.isi.clone(),
         },
     };
@@ -494,24 +565,17 @@ pub async fn run(
             health.sync(&registry);
             health.tick(&sessions);
             cancel_changed_jobs(&registry, &active, &journal);
-            sessions.retain(
-                |(connection, org, principal), entry| match entry.try_lock() {
-                    Ok(entry) => {
-                        let actor = Actor {
-                            principal_id: principal.clone(),
-                            org_id: org.clone(),
-                            ..Default::default()
-                        };
-                        registry
-                            .connections
-                            .get(connection)
-                            .and_then(|connection| endpoint_for(connection, &actor).ok())
-                            .is_some_and(|endpoint| fingerprint(&endpoint) == entry.fingerprint)
-                            && entry.last_used.elapsed() < Duration::from_secs(300)
-                    }
-                    Err(_) => true,
-                },
-            );
+            sessions.retain(|(connection, account), entry| match entry.try_lock() {
+                Ok(entry) => {
+                    registry
+                        .connections
+                        .get(connection)
+                        .and_then(|connection| endpoint_for(connection, account).ok())
+                        .is_some_and(|endpoint| fingerprint(&endpoint) == entry.fingerprint)
+                        && entry.last_used.elapsed() < Duration::from_secs(300)
+                }
+                Err(_) => true,
+            });
             let backend = backend.clone();
             let snapshot = registry.clone();
             let active_ids = active.keys().cloned().collect();
@@ -563,15 +627,15 @@ pub async fn run(
                             private_json(&journal_path,&journal)?;
                             let reject=if cancelled.contains(&id){Some(error("cancelled","This job was cancelled before dispatch.",false))}
                                 else if job.expires_at<=now(){Some(error("expired","The job expired before reaching its host.",false))}
-                                else if job.actor.org_id!=registry.host.org_id{Some(error("wrong_organization","The job organization does not match its registered host.",false))}
                                 else if active.len()>=4{Some(error("host_busy","This host is executing its maximum number of concurrent jobs. Try again after current work finishes.",false))}
                                 else {None};
                             if let Some(result)=reject {journal.jobs.get_mut(&id).unwrap().result=Some(result);continue;}
-                            let endpoint=registry.connections.get(&job.connection_id).ok_or_else(||error("unregistered_connection","This connection is not registered on this host. Register it locally before calling it.",false)).and_then(|connection|endpoint_for(connection,&job.actor));
+                            let account=registry.account_key(&job.actor).to_owned();
+                            let endpoint=registry.connections.get(&job.connection_id).ok_or_else(||error("unregistered_connection","This connection is not registered on this host. Register it locally before calling it.",false)).and_then(|connection|endpoint_for(connection,&account));
                             match endpoint {
                                 Err(result)=>journal.jobs.get_mut(&id).unwrap().result=Some(result),
                                 Ok(endpoint)=>{
-                                    let key=(job.connection_id.clone(),job.actor.org_id.clone(),job.actor.principal_id.clone());
+                                    let key=(job.connection_id.clone(),account);
                                     if sessions.len()>=32 && !sessions.contains_key(&key) {journal.jobs.get_mut(&id).unwrap().result=Some(error("host_capacity","This host has reached its active connection capacity. Wait for idle sessions to close.",false));continue;}
                                     let hash=fingerprint(&endpoint);
                                     let session=sessions.entry(key).or_insert_with(||Arc::new(tokio::sync::Mutex::new(SessionEntry{fingerprint:hash,session:None,last_used:Instant::now()}))).clone();
@@ -618,7 +682,7 @@ fn cancel_changed_jobs(
         let changed = registry
             .connections
             .get(&job.connection_id)
-            .and_then(|connection| endpoint_for(connection, &job.actor).ok())
+            .and_then(|connection| endpoint_for(connection, registry.account_key(&job.actor)).ok())
             .is_none_or(|endpoint| fingerprint(&endpoint) != job.fingerprint);
         if changed
             || journal
@@ -775,14 +839,17 @@ async fn execute_in_session(
 mod tests {
     use super::*;
     pub(super) fn host() -> HostConfig {
-        HostConfig {
-            backend_url: "http://127.0.0.1:4380".into(),
-            host_id: "host".into(),
-            host_token: "secret".into(),
-            environment: "production".into(),
-            org_id: "org".into(),
-            owner_id: "owner".into(),
-            isi: None,
+        HostConfig::new("http://127.0.0.1:4380", "host", "secret", "Own", None)
+    }
+    /// A registry as mcport 0.2 wrote it (version 1, keyed by old ids).
+    pub(super) fn legacy_json() -> Value {
+        json!({"version":1,"host":{"backend_url":"http://127.0.0.1:4380","host_id":"host","host_token":"secret","environment":"production","org_id":"tos","owner_id":"c:owner","isi":null},"connections":{"conn":{"endpoint":{"transport":"http","url":"http://127.0.0.1:1/mcp","headers":{},"bearer_token":null},"auth_mode":"per-user","shared_account":null,"shared_account_disconnected":false,"personal_accounts":{"c:owner":{"label":"Owner","bearer_token":"owner-secret","headers":{},"env":{}}}}}})
+    }
+    fn actor(uuid: &str, principal: &str) -> Actor {
+        Actor {
+            uuid: uuid.into(),
+            principal_id: principal.into(),
+            ..Default::default()
         }
     }
     #[test]
@@ -798,12 +865,13 @@ mod tests {
             )
             .unwrap();
         registry.save(&path).unwrap();
-        assert!(
-            Registry::load(&path)
-                .unwrap()
-                .connections
-                .contains_key("connection")
-        );
+        let loaded = Registry::load(&path).unwrap();
+        assert!(loaded.connections.contains_key("connection"));
+        assert_eq!(loaded.version, 2);
+        // Version 2 files carry no pre-0.3.0 owner fields.
+        let raw: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(raw["host"]["owner_uuid"], "Own");
+        assert!(raw["host"].get("org_id").is_none() && raw["host"].get("environment").is_none());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -812,6 +880,44 @@ mod tests {
                 0o600
             );
         }
+    }
+    #[test]
+    fn legacy_registries_load_and_key_accounts_by_old_id_until_migrated() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.json");
+        private_json(&path, &legacy_json()).unwrap();
+        let legacy = Registry::load(&path).unwrap();
+        assert!(legacy.is_legacy());
+        // The service sends the old id as principal_id for registries not yet migrated.
+        let caller = actor("Ow1", "c:owner");
+        assert_eq!(legacy.account_key(&caller), "c:owner");
+        let connection = &legacy.connections["conn"];
+        let Endpoint::Http { bearer_token, .. } =
+            endpoint_for(connection, legacy.account_key(&caller)).unwrap()
+        else {
+            panic!("HTTP endpoint")
+        };
+        assert_eq!(bearer_token.as_deref(), Some("owner-secret"));
+        // A version 2 registry uses the uuid, never the id.
+        let mut migrated = legacy.clone();
+        migrated.version = 2;
+        migrated.host = HostConfig::new("http://127.0.0.1:4380", "host", "secret", "Ow1", None);
+        assert_eq!(migrated.account_key(&caller), "Ow1");
+        assert!(endpoint_for(connection, migrated.account_key(&caller)).is_err());
+        assert_eq!(migrated.account_key(&actor("", "c:owner")), "");
+        // Saving re-validates: version 2 must not keep the old owner fields.
+        let mut mixed = migrated.clone();
+        mixed.host.org_id = "tos".into();
+        assert!(
+            mixed
+                .save(directory.path().join("mixed/registry.json"))
+                .is_err()
+        );
+        let mut unknown = legacy_json();
+        unknown["version"] = json!(3);
+        private_json(&path, &unknown).unwrap();
+        let error = Registry::load(&path).err().unwrap().to_string();
+        assert!(error.contains("version 3"), "{error}");
     }
     #[test]
     fn personal_account_never_falls_back() {
@@ -825,30 +931,17 @@ mod tests {
             shared_account_disconnected: false,
             personal_accounts: BTreeMap::new(),
         };
-        let actor = Actor {
-            principal_id: "caller".into(),
-            identity_kind: "silicon".into(),
-            org_id: "org".into(),
-            display_name: "caller".into(),
-            ..Default::default()
-        };
-        assert!(endpoint_for(&connection, &actor).is_err());
+        assert!(endpoint_for(&connection, "caller").is_err());
+        assert!(endpoint_for(&connection, "").is_err());
         let mut shared = connection.clone();
         shared.auth_mode = "shared".into();
         shared.shared_account = None;
-        assert!(endpoint_for(&shared, &actor).is_ok()); // Initial desktop app session is intentional.
+        assert!(endpoint_for(&shared, "caller").is_ok()); // Initial desktop app session is intentional.
         shared.shared_account_disconnected = true;
-        assert!(endpoint_for(&shared, &actor).is_err()); // Explicit disconnect cannot use it again.
+        assert!(endpoint_for(&shared, "caller").is_err()); // Explicit disconnect cannot use it again.
     }
     #[test]
     fn personal_credentials_replace_shared_material_and_match_transport() {
-        let actor = Actor {
-            principal_id: "caller".into(),
-            org_id: "org".into(),
-            identity_kind: "silicon".into(),
-            display_name: "caller".into(),
-            ..Default::default()
-        };
         let mut registry = Registry::new(host());
         registry
             .register(
@@ -865,7 +958,7 @@ mod tests {
         connection
             .personal_accounts
             .insert("caller".into(), LocalAccount::default());
-        assert!(endpoint_for(connection, &actor).is_err());
+        assert!(endpoint_for(connection, "caller").is_err());
         connection
             .personal_accounts
             .get_mut("caller")
@@ -875,7 +968,7 @@ mod tests {
             headers,
             bearer_token,
             ..
-        } = endpoint_for(connection, &actor).unwrap()
+        } = endpoint_for(connection, "caller").unwrap()
         else {
             panic!("HTTP endpoint")
         };
@@ -887,13 +980,13 @@ mod tests {
             env: BTreeMap::from([("SHARED_TOKEN".into(), "shared-secret".into())]),
             cwd: None,
         };
-        assert!(endpoint_for(connection, &actor).is_err());
+        assert!(endpoint_for(connection, "caller").is_err());
         let account = connection.personal_accounts.get_mut("caller").unwrap();
         account.bearer_token = None;
         account
             .env
             .insert("PERSONAL_TOKEN".into(), "personal-secret".into());
-        let Endpoint::Stdio { env, .. } = endpoint_for(connection, &actor).unwrap() else {
+        let Endpoint::Stdio { env, .. } = endpoint_for(connection, "caller").unwrap() else {
             panic!("stdio endpoint")
         };
         assert!(!env.contains_key("SHARED_TOKEN"));

@@ -40,11 +40,13 @@ fn job(id: &str, connection: &str) -> HostJob {
         timeout_ms: 2000,
         expires_at: now() + 30,
         actor: Actor {
-            principal_id: "si:caller".into(),
-            identity_kind: "silicon".into(),
-            org_id: "org".into(),
+            uuid: "Cal".into(),
+            id: "si:caller".into(),
+            kind: "silicon".into(),
             display_name: "caller".into(),
-            ..Default::default()
+            principal_id: "Cal".into(),
+            identity_kind: "silicon".into(),
+            org_id: String::new(),
         },
     }
 }
@@ -55,7 +57,10 @@ async fn poll(
     Json(input): Json<Value>,
 ) -> impl IntoResponse {
     assert_eq!(headers.get("authorization").unwrap(), "Bearer host-secret");
-    assert_eq!(headers.get("x-mcport-test").unwrap(), "test-isolation");
+    // No testing-environment header: a host token is the whole host identity.
+    assert!(headers.get("x-mcport-test").is_none());
+    // The registry keys personal accounts by uuid, so jobs may name callers by uuid.
+    assert_eq!(input["capabilities"]["registry_version"], 2);
     assert!(
         input["registered_connections"]
             .as_array()
@@ -91,15 +96,19 @@ async fn mcp(State(fixture): State<Fixture>, Json(input): Json<Value>) -> axum::
 }
 
 #[tokio::test]
-async fn outbound_relay_rejects_unregistered_expired_cross_org_and_never_replays() {
+async fn outbound_relay_rejects_unregistered_and_expired_jobs_and_never_replays() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let mut expired = job("expired", "registered");
     expired.expires_at = now() - 1;
-    let mut foreign = job("foreign", "registered");
-    foreign.actor.org_id = "other-org".into();
+    // Jobs for hosts registered before 0.3.0 still carry an organization; it no
+    // longer decides anything (the host token and the registry do), and the same
+    // caller uuid keeps its provider session.
+    let mut same_actor = job("same-actor-next-call", "registered");
+    same_actor.actor.org_id = "tos".into();
     let mut second_actor = job("second-actor", "registered");
-    second_actor.actor.principal_id = "another-caller".into();
+    second_actor.actor.uuid = "An2".into();
+    second_actor.actor.principal_id = "An2".into();
     let mut invalid = job("invalid-input", "registered");
     invalid.params = json!({"name":"echo","arguments":{"unexpected":true}});
     let fixture = Fixture {
@@ -108,11 +117,10 @@ async fn outbound_relay_rejects_unregistered_expired_cross_org_and_never_replays
         discoveries: Default::default(),
         jobs: vec![
             job("valid", "registered"),
-            job("same-actor-next-call", "registered"),
+            same_actor,
             second_actor,
             job("unregistered", "remote-command-is-not-accepted"),
             expired,
-            foreign,
             invalid,
         ],
     };
@@ -129,15 +137,13 @@ async fn outbound_relay_rejects_unregistered_expired_cross_org_and_never_replays
     });
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("host/registry.json");
-    let mut registry = Registry::new(HostConfig {
-        backend_url: format!("http://{address}"),
-        host_id: "host".into(),
-        host_token: "host-secret".into(),
-        environment: "test-isolation".into(),
-        org_id: "org".into(),
-        owner_id: "owner".into(),
-        isi: None,
-    });
+    let mut registry = Registry::new(HostConfig::new(
+        format!("http://{address}"),
+        "host",
+        "host-secret",
+        "Own",
+        None,
+    ));
     registry
         .register(
             "registered",
@@ -153,7 +159,7 @@ async fn outbound_relay_rejects_unregistered_expired_cross_org_and_never_replays
         tokio::spawn(async move { mcport_daemon::run(daemon_path, daemon_shutdown).await });
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if fixture.results.lock().unwrap().len() == 7 {
+            if fixture.results.lock().unwrap().len() == 6 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -172,7 +178,10 @@ async fn outbound_relay_rejects_unregistered_expired_cross_org_and_never_replays
             "unregistered_connection"
         );
         assert_eq!(results["expired"]["error"]["code"], "expired");
-        assert_eq!(results["foreign"]["error"]["code"], "wrong_organization");
+        assert_eq!(
+            results["same-actor-next-call"]["result"]["content"][0]["text"],
+            "local result"
+        );
         assert_eq!(
             results["invalid-input"]["error"]["code"],
             "invalid_arguments"

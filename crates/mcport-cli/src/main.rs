@@ -1,21 +1,21 @@
 mod args;
 mod local;
+mod signin;
 mod store;
 
 use args::*;
 use clap::Parser;
+use mcport_client::accounts::{SILICON_SIGN_IN, SignInError};
+use mcport_client::session::{SessionError, StoredSignIn};
 use mcport_client::{
-    ApiError, Client, ConnectionInput, ConnectionUpdate, DirectoryEntry, DirectoryInput,
-    DirectoryUpdate, RequestContext, Session, ToolPolicyInput,
+    AllowanceInput, ApiError, Client, ConnectionInput, ConnectionUpdate, DirectoryEntry,
+    DirectoryInput, DirectoryUpdate, RequestContext, ToolPolicyInput,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
-use store::{Settings, Store, StoredSession};
-
-const DEFAULT_BACKEND: &str = "https://backend.mcport.teamofsilicons.com";
+use store::Store;
 
 #[derive(Debug, thiserror::Error)]
 enum CliError {
@@ -27,6 +27,18 @@ enum CliError {
     Daemon(#[from] mcport_client::local::DaemonError),
     #[error(transparent)]
     Local(#[from] mcport_client::local::Error),
+    #[error(transparent)]
+    SignIn(#[from] SignInError),
+    #[error(transparent)]
+    Session(#[from] SessionError),
+    #[error("Not signed in to MCPort at {backend}.")]
+    NotSignedIn { backend: String, legacy: bool },
+    #[error("{message}")]
+    Coded {
+        code: String,
+        message: String,
+        recovery: String,
+    },
     #[error("{0}")]
     Input(String),
     #[error("Local I/O failed: {0}")]
@@ -34,35 +46,123 @@ enum CliError {
     #[error("JSON could not be processed: {0}")]
     Json(#[from] serde_json::Error),
 }
+
+fn sign_in_recovery() -> String {
+    format!("Carbons: mcport login. Silicons: {SILICON_SIGN_IN}")
+}
+
 impl CliError {
     fn public(&self) -> ApiError {
+        let coded = |code: &str, message: String, recovery: String| ApiError {
+            code: code.into(),
+            message,
+            recovery: Some(recovery),
+            outcome_unknown: false,
+        };
         match self {
             Self::Client(error) => error.public(),
-            _ => ApiError {
-                code: "cli_error".into(),
-                message: self.to_string(),
-                recovery: Some(
-                    "Use mcport <service> --help to inspect requirements and commands.".into(),
+            Self::SignIn(error) | Self::Session(SessionError::SignIn(error)) => {
+                coded(&error.code(), error.message(), error.hint())
+            }
+            Self::Session(SessionError::NotSignedIn) => coded(
+                "not_signed_in",
+                "Not signed in to MCPort.".into(),
+                sign_in_recovery(),
+            ),
+            Self::Session(error @ SessionError::Unreadable { .. }) => coded(
+                "session_unreadable",
+                error.to_string(),
+                format!(
+                    "Sign in again ({}); the new sign-in replaces the file.",
+                    sign_in_recovery()
                 ),
-                outcome_unknown: false,
-            },
+            ),
+            Self::Session(error @ SessionError::LockTimeout { .. }) => coded(
+                "session_busy",
+                error.to_string(),
+                "Wait for the other mcport command to finish, then retry.".into(),
+            ),
+            Self::NotSignedIn { backend, legacy } => coded(
+                "not_signed_in",
+                if *legacy {
+                    format!(
+                        "Not signed in to MCPort at {backend}: sign-ins from mcport 0.2 and earlier no longer work."
+                    )
+                } else {
+                    format!("Not signed in to MCPort at {backend}.")
+                },
+                sign_in_recovery(),
+            ),
+            Self::Local(error @ mcport_client::local::Error::LegacyRegistry { host_id }) => coded(
+                "registry_not_migrated",
+                error.to_string(),
+                format!(
+                    "mcport host migrate {host_id} --dry-run, then mcport host migrate {host_id}"
+                ),
+            ),
+            Self::Coded {
+                code,
+                message,
+                recovery,
+            } => coded(code, message.clone(), recovery.clone()),
+            _ => coded(
+                "cli_error",
+                self.to_string(),
+                "Run mcport <command> --help to see what the command needs.".into(),
+            ),
         }
     }
 }
 
 type Result<T> = std::result::Result<T, CliError>;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
     let machine = cli.json;
-    if let Command::Docs { topic } = &cli.command
-        && !machine
-    {
-        println!("{}", topic.content());
-        return;
+    // Discovery and the bundled docs answer before any async runtime starts: no
+    // threads, no network, no home needed and nothing written (Silicon Apps runs
+    // these in a sandbox that allows none of that).
+    match &cli.command {
+        Command::Docs { topic } if !machine => {
+            println!("{}", topic.content());
+            return;
+        }
+        Command::Docs { topic } => {
+            finish(
+                Ok(json!({"topic":topic.name(),"content":topic.content()})),
+                machine,
+            );
+        }
+        Command::Accounts | Command::Iam => {
+            finish(Ok(signin::accounts_json(&cli)), machine);
+        }
+        Command::Login(LoginArgs {
+            action: Some(LoginAction::Status { offline }),
+            ..
+        }) => {
+            let (value, signed_in) = signin::status(&cli, *offline);
+            let _ = print_value(&value, machine);
+            if !signed_in && !machine {
+                eprintln!("Not signed in. {}", sign_in_recovery());
+                std::process::exit(1);
+            }
+            return;
+        }
+        _ => {}
     }
-    match run(cli).await {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => finish(Err(CliError::Io(error)), machine),
+    };
+    let result = runtime.block_on(run(cli));
+    finish(result, machine);
+}
+
+fn finish(result: Result<Value>, machine: bool) -> ! {
+    match result {
         Ok(value) => {
             let failed = value
                 .pointer("/result/isError")
@@ -75,14 +175,12 @@ async fn main() {
                 eprintln!("{error}");
                 std::process::exit(1);
             }
-            if failed {
-                std::process::exit(1);
-            }
+            std::process::exit(if failed { 1 } else { 0 });
         }
         Err(error) => {
             let public = error.public();
             if machine {
-                // stdout remains valid machine-readable output even on failure.
+                // stdout stays valid machine-readable output even on failure.
                 let _ = print_value(&json!({"error":public}), true);
             } else {
                 eprintln!("Error [{}]: {}", public.code, public.message);
@@ -115,71 +213,16 @@ fn print_value(value: &Value, compact: bool) -> Result<()> {
 fn value<T: Serialize>(item: T) -> Result<Value> {
     Ok(serde_json::to_value(item)?)
 }
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
 
-fn stored(session: Session) -> Result<StoredSession> {
-    Ok(StoredSession {
-        principal_id: session.actor.principal_id.clone(),
-        org_id: session.actor.org_id.clone(),
-        access_token: session.access_token,
-        refresh_token: Some(session.refresh_token),
-        expires_at: Some(session.expires_at),
-        identity: value(session.actor)?,
-    })
-}
-
-fn public_context(test_id: Option<String>, settings: &Settings) -> RequestContext {
+fn request_context(session: &StoredSignIn, telemetry: bool) -> RequestContext {
     RequestContext {
-        access_token: None,
-        test_id,
+        access_token: Some(session.access_token.expose().to_owned()),
         isi: std::env::var("ISI").ok().filter(|v| !v.is_empty()),
-        telemetry: Some(settings.telemetry),
+        telemetry: Some(telemetry),
     }
-}
-
-async fn authenticated(
-    client: &Client,
-    store: &Store,
-    base: &RequestContext,
-) -> Result<(RequestContext, StoredSession)> {
-    let mut guard = store.sessions(&client.backend_url(), base.test_id.as_deref())?;
-    let mut session = guard.active().cloned().ok_or_else(|| CliError::Input("Not authenticated in this backend and testing context. Run mcport iam --json, obtain an app-bound SLT, then run mcport login <slt>.".into()))?;
-    if session
-        .expires_at
-        .is_some_and(|expiry| expiry <= now() + 30)
-    {
-        let token = session.refresh_token.as_deref().ok_or_else(|| {
-            CliError::Input(
-                "Session expired and no refresh token is stored. Run mcport login <slt>.".into(),
-            )
-        })?;
-        let refreshed = client.refresh(base, token).await?;
-        if refreshed.actor.principal_id != session.principal_id
-            || refreshed.actor.org_id != session.org_id
-        {
-            return Err(CliError::Input("Refresh returned a different identity or organization. The stored session was preserved; sign in again and report this server error.".into()));
-        }
-        let expected = base.test_id.as_deref().unwrap_or("production");
-        if refreshed.environment != expected {
-            return Err(CliError::Input("Refresh returned a different testing environment. The stored session was preserved.".into()));
-        }
-        session = stored(refreshed)?;
-        guard.save(session.clone())?;
-    }
-    let mut context = base.clone();
-    context.access_token = Some(session.access_token.clone());
-    Ok((context, session))
 }
 
 async fn run(cli: Cli) -> Result<Value> {
-    if let Command::Docs { topic } = &cli.command {
-        return Ok(json!({"topic":topic.name(),"content":topic.content()}));
-    }
     if let Command::Daemon(DaemonCommand::Run { registry }) = &cli.command {
         let cancellation = tokio_util::sync::CancellationToken::new();
         let signal = cancellation.clone();
@@ -191,6 +234,11 @@ async fn run(cli: Cli) -> Result<Value> {
         mcport_client::local::run(registry, cancellation).await?;
         return Ok(json!({"stopped":true}));
     }
+    match &cli.command {
+        Command::Login(args) => return signin::login(&cli, args.clone()).await,
+        Command::Logout => return signin::logout(&cli).await,
+        _ => {}
+    }
     let store = Store::discover()?;
     let mut settings = store.settings()?;
     if let Command::Config(ConfigCommand::Home { location }) = &cli.command {
@@ -199,65 +247,79 @@ async fn run(cli: Cli) -> Result<Value> {
             json!({"home":home,"directory":home.join(".mcport/dir"),"credentials_copied":false}),
         );
     }
-    let backend = cli
-        .url
-        .as_deref()
-        .or(settings.backend_url.as_deref())
-        .unwrap_or(DEFAULT_BACKEND);
-    if let Command::Config(ConfigCommand::Show) = &cli.command {
-        return Ok(
-            json!({"home":store.home,"directory":store.directory,"telemetry":settings.telemetry,"backend_url":backend,"test_id":cli.test_id}),
-        );
-    }
-    let client = Client::new(backend)?;
-    let base = public_context(cli.test_id.clone(), &settings);
-
+    let target = signin::Target::resolve(&cli, &settings);
+    let client = Client::new(&target.backend)?;
+    let backend = client.backend_url();
     match cli.command {
-        Command::Iam => return Ok(client.iam(&base).await?),
-        Command::Login(LoginArgs { slt: Some(slt), action: None }) => {
-            let session = client.login(&base, &slt).await?;
-            if session.environment != base.test_id.as_deref().unwrap_or("production") {
-                return Err(CliError::Input("Login returned a session for a different testing environment. No credentials were stored.".into()));
-            }
-            let output = json!({"authenticated":true,"actor":session.actor,"environment":session.environment,"expires_at":session.expires_at});
-            store.sessions(&client.backend_url(), base.test_id.as_deref())?.save(stored(session)?)?;
-            Ok(output)
+        Command::Config(ConfigCommand::Show) => {
+            let signed_in = signin::stored(&store, &backend)
+                .map(|s| json!({"uuid":s.account.uuid,"id":s.account.id,"kind":s.account.kind}));
+            Ok(
+                json!({"home":store.home,"directory":store.directory,"telemetry":settings.telemetry,"backend_url":backend,"accounts_url":target.accounts_url,"app_id":target.app_id,"signed_in":signed_in}),
+            )
         }
-        Command::Login(LoginArgs { action: Some(LoginAction::Status), .. }) => {
-            let current = store.sessions(&client.backend_url(), base.test_id.as_deref())?.active().cloned();
-            if current.is_none() { return Ok(json!({"authenticated":false,"environment":base.test_id.as_deref().unwrap_or("production")})); }
-            let (context, _) = authenticated(&client, &store, &base).await?;
-            return Ok(client.status(&context).await?);
-        }
-        Command::Login(_) => Err(CliError::Input("A short-lived token is required: mcport login <slt>. To inspect a session, run mcport login status --json.".into())),
-        Command::Session(SessionCommand::Ls) => Ok(store.sessions(&client.backend_url(), base.test_id.as_deref())?.list()),
-        Command::Session(SessionCommand::Use { principal, org }) => Ok(store.sessions(&client.backend_url(), base.test_id.as_deref())?.select(&principal, org.as_deref())?),
-        Command::Daemon(command) => return local::daemon_command(&store, &client.backend_url(), base.test_id.as_deref(), command).await,
-        Command::Config(ConfigCommand::Set { key, value: setting }) => {
-            match key.as_str() {
-                "telemetry" => {
-                    settings.telemetry = setting.parse::<bool>().map_err(|_| CliError::Input("Telemetry must be true or false: mcport config set telemetry false".into()))?;
-                    store.save_settings(&settings)?;
-                    let has_session = store.sessions(&client.backend_url(), base.test_id.as_deref())?.active().is_some();
-                    if has_session {
-                        let (mut ctx, _) = authenticated(&client, &store, &base).await?;
-                        ctx.telemetry = Some(settings.telemetry);
-                        client.set_telemetry(&ctx, settings.telemetry).await?;
-                    }
-                    Ok(json!({"telemetry":settings.telemetry,"server_updated":has_session}))
+        Command::Config(ConfigCommand::Set {
+            key,
+            value: setting,
+        }) => match key.as_str() {
+            "telemetry" => {
+                settings.telemetry = setting.parse::<bool>().map_err(|_| {
+                    CliError::Input(
+                        "Telemetry must be true or false: mcport config set telemetry false".into(),
+                    )
+                })?;
+                store.save_settings(&settings)?;
+                let signed_in = signin::stored(&store, &backend).is_some();
+                if signed_in {
+                    let session = signin::signed_in(&store, &backend, false).await?;
+                    client
+                        .set_telemetry(
+                            &request_context(&session, settings.telemetry),
+                            settings.telemetry,
+                        )
+                        .await?;
                 }
-                "url" | "backend" | "backend_url" => {
-                    let validated = Client::new(&setting)?;
-                    settings.backend_url = Some(validated.backend_url());
-                    store.save_settings(&settings)?;
-                    Ok(json!({"backend_url":settings.backend_url,"note":"Sessions are separate for each backend."}))
-                }
-                _ => Err(CliError::Input(format!("Unknown setting {key}. Supported settings: telemetry, backend. Use mcport config home <location> to change the storage home."))),
+                Ok(json!({"telemetry":settings.telemetry,"server_updated":signed_in}))
             }
-        }
+            "url" | "backend" | "backend_url" => {
+                let validated = Client::new(&setting)?;
+                settings.backend_url = Some(validated.backend_url());
+                store.save_settings(&settings)?;
+                Ok(
+                    json!({"backend_url":settings.backend_url,"note":"Sign-ins are kept per backend: sign in again for this one if needed."}),
+                )
+            }
+            "accounts" | "accounts_url" => {
+                let validated = mcport_client::accounts::SignIn::new(&setting, &target.app_id)?;
+                settings.accounts_url = Some(validated.accounts_url());
+                store.save_settings(&settings)?;
+                Ok(
+                    json!({"accounts_url":settings.accounts_url,"note":"Stored sign-ins keep using the Silicon Accounts that issued them; sign in again to use this one."}),
+                )
+            }
+            _ => Err(CliError::Input(format!(
+                "Unknown setting {key}. Supported settings: backend, accounts, telemetry. Use mcport config home <location> to change the storage home."
+            ))),
+        },
+        Command::Daemon(command) => local::daemon_command(&store, &backend, command).await,
         command => {
-            let (context, session) = authenticated(&client, &store, &base).await?;
-            dispatch(&client, &context, &store, &session, command).await
+            let session = signin::signed_in(&store, &backend, false).await?;
+            let context = request_context(&session, settings.telemetry);
+            let first = dispatch(&client, &context, &store, &session, command.clone()).await;
+            match first {
+                // The service refused the token itself (clock skew, or a sign-out that
+                // predates it): refresh once and run the command again. A 401 means
+                // nothing was executed, so repeating is safe.
+                Err(CliError::Client(error))
+                    if error.status() == Some(401)
+                        && (error.is_code("token_expired") || error.is_code("signed_out")) =>
+                {
+                    let session = signin::signed_in(&store, &backend, true).await?;
+                    let context = request_context(&session, settings.telemetry);
+                    dispatch(&client, &context, &store, &session, command).await
+                }
+                other => other,
+            }
         }
     }
 }
@@ -274,6 +336,18 @@ struct ConnectionDraft {
     clear_args: bool,
     auth: Option<AuthMode>,
     visibility: Option<Visibility>,
+}
+
+/// `--visibility org` existed when MCPort grouped accounts into organizations.
+fn visibility_value(visibility: Visibility) -> Result<&'static str> {
+    match visibility {
+        Visibility::Org => Err(CliError::Coded {
+            code: "visibility_removed".into(),
+            message: "--visibility org no longer exists: a connection is yours alone, shared with your own people (--visibility circle), or shared with chosen accounts.".into(),
+            recovery: "Use --visibility circle (you and the Silicons you look after, or your custodian and its Silicons), or invite accounts with mcport access new <connection> --account <c:/si: id>.".into(),
+        }),
+        other => Ok(other.value()),
+    }
 }
 
 impl ConnectionDraft {
@@ -295,6 +369,10 @@ impl ConnectionDraft {
         if !matches!(auth, "none" | "per-user" | "shared") {
             return Err(CliError::Input("Directory template has an unsupported account mode. Choose --auth none, per-user or shared explicitly.".into()));
         }
+        let visibility = match self.visibility {
+            Some(visibility) => visibility_value(visibility)?,
+            None => "invited",
+        };
         let endpoint = self.endpoint.or_else(|| {
             template
                 .filter(|template| template.transport == transport && transport == "http")
@@ -349,28 +427,23 @@ impl ConnectionDraft {
             command: self.command,
             args: arguments,
             auth_mode: auth.into(),
-            visibility: self
-                .visibility
-                .map(Visibility::value)
-                .unwrap_or(if auth == "none" { "org" } else { "invited" })
-                .into(),
+            visibility: visibility.into(),
         })
     }
 }
 
-async fn dispatch(
-    client: &Client,
-    ctx: &RequestContext,
-    store: &Store,
-    session: &StoredSession,
-    command: Command,
-) -> Result<Value> {
-    let operation = match &command {
-        Command::Logout => "logout",
+fn operation(command: &Command) -> &'static str {
+    match command {
         Command::Directory(DirectoryCommand::Ls { .. }) => "directory.list",
-        Command::Directory(DirectoryCommand::Show { .. }) => "directory.read",
+        Command::Directory(DirectoryCommand::Show { .. } | DirectoryCommand::Access { .. }) => {
+            "directory.read"
+        }
         Command::Directory(DirectoryCommand::New { .. }) => "directory.create",
-        Command::Directory(DirectoryCommand::Set { .. }) => "directory.update",
+        Command::Directory(
+            DirectoryCommand::Set { .. }
+            | DirectoryCommand::Share { .. }
+            | DirectoryCommand::Unshare { .. },
+        ) => "directory.update",
         Command::Directory(DirectoryCommand::Rm { .. }) => "directory.delete",
         Command::Connection(ConnectionCommand::New { .. } | ConnectionCommand::Register { .. }) => {
             "connection.create"
@@ -384,8 +457,10 @@ async fn dispatch(
         Command::Tool(_) => "tool.list",
         Command::Account(AccountCommand::Disconnect { .. }) => "account.disconnect",
         Command::Account(_) => "account.connect",
-        Command::Access(AccessCommand::Rm { .. }) => "access.revoke",
-        Command::Access(_) => "access.grant",
+        Command::Access(AccessCommand::Rm { .. }) | Command::Allow(AllowCommand::Rm { .. }) => {
+            "access.revoke"
+        }
+        Command::Access(_) | Command::Allow(_) => "access.grant",
         Command::Host(_) => "host.register",
         Command::Resource(ResourceCommand::Read { .. }) => "resource.read",
         Command::Resource(_) => "resource.list",
@@ -396,7 +471,17 @@ async fn dispatch(
         Command::Activity(_) | Command::Asset(_) => "activity.read",
         Command::Report { .. } => "report.submit",
         _ => "navigation",
-    };
+    }
+}
+
+async fn dispatch(
+    client: &Client,
+    ctx: &RequestContext,
+    store: &Store,
+    session: &StoredSignIn,
+    command: Command,
+) -> Result<Value> {
+    let operation = operation(&command);
     let started = std::time::Instant::now();
     let result = dispatch_inner(client, ctx, store, session, command).await;
     if ctx.telemetry != Some(false) {
@@ -419,17 +504,12 @@ async fn dispatch_inner(
     client: &Client,
     ctx: &RequestContext,
     store: &Store,
-    session: &StoredSession,
+    session: &StoredSignIn,
     command: Command,
 ) -> Result<Value> {
+    let backend = client.backend_url();
+    let me = session.account.uuid.as_str();
     match command {
-        Command::Logout => {
-            let response = client.logout(ctx).await?;
-            store
-                .sessions(&client.backend_url(), ctx.test_id.as_deref())?
-                .remove_active()?;
-            Ok(response)
-        }
         Command::Directory(command) => match command {
             DirectoryCommand::Ls { search } => {
                 value(client.directory(ctx, search.as_deref()).await?)
@@ -458,6 +538,15 @@ async fn dispatch_inner(
             DirectoryCommand::Rm { entry } => {
                 Ok(client.delete_directory_entry(ctx, &entry).await?)
             }
+            DirectoryCommand::Share { entry, account } => {
+                value(client.share_directory_entry(ctx, &entry, &account).await?)
+            }
+            DirectoryCommand::Unshare { entry, account } => {
+                Ok(client.unshare_directory_entry(ctx, &entry, &account).await?)
+            }
+            DirectoryCommand::Access { entry } => {
+                value(client.directory_access(ctx, &entry).await?)
+            }
         },
         Command::Connection(command) => match command {
             ConnectionCommand::Register {
@@ -465,36 +554,25 @@ async fn dispatch_inner(
                 environment,
             } => {
                 let connection = client.connection(ctx, &connection).await?;
-                if connection.owner.uuid != session.principal_id {
+                if connection.owner.uuid != me {
                     return Err(CliError::Input(
                         "Only the connection's owner can approve local execution.".into(),
                     ));
                 }
                 let host_id = connection.host_id.as_deref().ok_or_else(|| CliError::Input("This is a cloud connection. Only connections assigned to a local host need registration.".into()))?;
                 let host = client.host(ctx, host_id).await?;
-                if host.owner.uuid != session.principal_id {
+                if host.owner.uuid != me {
                     return Err(CliError::Input(
-                        "The connection's execution host is not owned by this account.".into(),
+                        "The connection's host is not registered by this account.".into(),
                     ));
                 }
-                let path = local::require_registry(
-                    store,
-                    &client.backend_url(),
-                    ctx.test_id.as_deref(),
-                    host_id,
-                    session,
-                )?;
+                let path = local::require_registry(store, &backend, host_id, me)?;
                 let _registry_lock = local::registry_lock(&path)?;
                 let mut registry = mcport_client::local::Registry::load(&path)?;
-                if registry.host.owner_id != session.principal_id {
-                    return Err(CliError::Input(
-                        "The local host registry belongs to another account.".into(),
-                    ));
-                }
                 let added = mcport_client::local::register_connection(
                     &mut registry,
                     &connection,
-                    &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                    &local::scope(&backend, me),
                     parse_environment(environment)?,
                 )?;
                 if !added {
@@ -558,16 +636,9 @@ async fn dispatch_inner(
                     Some(id) => Some(client.host(ctx, id).await?),
                     None => None,
                 };
-                let local_path = if let Some(host) = &host_record {
-                    Some(local::require_registry(
-                        store,
-                        &client.backend_url(),
-                        ctx.test_id.as_deref(),
-                        &host.id,
-                        session,
-                    )?)
-                } else {
-                    None
+                let local_path = match &host_record {
+                    Some(host) => Some(local::require_registry(store, &backend, &host.id, me)?),
+                    None => None,
                 };
                 input.host_id = host_record.map(|h| h.id);
                 let created = client.create_connection(ctx, &input).await?;
@@ -577,12 +648,12 @@ async fn dispatch_inner(
                     mcport_client::local::register_connection(
                         &mut registry,
                         &created,
-                        &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                        &local::scope(&backend, me),
                         env,
                     )?;
                     if let Err(error) = registry.save(&path) {
                         return Err(CliError::Input(format!(
-                            "Connection {} was saved centrally, but its local registration failed: {error}. It cannot execute. Delete it with mcport connection rm {} and retry after fixing local storage.",
+                            "Connection {} was saved, but its local registration failed: {error}. It cannot run. Delete it with mcport connection rm {} and retry after fixing local storage.",
                             created.id, created.id
                         )));
                     }
@@ -601,6 +672,7 @@ async fn dispatch_inner(
                             .into(),
                     ));
                 }
+                let visibility = visibility.map(visibility_value).transpose()?;
                 let existing = client.connection(ctx, &connection).await?;
                 value(
                     client
@@ -610,7 +682,7 @@ async fn dispatch_inner(
                             &ConnectionUpdate {
                                 name,
                                 description,
-                                visibility: visibility.map(|v| v.value().into()),
+                                visibility: visibility.map(Into::into),
                                 version: Some(existing.version),
                             },
                         )
@@ -621,19 +693,14 @@ async fn dispatch_inner(
                 let existing = client.connection(ctx, &connection).await?;
                 let response = client.delete_connection(ctx, &existing.id).await?;
                 if let Some(host_id) = &existing.host_id {
-                    let path = local::registry_path(
-                        store,
-                        &client.backend_url(),
-                        ctx.test_id.as_deref(),
-                        host_id,
-                    );
+                    let path = local::registry_path(store, &backend, host_id);
                     if path.exists() {
                         let _registry_lock = local::registry_lock(&path)?;
                         let mut registry = mcport_client::local::Registry::load(&path)?;
                         mcport_client::local::unregister_connection(
                             &mut registry,
                             &existing,
-                            &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                            &local::scope(&backend, me),
                         )?;
                         registry.save(&path)?;
                     }
@@ -665,14 +732,14 @@ async fn dispatch_inner(
                 let future = client.rpc(ctx, &connection, &request);
                 tokio::select! {
                     output = future => value(output?),
-                    _ = tokio::signal::ctrl_c() => Err(CliError::Client(mcport_client::Error::Transport { message: "Stopped waiting for the invocation. The server may still be executing it; inspect mcport activity ls and use mcport activity cancel <id>.".into(), outcome_unknown: true })),
+                    _ = tokio::signal::ctrl_c() => Err(CliError::Client(mcport_client::Error::Transport { message: "Stopped waiting for the call. The service may still be running it; inspect mcport activity ls and use mcport activity cancel <id>.".into(), outcome_unknown: true })),
                 }
             }
             ToolCommand::Set {
                 connection,
                 tool,
                 enabled,
-                principal,
+                account,
             } => value(
                 client
                     .set_tool_policy(
@@ -680,7 +747,7 @@ async fn dispatch_inner(
                         &connection,
                         &ToolPolicyInput {
                             tool,
-                            account: principal,
+                            account,
                             enabled,
                         },
                     )
@@ -688,32 +755,47 @@ async fn dispatch_inner(
             ),
         },
         Command::Account(command) => {
-            let connection_name = match &command {
-                AccountCommand::Connect { connection, .. }
-                | AccountCommand::Disconnect { connection }
-                | AccountCommand::Show { connection } => connection,
+            let (connection_name, account, host_home) = match &command {
+                AccountCommand::Connect {
+                    connection,
+                    host_home,
+                    ..
+                } => (connection, None, host_home),
+                AccountCommand::Disconnect {
+                    connection,
+                    account,
+                    host_home,
+                }
+                | AccountCommand::Show {
+                    connection,
+                    account,
+                    host_home,
+                } => (connection, account.as_deref(), host_home),
             };
             let connection = client.connection(ctx, connection_name).await?;
+            if let Some(account) = account {
+                // A custodian asking about a Silicon it looks after: the service decides.
+                return match (&command, connection.host_id.is_some()) {
+                    (AccountCommand::Show { .. }, _) => {
+                        value(client.account_for(ctx, &connection.id, account).await?)
+                    }
+                    (_, true) => Err(CliError::Input("A local provider account lives in its host's registry on that machine; only the account itself can disconnect it there (mcport account disconnect, signed in as that account).".into())),
+                    _ => Ok(client
+                        .disconnect_account_for(ctx, &connection.id, account)
+                        .await?),
+                };
+            }
             if let Some(host_id) = &connection.host_id {
+                let registry_store = match host_home {
+                    Some(home) => Store::at(home.clone())?,
+                    None => store.clone(),
+                };
                 if matches!(command, AccountCommand::Show { .. })
-                    && !local::registry_path(
-                        store,
-                        &client.backend_url(),
-                        ctx.test_id.as_deref(),
-                        host_id,
-                    )
-                    .is_file()
+                    && !local::registry_path(&registry_store, &backend, host_id).is_file()
                 {
                     return value(client.account(ctx, &connection.id).await?);
                 }
-                return local::account(
-                    store,
-                    &client.backend_url(),
-                    ctx.test_id.as_deref(),
-                    session,
-                    &connection,
-                    command,
-                );
+                return local::account(&registry_store, &backend, me, &connection, command);
             }
             match command {
                 AccountCommand::Show { .. } => value(client.account(ctx, &connection.id).await?),
@@ -759,7 +841,7 @@ async fn dispatch_inner(
                             .authorize_account(ctx, &connection.id, client_id.as_deref())
                             .await?;
                         if let Some(map) = flow.as_object_mut() {
-                            map.insert("next_step".into(), json!("Open authorization_url to authorize the upstream provider. After consent, run mcport account show <connection> to verify the linked account."));
+                            map.insert("next_step".into(), json!("Open authorization_url to authorize the provider. After consent, run mcport account show <connection> to check the linked account."));
                         }
                         Ok(flow)
                     }
@@ -769,29 +851,37 @@ async fn dispatch_inner(
         Command::Access(command) => match command {
             AccessCommand::New {
                 connection,
-                principal,
-            } => value(client.grant_access(ctx, &connection, &principal).await?),
+                account,
+            } => value(client.grant_access(ctx, &connection, &account).await?),
             AccessCommand::Ls { connection } => value(client.access(ctx, &connection).await?),
             AccessCommand::Rm {
                 connection,
-                principal,
-            } => Ok(client.revoke_access(ctx, &connection, &principal).await?),
+                account,
+            } => Ok(client.revoke_access(ctx, &connection, &account).await?),
+        },
+        Command::Allow(command) => match command {
+            AllowCommand::Add { account, silicon } => value(
+                client
+                    .allow(ctx, &AllowanceInput { account, silicon })
+                    .await?,
+            ),
+            AllowCommand::Ls { silicon } => {
+                value(client.allowances(ctx, silicon.as_deref()).await?)
+            }
+            AllowCommand::Rm { account, silicon } => {
+                Ok(client.disallow(ctx, &account, silicon.as_deref()).await?)
+            }
         },
         Command::Host(command) => match command {
             HostCommand::Ls => value(client.hosts(ctx).await?),
             HostCommand::Show { host } => value(client.host(ctx, &host).await?),
             HostCommand::New { name } => {
                 let registration = client.create_host(ctx, &name).await?;
-                let path = local::registry_path(
-                    store,
-                    &client.backend_url(),
-                    ctx.test_id.as_deref(),
-                    &registration.host.id,
-                );
+                let path = local::registry_path(store, &backend, &registration.host.id);
                 let host = registration.host.clone();
                 let registry = mcport_client::local::registry_for_host(
                     registration,
-                    &local::scope(&client.backend_url(), ctx.test_id.as_deref(), session),
+                    &local::scope(&backend, me),
                     ctx.isi.clone(),
                 )?;
                 registry.save(&path)?;
@@ -801,17 +891,24 @@ async fn dispatch_inner(
             HostCommand::Rm { host } => {
                 let host = client.host(ctx, &host).await?;
                 let response = client.delete_host(ctx, &host.id).await?;
-                let path = local::registry_path(
-                    store,
-                    &client.backend_url(),
-                    ctx.test_id.as_deref(),
-                    &host.id,
-                );
+                let path = local::registry_path(store, &backend, &host.id);
                 if path.exists() {
                     local::stop(&path).await?;
                     std::fs::remove_file(&path)?;
+                    let backup = path.with_file_name("registry.v1.json");
+                    if backup.exists() {
+                        std::fs::remove_file(backup)?;
+                    }
                 }
                 Ok(response)
+            }
+            HostCommand::Migrate {
+                host,
+                dry_run,
+                drop_unmapped,
+            } => {
+                let host = client.host(ctx, &host).await?;
+                local::migrate_host(client, ctx, store, me, &host, dry_run, drop_unmapped).await
             }
         },
         Command::Resource(command) => match command {
@@ -884,6 +981,12 @@ async fn dispatch_inner(
                     json!({"saved":true,"output":std::fs::canonicalize(output)?,"size":bytes.len(),"call_id":call,"index":index}),
                 )
             }
+            AssetCommand::Link { call, index } => {
+                let ticket = client.asset_ticket(ctx, &call, index).await?;
+                Ok(
+                    json!({"url":ticket.url,"expires_at":ticket.expires_at,"call_id":call,"index":index,"note":"Works once, without signing in, until expires_at (60 seconds); your access is checked again when it is used."}),
+                )
+            }
         },
         Command::Report { message, pr } => {
             let mut output = client.report(ctx, &message, pr.as_deref()).await?;
@@ -891,7 +994,7 @@ async fn dispatch_inner(
                 let repository = output
                     .get("repository_url")
                     .and_then(Value::as_str)
-                    .unwrap_or("https://github.com/teamofsilicons/silicon-mcport")
+                    .unwrap_or(signin::REPOSITORY)
                     .to_owned();
                 if let Some(map) = output.as_object_mut() {
                     map.insert(
@@ -905,7 +1008,7 @@ async fn dispatch_inner(
             Ok(output)
         }
         _ => Err(CliError::Input(
-            "This command is not an authenticated application operation.".into(),
+            "This command does not need a sign-in; it was routed here by mistake. Report it with mcport report.".into(),
         )),
     }
 }
@@ -954,7 +1057,10 @@ mod tests {
     use super::*;
 
     fn directory_fixture() -> DirectoryEntry {
-        serde_json::from_value(json!({"id":"abc","name":"Docs","description":"Suggested provider","category":"Documentation","source":"org","source_url":"https://provider.example","source_revision":null,"owner_id":"c:owner","org_id":"tos","environment":"test-one","can_manage":true,"template":{"transport":"http","url":"https://provider.example/mcp","command":null,"args":[],"auth_mode":"per-user"},"version":4,"created_at":1,"updated_at":2})).unwrap()
+        serde_json::from_value(json!({"id":"abc","name":"Docs","description":"Suggested provider","category":"Documentation","source":"personal","source_url":"https://provider.example","source_revision":null,"owner":{"uuid":"Own","id":"c:owner","kind":"carbon","display_name":"Owner"},"can_manage":true,"template":{"transport":"http","url":"https://provider.example/mcp","command":null,"args":[],"auth_mode":"per-user"},"version":4,"created_at":1,"updated_at":2})).unwrap()
+    }
+    fn session_fixture() -> StoredSignIn {
+        serde_json::from_value(json!({"format":1,"accounts_url":"http://127.0.0.1:9","app_id":"mcport","backend_url":"","method":"slt","account":{"uuid":"Own","id":"c:owner","kind":"carbon","display_name":"Owner"},"access_token":"fixture","refresh_token":"sar_fixture","expires_at":4102444800i64,"refresh_expires_at":null,"scope":"profile","signed_in_at":1,"refreshed_at":1})).unwrap()
     }
 
     #[test]
@@ -986,8 +1092,17 @@ mod tests {
             explicit.url.as_deref(),
             Some("https://alternate.example/mcp")
         );
-        assert_eq!(explicit.visibility, "org");
+        // No organization-wide default any more: new connections are owner-only.
+        assert_eq!(explicit.visibility, "invited");
         assert!(explicit.description.is_empty());
+        let circle = ConnectionDraft {
+            name: "shared".into(),
+            visibility: Some(Visibility::Circle),
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap();
+        assert_eq!(circle.visibility, "circle");
         let legacy = ConnectionDraft {
             name: "legacy".into(),
             visibility: Some(Visibility::Private),
@@ -995,7 +1110,22 @@ mod tests {
         }
         .resolve(Some(&entry))
         .unwrap();
-        assert_eq!(legacy.visibility, "private"); // Server preserves owner-only semantics.
+        assert_eq!(legacy.visibility, "private"); // The service reads it as invited.
+        let removed = ConnectionDraft {
+            name: "org".into(),
+            visibility: Some(Visibility::Org),
+            ..Default::default()
+        }
+        .resolve(Some(&entry))
+        .unwrap_err();
+        assert_eq!(removed.public().code, "visibility_removed");
+        assert!(
+            removed
+                .public()
+                .recovery
+                .unwrap()
+                .contains("--visibility circle")
+        );
 
         let executable = std::env::current_exe()
             .unwrap()
@@ -1030,7 +1160,6 @@ mod tests {
         .resolve(Some(&entry))
         .unwrap();
         assert_eq!(explicit.args, ["chosen"]);
-        assert_eq!(explicit.visibility, "invited");
         let cleared = ConnectionDraft {
             name: "files".into(),
             host: Some("laptop".into()),
@@ -1053,7 +1182,7 @@ mod tests {
     }
 
     #[test]
-    fn setup_requires_complete_configuration_and_hides_legacy_visibility() {
+    fn setup_requires_complete_configuration_and_help_hides_removed_values() {
         let entry = directory_fixture();
         let manual = ConnectionDraft {
             name: "missing".into(),
@@ -1085,33 +1214,6 @@ mod tests {
             .resolve(Some(&entry))
             .is_err()
         );
-        assert!(Cli::try_parse_from(["mcport", "connection", "new", "incomplete"]).is_err());
-        assert!(
-            Cli::try_parse_from([
-                "mcport",
-                "connection",
-                "new",
-                "docs",
-                "--from",
-                "abc",
-                "--dry-run"
-            ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "mcport",
-                "connection",
-                "new",
-                "docs",
-                "--from",
-                "abc",
-                "--arg",
-                "x",
-                "--clear-args"
-            ])
-            .is_err()
-        );
         use clap::CommandFactory;
         let mut cli = Cli::command();
         let help = cli
@@ -1121,8 +1223,50 @@ mod tests {
             .unwrap()
             .render_long_help()
             .to_string();
-        assert!(!help.contains("private"));
-        assert!(help.contains("org") && help.contains("invited") && help.contains("--dry-run"));
+        assert!(!help.contains("private") && !help.contains("org"));
+        assert!(help.contains("invited") && help.contains("circle") && help.contains("--dry-run"));
+    }
+
+    #[test]
+    fn every_command_has_help_and_none_mentions_removed_concepts() {
+        use clap::CommandFactory;
+        fn visit(command: &mut clap::Command, path: &str, seen: &mut usize) {
+            if command.is_hide_set() {
+                return;
+            }
+            let help = command.render_long_help().to_string();
+            for removed in [
+                "IAM",
+                "organization",
+                "Honeycomb",
+                "--test",
+                "app-bound",
+                "principal",
+            ] {
+                assert!(
+                    !help.contains(removed),
+                    "`{path} --help` mentions {removed}:\n{help}"
+                );
+            }
+            if path != "mcport" {
+                assert!(command.get_about().is_some(), "`{path}` has no description");
+            }
+            *seen += 1;
+            let names: Vec<String> = command
+                .get_subcommands()
+                .map(|sub| sub.get_name().to_owned())
+                .collect();
+            for name in names {
+                if name == "help" {
+                    continue;
+                }
+                let sub = command.find_subcommand_mut(&name).unwrap();
+                visit(sub, &format!("{path} {name}"), seen);
+            }
+        }
+        let mut seen = 0;
+        visit(&mut Cli::command(), "mcport", &mut seen);
+        assert!(seen > 60, "only {seen} help pages");
     }
 
     #[tokio::test]
@@ -1161,15 +1305,8 @@ mod tests {
         });
         let directory = tempfile::tempdir().unwrap();
         let store = Store::at(directory.path().into()).unwrap();
-        let session = StoredSession {
-            principal_id: "c:owner".into(),
-            org_id: "tos".into(),
-            access_token: "fixture".into(),
-            refresh_token: None,
-            expires_at: None,
-            identity: Value::Null,
-        };
-        let ctx = RequestContext::authenticated("fixture").testing("test-one");
+        let session = session_fixture();
+        let ctx = RequestContext::authenticated("fixture");
         let file = directory.path().join("entry.json");
         std::fs::write(&file, r#"{"name":"Edited","category":"Docs"}"#).unwrap();
         dispatch_inner(
@@ -1200,7 +1337,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(output["dry_run"], true);
-        assert_eq!(output["connection"]["visibility"], "org");
+        assert_eq!(output["connection"]["visibility"], "invited");
         assert_eq!(output["connection"]["url"], "https://provider.example/mcp");
         assert_eq!(output["directory"]["id"], "abc");
         let requests = requests.lock().unwrap();
@@ -1218,10 +1355,18 @@ mod tests {
     }
 
     #[test]
-    fn all_documented_grammars_parse() {
+    fn documented_grammars_parse_and_removed_ones_do_not() {
         let cases = [
+            vec!["mcport", "accounts", "--json"],
+            vec!["mcport", "iam", "--json"],
+            vec!["mcport", "login"],
+            vec!["mcport", "login", "--open", "--label", "build box"],
+            vec!["mcport", "login", "--slt-stdin", "--json"],
+            vec!["mcport", "login", "--slt", "slt_x"],
+            vec!["mcport", "login", "slt_x"],
             vec!["mcport", "login", "status", "--json"],
-            vec!["mcport", "login", "slt-secret"],
+            vec!["mcport", "login", "status", "--offline", "--json"],
+            vec!["mcport", "logout", "--json"],
             vec!["mcport", "docs"],
             vec!["mcport", "docs", "development", "--json"],
             vec!["mcport", "completion", "get", "notes", "--input", "{}"],
@@ -1237,7 +1382,15 @@ mod tests {
                 "--auth",
                 "none",
                 "--visibility",
-                "private",
+                "circle",
+            ],
+            vec![
+                "mcport",
+                "connection",
+                "set",
+                "docs",
+                "--visibility",
+                "invited",
             ],
             vec![
                 "mcport",
@@ -1249,16 +1402,116 @@ mod tests {
                 "false",
             ],
             vec![
-                "mcport", "--test", "test-1", "tool", "call", "docs", "search", "--input", "-",
+                "mcport",
+                "tool",
+                "set",
+                "docs",
+                "search",
+                "--enabled",
+                "false",
+                "--account",
+                "si:researcher",
+            ],
+            vec![
+                "mcport",
+                "tool",
+                "set",
+                "docs",
+                "search",
+                "--enabled",
+                "true",
+                "--principal",
+                "si:researcher",
+            ],
+            vec!["mcport", "access", "new", "docs", "--account", "c:ada"],
+            vec!["mcport", "access", "rm", "docs", "--principal", "c:ada"],
+            vec!["mcport", "allow", "add", "c:ada"],
+            vec![
+                "mcport",
+                "allow",
+                "ls",
+                "--silicon",
+                "si:researcher",
                 "--json",
             ],
+            vec![
+                "mcport",
+                "allow",
+                "rm",
+                "c:ada",
+                "--silicon",
+                "si:researcher",
+            ],
+            vec![
+                "mcport",
+                "directory",
+                "share",
+                "abc",
+                "--account",
+                "si:researcher",
+            ],
+            vec![
+                "mcport",
+                "directory",
+                "unshare",
+                "abc",
+                "--account",
+                "si:researcher",
+            ],
+            vec!["mcport", "directory", "access", "abc"],
+            vec![
+                "mcport",
+                "account",
+                "show",
+                "docs",
+                "--account",
+                "si:researcher",
+            ],
+            vec![
+                "mcport",
+                "account",
+                "connect",
+                "docs",
+                "--token",
+                "--host-home",
+                "/tmp",
+            ],
+            vec!["mcport", "host", "migrate", "laptop", "--dry-run"],
+            vec!["mcport", "host", "migrate", "laptop", "--drop-unmapped"],
+            vec!["mcport", "asset", "link", "c1", "0"],
+            vec![
+                "mcport",
+                "--backend",
+                "http://127.0.0.1:4241",
+                "--accounts-url",
+                "http://localhost:9590",
+                "connection",
+                "ls",
+            ],
             vec!["mcport", "config", "home", "/tmp"],
+            vec![
+                "mcport",
+                "config",
+                "set",
+                "accounts",
+                "https://accounts.example",
+            ],
             vec!["mcport", "config", "set", "telemetry", "false"],
         ];
         for case in cases {
             assert!(Cli::try_parse_from(case.clone()).is_ok(), "{case:?}");
         }
+        for removed in [
+            vec!["mcport", "--test", "t-1", "connection", "ls"],
+            vec!["mcport", "session", "ls"],
+            vec!["mcport", "session", "use", "c:ada", "--org", "tos"],
+            vec!["mcport", "login", "--slt", "slt_x", "--slt-stdin"],
+            vec!["mcport", "login", "slt_x", "--open"],
+        ] {
+            assert!(Cli::try_parse_from(removed.clone()).is_err(), "{removed:?}");
+        }
     }
+
     #[test]
     fn json_arguments_require_object_and_support_file() {
         assert!(input_object("[]").is_err());

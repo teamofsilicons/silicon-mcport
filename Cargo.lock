@@ -1683,7 +1683,6 @@ dependencies = [
  "axum",
  "clap",
  "dirs",
- "fs2",
  "mcport-client",
  "rpassword",
  "serde",
@@ -1700,15 +1699,20 @@ dependencies = [
 name = "mcport-client"
 version = "0.3.0"
 dependencies = [
+ "axum",
  "fs2",
  "mcport-api",
  "mcport-daemon",
  "mcport-mcp",
+ "reqwest",
+ "serde",
  "serde_json",
+ "silicon-accounts-client",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-util",
+ "url",
 ]
 
 [[package]]
