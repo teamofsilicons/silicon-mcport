@@ -12,6 +12,7 @@ on:
         default: ''
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: backend-candidate-${{ github.ref }}
   cancel-in-progress: false
