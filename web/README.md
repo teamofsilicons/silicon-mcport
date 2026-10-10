@@ -1,31 +1,63 @@
-# MCPort website
+# Silicon MCPort website
 
-A React 19 + TypeScript workspace using real open source [Arc UI](https://uiarc.dev) components. See `THIRD_PARTY_NOTICES.md` for registry source and license attribution.
+Next.js 16, React 19 and Arc UI, using the Accounts/Apps theme and workspace shell. The website calls the actual MCPort API through a same-origin server proxy. Tokens stay in sealed HTTP-only cookies; the browser uses hosted Silicon Accounts sign-in with PKCE.
+
+## Product pages
+
+- Connections: cloud/local HTTP or stdio setup, discovery and paginated tools, global/per-account policy, JSON input/schema, execution and structured text/media/resource/file results.
+- Provider accounts: no-auth, personal and shared credentials; OAuth authorization, bearer/header credentials and disconnect. Custodians can inspect and disconnect a Silicon's personal provider account.
+- Sharing: exact Carbon/Silicon grants, invited or custodial visibility, personal directory entry sharing and inbound Silicon allowance management.
+- Directory: searchable community/personal templates, create/edit/delete and connection setup from a template. Hosts: registration instructions, live availability and removal.
+- Resources/templates and prompts, activity inspection/cancellation/download, configuration with optimistic version checks, telemetry and bug reports.
+
+## Local setup
+
+Use Node 24+ and the pinned pnpm version in package.json. From the repository root, configure and start `scripts/dev-accounts.sh` using `docs/migration/progress.md`. The backend listens on `4241`. Then:
 
 ```sh
-npm ci
-npm run dev
+cd web
+corepack enable
+pnpm install --frozen-lockfile
+cp .env.example .env.local
+# Fill APP_SECRET and SESSION_SECRET for the registered mcport app.
+pnpm dev
 ```
 
-Open `http://127.0.0.1:4381`. Vite proxies `/api` to the independently running MCPort backend at `127.0.0.1:4380`. Backend configuration must set `MCPORT_WEB_URL=http://127.0.0.1:4381` so browser origin checks and IAM callbacks match. The production `dist` directory is static output; serve it with SPA fallback for `/auth/callback`, `/connections/:id/:section`, `/activity/:call`, and workspace pages, plus same-origin routing to `/api`.
+Open `http://127.0.0.1:4240`. Register this exact origin plus `/auth/callback` in Silicon Accounts. Local email codes are delivered to the shared test messaging service. The API must already run; the website does not start a product stub.
+
+| Variable | Purpose |
+| --- | --- |
+| `APP_ID` | Defaults to `mcport`. |
+| `APP_SECRET` | Silicon Accounts app credential, server only. |
+| `ACCOUNTS_URL` | Hosted sign-in origin and token issuer. |
+| `ACCOUNTS_API_URL` | Optional private Accounts API origin. |
+| `APP_API_URL` | Product API origin (`http://127.0.0.1:4241` locally). |
+| `SESSION_SECRET` | At least 32 random bytes for sealed cookies; rotation signs browsers out. |
+| `PUBLIC_URL` | Website origin; its `/auth/callback` must be registered. |
+| `EXTRA_IMG_ORIGINS` | Optional image/media origins for local fixtures or account photos. |
+| `EXTRA_ORIGINS` | Optional additional origins of this website for write requests. |
+
+Values are validated at server startup and read at request time. External production origins require HTTPS. Cookies use Secure and the __Host prefix on HTTPS. The proxy forwards only allowlisted headers and refreshes access tokens on the server; state-changing requests require the site's Origin. Browser paths `/api/api/v1/...` forward to the backend's `/api/v1/...`.
+
+## Verification
 
 ```sh
-npm run build
-npm test
+pnpm typecheck
+pnpm lint
+pnpm test
+# Real backend plus shared Accounts stack must be running:
+TEST_STACK_JSON=/path/to/test-stack.json pnpm test:e2e
+NEXT_OUTPUT=standalone pnpm build
 ```
 
-The website never seeds connections or presents fixture results as live data. Empty, loading, denial, unavailable-provider, and unknown-outcome states come from the real backend. `src/lib/api.ts` is the contract boundary; authoritative server DTOs and endpoints are in `../docs/API.md` and `../crates/mcport-core`.
+Playwright starts Next on 4240, signs two fresh Carbons in using the hosted email flow and uses actual API requests. It checks product journeys, public/session flows, refresh concurrency, CSRF, desktop/mobile layout and WCAG 2.2 AA in both themes. Product screenshots go to the ignored `../.mig/screens/`. Provider fixtures prove application behavior, not compatibility with paid external providers. See the migration progress record for exact runs and limits.
 
-Browser authentication uses HttpOnly session/refresh cookies. Both Carbon and Silicon flows create a typed browser attempt. The callback immediately removes token-bearing query parameters from the URL before exchanging the SLT. The opener verifies the callback origin, window reference, and attempt state. Only public actor/environment/expiry metadata is kept in tab session storage. A pasted SLT uses the same browser exchange; application secrets and session tokens are never written to JavaScript storage.
+## Deployment
 
-The main flows are connection discovery/search; an MCP directory; a three-step connection wizard; tool discovery, input schemas, invocation and results; global and principal-specific restrictions; invitations; separate provider OAuth/secret authentication; hosts; call history and cancellation; telemetry preference and reports; and CLI onboarding. Tool discovery traverses provider pagination. Unknown execution outcomes are never automatically retried.
+Vercel: project root `web`, use the checked-in Next configuration and the environment above. Register production/preview callback URLs before rollout. Self-hosting: `NEXT_OUTPUT=standalone pnpm build`, copy `public` and `.next/static` into `.next/standalone`, then run `server.js` behind the site's TLS proxy.
 
-`/directory` lists the backend's community snapshot attributed to mcpservers.org alongside entries from the current organization and environment. Search is server-side. Members can add templates and edit/delete their own entries; community entries are read-only. Templates hold setup details only, never execution hosts or credentials. Selecting an entry normalizes its name and prefills the wizard without creating a connection or invoking tools. Source links and endpoints remain visible for review; missing endpoints, host selection and absolute executable paths must be supplied during setup. Custom setup is always available.
+`web/vercel.json` selects Next.js and pnpm. The backend bundle contains only the Rust service. Result-file downloads use a short-lived, single-use ticket URL from the backend, avoiding platform upload/download body limits.
 
-Connections have organization-wide or invite-only access, independently of directory membership. Unauthenticated connections initially select organization access; per-user/shared account modes initially select invite-only. Once the user chooses visibility explicitly, changing authentication preserves that choice. Legacy `private` responses display as invite-only. Focused tests cover these defaults, safe prefill, cross-platform command paths, source links, directory API versions and deep links.
+## Design and provenance
 
-Manual release checks must exercise these flows with real backend state and IAM identities. Automated adapter tests cover cookie/identity boundaries, envelope failures, unknown-outcome handling, tool pagination, and refresh serialization; they do not replace manual browser/CLI verification or real-provider testing.
-
-Connection sections and call details have stable URLs; browser back/forward and refresh restore the selected view. Activity opens the full caller-owned invocation, not just its summary. Result files use authenticated bounded downloads, including the active testing environment, with current server permission checks. Safe images/audio can be previewed; SVG/HTML remain downloads. Local result links copied by the daemon are shown as execution-host files.
-
-Vercel deployment uses the explicit build-time `MCPORT_BACKEND_ORIGIN` with `npm run build:vercel`. It produces static Build Output API files and a same-origin `/api` proxy. See [Vercel setup and required origins](../deploy/vercel.md); no backend or deployment domain is selected by the repository.
+Shared styles and Arc components are under `styles/`, `components/arc/` and `components/foundation/`. Product components are under `components/mcport/`. See `DESIGN.md`, `vendor/uiarc/PROVENANCE.md`, `vendor/uiarc/LICENSE` and the BDO Grotesk font licenses.

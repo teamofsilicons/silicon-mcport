@@ -26,8 +26,8 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+      - name: Enable pinned pnpm
+        run: corepack enable
       # Formatting, workspace tests, strict Clippy, script and packaging tests, the three
       # Silicon Apps discovery commands against the CLI the tests built, the web, and the
       # real-binary end-to-end journey (tests/e2e) against a fake Silicon Accounts and MCP

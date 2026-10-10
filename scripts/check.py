@@ -32,12 +32,14 @@ def main():
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
     run(sys.executable, "-I", ROOT / "scripts" / "package_apps.py", "--check-only", "--allow-dynamic", version, "host", cli)
     if not args.skip_web:
-        npm = shutil.which("npm") or shutil.which("npm.cmd")
-        if not npm:
-            parser.error("Node/npm is required for web checks; install it or pass --skip-web")
-        run(npm, "ci", cwd=ROOT / "web")
-        run(npm, "test", cwd=ROOT / "web")
-        run(npm, "run", "build", cwd=ROOT / "web")
+        pnpm = shutil.which("pnpm") or shutil.which("pnpm.cmd")
+        if not pnpm:
+            parser.error("Node 24/pnpm is required for web checks; install it or pass --skip-web")
+        run(pnpm, "install", "--frozen-lockfile", cwd=ROOT / "web")
+        run(pnpm, "typecheck", cwd=ROOT / "web")
+        run(pnpm, "lint", cwd=ROOT / "web")
+        run(pnpm, "test", cwd=ROOT / "web")
+        run(pnpm, "build", cwd=ROOT / "web")
     if not args.skip_e2e:
         run(sys.executable, "-m", "unittest", "discover", "-s", "tests/e2e", "-p", "test_*.py")
         options = ["--run-dir", args.e2e_run_dir] if args.e2e_run_dir else []

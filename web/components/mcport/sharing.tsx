@@ -1,0 +1,18 @@
+"use client";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/client/api";
+import { Stack,Cluster,Section } from "@/components/foundation/layout/layout";
+import { HoldToConfirm } from "@/components/arc/hold-to-confirm/hold-to-confirm";
+import { Button,Input,Dialog,DialogContent,ErrorBox } from "./ui";
+import { message,type Access,type Account } from "./lib/api";
+export function DirectorySharing({entry,name}:{entry:string;name:string}){const[open,setOpen]=useState(false);const[target,setTarget]=useState("");const[busy,setBusy]=useState(false);const[error,setError]=useState("");const path="/api/v1/directory/"+encodeURIComponent(entry)+"/access";
+ const list=useQuery({queryKey:["directory-access",entry],queryFn:()=>api.get<{data:Access[]}>(path),enabled:open});
+ async function change(remove?:string){setBusy(true);setError("");try{if(remove)await api.delete(path+"/"+encodeURIComponent(remove));else await api.post(path,{account:target});setTarget("");await list.refetch();}catch(e){setError(message(e));}finally{setBusy(false);}}
+ return <><Button variant="ghost" onClick={()=>setOpen(true)}>Share entry</Button><Dialog open={open} onOpenChange={setOpen}><DialogContent title={"Share "+name} description="A shared directory entry helps an account discover a server. It does not grant access to a connection or provider credentials."><Stack><form onSubmit={e=>{e.preventDefault();void change();}}><Stack><Input label="Carbon or Silicon ID" value={target} onChange={e=>setTarget(e.target.value)} placeholder="c:ada or si:scout" required/><Button type="submit" disabled={busy||!target.trim()} loading={busy}>Share entry</Button></Stack></form>{(error||list.error)&&<ErrorBox error={error||message(list.error)}/>} {list.data?.data.length===0&&<p>This entry has not been shared.</p>}{list.data?.data.map(g=><Cluster key={g.account.uuid} justify="between"><span>{g.account.id||g.account.uuid}</span><HoldToConfirm label={"Hold to remove "+(g.account.id||g.account.uuid)} tone="danger" disabled={busy} onConfirm={()=>void change(g.account.uuid)}/></Cluster>)}</Stack></DialogContent></Dialog></>;
+}
+export function ProviderCustody({connection}:{connection:string}){const[target,setTarget]=useState("");const[shown,setShown]=useState("");const[error,setError]=useState("");const[busy,setBusy]=useState(false);const path="/api/v1/connections/"+encodeURIComponent(connection)+"/account";
+ const result=useQuery({queryKey:["provider-account",connection,shown],queryFn:()=>api.get<{data:Account}>(path,{query:{account:shown}}),enabled:!!shown});
+ async function disconnect(){setBusy(true);setError("");try{await api.delete(path,{query:{account:shown}});await result.refetch();}catch(e){setError(message(e));}finally{setBusy(false);}}
+ return <Section title="A Silicon's provider account" description="As a custodian, you can inspect or disconnect a Silicon's provider account. Only the Silicon itself can connect it."><Stack><form onSubmit={e=>{e.preventDefault();setShown(target.trim());}}><Cluster><Input label="Silicon ID" value={target} onChange={e=>setTarget(e.target.value)} placeholder="si:scout" required/><Button variant="secondary" type="submit">Inspect account</Button></Cluster></form>{(error||result.error)&&<ErrorBox error={error||message(result.error)}/>} {result.data&&<Cluster><p>{result.data.data.connected?"Connected: "+(result.data.data.label||result.data.data.kind):"No provider account connected."}</p>{result.data.data.connected&&<HoldToConfirm tone="danger" label="Hold to disconnect provider account" disabled={busy} onConfirm={()=>void disconnect()}/>}</Cluster>}</Stack></Section>;
+}
