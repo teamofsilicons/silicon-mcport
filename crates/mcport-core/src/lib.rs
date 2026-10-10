@@ -224,6 +224,31 @@ pub struct HostRegistration {
     pub host_token: String,
 }
 
+/// `GET /api/v1/hosts/{host}/legacy-accounts`: the Silicon Accounts accounts behind
+/// the keys of a host registry written before 0.3.0, which keyed personal provider
+/// accounts by the callers' old ids. `mcport host migrate` uses it to re-key the
+/// registry by uuid. Only the host's owner may ask.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LegacyHostAccounts {
+    pub host_id: String,
+    /// Whether the host was registered before 0.3.0.
+    pub legacy: bool,
+    /// The registry's pre-0.3.0 owner key, when the host has one.
+    #[serde(default)]
+    pub legacy_owner_id: Option<String>,
+    /// One entry per old key MCPort could link to an account: the owner key and
+    /// every key the host's daemon reported. Unlinked keys are left out.
+    #[serde(default)]
+    pub accounts: Vec<LegacyAccount>,
+}
+
+/// One pre-0.3.0 registry key and the account it now belongs to.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LegacyAccount {
+    pub legacy_id: String,
+    pub account: AccountRef,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RpcInput {
     pub method: String,

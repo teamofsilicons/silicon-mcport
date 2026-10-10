@@ -197,6 +197,7 @@ fn router(app: App) -> Router {
     .route("/api/v1/downloads/{ticket}",get(assets::redeem))
     .route("/api/v1/hosts",get(hosts::list).post(hosts::create))
     .route("/api/v1/hosts/{host}",get(hosts::get).delete(hosts::remove))
+    .route("/api/v1/hosts/{host}/legacy-accounts",get(hosts::legacy_accounts))
     .route("/api/v1/hosts/{host}/poll",post(hosts::poll))
     .route("/api/v1/hosts/{host}/jobs/{job}/result",post(hosts::complete))
     .route("/api/v1/hosts/{host}/jobs/{job}/progress",post(hosts::progress))

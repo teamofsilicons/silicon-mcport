@@ -56,6 +56,29 @@ impl HostRecord {
             .filter(|org| !org.is_empty())
             .map(str::to_owned)
     }
+    /// The registry's pre-0.3.0 owner key (kept by link-identities).
+    pub fn legacy_owner(&self) -> Option<String> {
+        self.other
+            .get("legacy")
+            .and_then(|legacy| legacy.get("fields"))
+            .and_then(|fields| fields.get("host.owner_id"))
+            .or_else(|| self.host.other.get("owner_id"))
+            .and_then(Value::as_str)
+            .filter(|owner| !owner.is_empty())
+            .map(str::to_owned)
+    }
+    /// Personal-account keys the host's daemon reported on its last poll.
+    fn reported_account_keys(&self) -> std::collections::BTreeSet<String> {
+        self.capabilities
+            .values()
+            .filter_map(|value| value.get("account_owners"))
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
     /// Whether the host's daemon still keys personal accounts by pre-0.3.0 ids: a
     /// host registered before 0.3.0 whose daemon has not reported registry v2.
     pub fn legacy_registry(&self) -> bool {
@@ -210,6 +233,44 @@ pub async fn create(
 pub async fn get(State(app): State<App>, a: Auth, Path(name): Path<String>) -> Result<Json<Value>> {
     let (h, _) = resolve(&app, &a.account, &name).await?;
     Ok(Json(json!({"data":view(&app, h, true)})))
+}
+/// `GET /hosts/{id}/legacy-accounts`: the accounts behind the keys of a host
+/// registry written before 0.3.0, so `mcport host migrate` can re-key it by uuid.
+/// Only the host's owner may ask, and only about the registry's own owner key and the
+/// keys its daemon reported (evidence they are in that registry); keys MCPort cannot
+/// link to an account are left out.
+pub async fn legacy_accounts(
+    State(app): State<App>,
+    a: Auth,
+    Path(name): Path<String>,
+) -> Result<Json<Value>> {
+    let (h, access) = resolve(&app, &a.account, &name).await?;
+    if access != HostAccess::Owner {
+        return Err(Error::new(
+            403,
+            "access_denied",
+            "Only the account that registered a host can migrate its local registry.",
+            "Run mcport host migrate on the host's machine, signed in as the host's owner.",
+        ));
+    }
+    let legacy_owner_id = h.legacy_owner();
+    let mut keys = h.reported_account_keys();
+    keys.extend(legacy_owner_id.clone());
+    let mut accounts = Vec::new();
+    for key in keys {
+        if let Some(uuid) = app.store.linked_uuid(&key)? {
+            accounts.push(mcport_core::LegacyAccount {
+                legacy_id: key,
+                account: accounts::reference(&app, &uuid),
+            });
+        }
+    }
+    Ok(Json(json!({"data": mcport_core::LegacyHostAccounts {
+        host_id: h.host.id.clone(),
+        legacy: h.legacy_org().is_some(),
+        legacy_owner_id,
+        accounts,
+    }})))
 }
 pub async fn remove(
     State(app): State<App>,
@@ -968,5 +1029,74 @@ mod tests {
         .await;
         assert_eq!(job.actor.principal_id, "Scout");
         assert_eq!(job.actor.org_id, "");
+    }
+
+    #[tokio::test]
+    async fn owners_learn_the_accounts_behind_their_old_registry_keys_and_nobody_else_does() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.silicon("Scout", "si:scout", "Ada");
+        f.carbon("Cy", "c:cy");
+        let (host, _, connection) = host_with_connection(&f, "Ada", "per-user").await;
+        let path = format!("/api/v1/hosts/{host}/legacy-accounts");
+        // A host created after 0.3.0 has no old keys.
+        let (status, body) = f.as_("Ada", "GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["legacy"], false);
+        assert_eq!(body["data"]["accounts"], json!([]));
+        // A host registered before 0.3.0: its old owner key and what its daemon reported.
+        f.app
+            .store
+            .update::<HostRecord>("host", &host, |h| {
+                h.other.insert(
+                    "legacy".into(),
+                    json!({"fields":{"host.org_id":"tos","host.owner_id":"c:ada-old"}}),
+                );
+                h.capabilities.insert(
+                    connection.clone(),
+                    json!({"account_owners":["c:ada-old","si:scout-old","si:never-linked"]}),
+                );
+                true
+            })
+            .unwrap();
+        for (old, uuid) in [
+            ("c:ada-old", "Ada"),
+            ("si:scout-old", "Scout"),
+            ("c:cy-old", "Cy"),
+        ] {
+            f.app.store.db.lock().unwrap().execute(
+                "INSERT INTO identity_links(iam_principal_id,iam_public_id,accounts_uuid,linked_at,source) VALUES(?1,?1,?2,1,'test')",
+                rusqlite::params![old, uuid],
+            ).unwrap();
+        }
+        let (status, body) = f.as_("Ada", "GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let data = &body["data"];
+        assert_eq!(data["legacy"], true);
+        assert_eq!(data["legacy_owner_id"], "c:ada-old");
+        let accounts = data["accounts"].as_array().unwrap();
+        // Unlinked keys are left out, and so are linked ids the daemon never reported.
+        assert_eq!(accounts.len(), 2, "{body}");
+        assert_eq!(accounts[0]["legacy_id"], "c:ada-old");
+        assert_eq!(accounts[0]["account"]["uuid"], "Ada");
+        assert_eq!(accounts[0]["account"]["id"], "c:ada");
+        assert_eq!(accounts[1]["legacy_id"], "si:scout-old");
+        assert_eq!(accounts[1]["account"]["uuid"], "Scout");
+        // Strangers cannot find the host; custodians may see a Silicon's host but not migrate it.
+        assert_eq!(
+            f.as_("Cy", "GET", &path, None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        let (silicon_host, _, _) = host_with_connection(&f, "Scout", "none").await;
+        let (status, body) = f
+            .as_(
+                "Ada",
+                "GET",
+                &format!("/api/v1/hosts/{silicon_host}/legacy-accounts"),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["error"]["code"], "access_denied");
     }
 }

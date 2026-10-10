@@ -114,6 +114,17 @@ impl Store {
             .query_map([uuid], |row| row.get(0))?
             .collect::<std::result::Result<Vec<String>, _>>()?)
     }
+    /// The account an IAM-era principal id was linked to at cutover, if any.
+    pub fn linked_uuid(&self, iam_principal_id: &str) -> Result<Option<String>> {
+        let db = self.db.lock().map_err(|_| Error::internal())?;
+        Ok(db
+            .query_row(
+                "SELECT accounts_uuid FROM identity_links WHERE iam_principal_id=?",
+                [iam_principal_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
     /// Whether this webhook event id was already handled.
     pub fn webhook_handled(&self, event_id: &str) -> Result<bool> {
         let db = self.db.lock().map_err(|_| Error::internal())?;
