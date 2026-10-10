@@ -38,6 +38,8 @@ struct Stub {
     bearers: Mutex<Vec<String>>,
     /// An access token the backend answers with 401 token_expired.
     expired_access: Mutex<Option<String>>,
+    /// An access token the backend answers with 401 sign_in_revoked (introspection said so).
+    revoked_access: Mutex<Option<String>>,
 }
 type Shared = Arc<Stub>;
 
@@ -186,6 +188,14 @@ async fn me(headers: HeaderMap) -> (StatusCode, Json<Value>) {
 async fn connections(State(stub): State<Shared>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
     let token = bearer(&headers);
     stub.bearers.lock().unwrap().push(token.clone());
+    if stub.revoked_access.lock().unwrap().as_deref() == Some(token.as_str()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(
+                json!({"error":{"code":"sign_in_revoked","message":"This sign-in was signed out in Silicon Accounts.","recovery":"Sign in again.","outcome_unknown":false}}),
+            ),
+        );
+    }
     if stub.expired_access.lock().unwrap().as_deref() == Some(token.as_str()) {
         return (
             StatusCode::UNAUTHORIZED,
@@ -647,6 +657,58 @@ async fn a_spent_refresh_token_ends_the_sign_in_with_a_clear_reason() {
     assert!(sign_in_files(home.path()).is_empty());
     let status = json_of(&run(mcport(home.path(), &origin, &["login", "status", "--json"])).await);
     assert_eq!(status, json!({"authenticated": false}));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sign_in_revoked_elsewhere_is_confirmed_by_refresh_and_forgotten() {
+    let (stub, origin) = serve().await;
+    let home = tempfile::tempdir().unwrap();
+    run_with_stdin(
+        mcport(home.path(), &origin, &["login", "--slt-stdin"]),
+        "slt_ok",
+    )
+    .await;
+    // The service's introspection saw the sign-in end before any webhook arrived.
+    *stub.revoked_access.lock().unwrap() = Some("access-1".into());
+    stub.refuse_refresh.store(true, Ordering::SeqCst);
+    let output = run(mcport(
+        home.path(),
+        &origin,
+        &["connection", "ls", "--json"],
+    ))
+    .await;
+    assert_eq!(output.status.code(), Some(1));
+    let error = &json_of(&output)["error"];
+    assert_eq!(error["code"], "sign_in_ended", "{error}");
+    assert!(error["recovery"].as_str().unwrap().contains("mcport login"));
+    assert!(sign_in_files(home.path()).is_empty());
+    assert_eq!(*stub.bearers.lock().unwrap(), ["access-1"]);
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_home_that_cannot_keep_the_sign_in_fails_before_the_token_is_spent() {
+    use std::os::unix::fs::PermissionsExt;
+    let (stub, origin) = serve().await;
+    let home = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+    if std::fs::write(home.path().join("probe"), b"x").is_ok() {
+        // Running with privileges that ignore directory modes: nothing to prove here.
+        std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    }
+    let output = run_with_stdin(
+        mcport(home.path(), &origin, &["login", "--slt-stdin", "--json"]),
+        "slt_ok",
+    )
+    .await;
+    std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(json_of(&output)["error"]["code"].is_string());
+    assert!(
+        stub.slts.lock().unwrap().is_empty(),
+        "the single-use token was spent although it could not be kept"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

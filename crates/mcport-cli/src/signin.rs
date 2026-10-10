@@ -435,12 +435,14 @@ pub async fn login(cli: &Cli, args: LoginArgs) -> Result<Value> {
     let client = Client::new(&target.backend)?;
     let backend = client.backend_url();
     let sign_in = SignIn::new(&target.accounts_url, &target.app_id)?;
+    // Find out now whether the sign-in can be kept, before a single-use token or a
+    // Carbon's approval is spent on it.
+    let file = SessionFile::new(store.prepare_sign_in(&backend)?);
     check_backend(&client, &sign_in).await?;
     let (tokens, method) = match slt {
         Some(slt) => (sign_in.exchange_slt(&slt).await?, "slt"),
         None => (device_flow(cli.json, &args, &sign_in).await?, "device"),
     };
-    let file = SessionFile::new(store.prepare_sign_in(&backend)?);
     let lock = file.lock(Duration::from_secs(30)).await?;
     let previous = file.load().ok().flatten();
     let stored = StoredSignIn::new(&sign_in, &backend, method, tokens);

@@ -307,12 +307,15 @@ async fn run(cli: Cli) -> Result<Value> {
             let context = request_context(&session, settings.telemetry);
             let first = dispatch(&client, &context, &store, &session, command.clone()).await;
             match first {
-                // The service refused the token itself (clock skew, or a sign-out that
-                // predates it): refresh once and run the command again. A 401 means
-                // nothing was executed, so repeating is safe.
+                // The service refused the token itself (expired early by clock skew, or a
+                // sign-out it learned about): refresh once and run the command again. If
+                // the sign-in really ended, the refresh says so and forgets it. A 401
+                // means nothing was executed, so repeating is safe.
                 Err(CliError::Client(error))
                     if error.status() == Some(401)
-                        && (error.is_code("token_expired") || error.is_code("signed_out")) =>
+                        && ["token_expired", "signed_out", "sign_in_revoked"]
+                            .iter()
+                            .any(|code| error.is_code(code)) =>
                 {
                     let session = signin::signed_in(&store, &backend, true).await?;
                     let context = request_context(&session, settings.telemetry);
