@@ -95,3 +95,18 @@ Required commands:
   account to share with a Silicon you look after (`mcport allow add c:ada --silicon si:researcher`).
 - "Connection names resolve within the selected organization" → "Connection names resolve among the connections you can
   use, your own first".
+
+## CLI stage additions (2026-10-10)
+
+- CLI Experience, after the required commands: "`mcport logout` ends this machine's sign-in at Silicon Accounts; other
+  machines and the website stay signed in. One home keeps one sign-in per backend; several identities on one machine use
+  separate homes."
+- Rust Package & CLI: "The Rust package signs in with Silicon Accounts as MCPort's public client (device flow and
+  short-lived tokens) and keeps a stored sign-in with single-flight refresh, so the CLI has no capability the package
+  lacks."
+- Local MCPs: "Hosts registered before the move to Silicon Accounts keep serving their connections; their owner runs
+  `mcport host migrate <host>` once on the host to re-key its local provider accounts by account."
+- Sharing and Access: "A Silicon, or its custodian, chooses who outside its own people may share with it (`mcport allow
+  add <c:/si: id>`)."
+- CLI Examples: every `--principal` becomes `--account` (for example `mcport tool set docs delete --enabled false
+  --account si:researcher`).
