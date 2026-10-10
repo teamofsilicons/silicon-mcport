@@ -30,6 +30,7 @@ impl Target {
         let backend = cli
             .url
             .clone()
+            .filter(|url| !url.trim().is_empty())
             .or_else(|| settings.backend_url.clone())
             .unwrap_or_else(|| DEFAULT_BACKEND.into());
         let accounts_url = cli
@@ -176,31 +177,27 @@ pub fn status(cli: &Cli, offline: bool) -> (Value, bool) {
 
 /// Refresh the stored sign-in when needed and ask the backend who it belongs to.
 async fn verify(file: &SessionFile, backend: &str, stored: StoredSignIn) -> (Value, bool) {
-    let fresh = match file.fresh(MIN_VALID).await {
+    let mut fresh = match file.fresh(MIN_VALID).await {
         Ok(fresh) => fresh,
-        Err(SessionError::SignIn(error @ SignInError::SignInEnded { .. })) => {
-            return signed_out(json!({"reason": "sign_in_ended", "message": error.message()}));
-        }
-        Err(SessionError::NotSignedIn) => return signed_out(json!({})),
-        Err(error) => {
-            let mut value = status_json(&stored, false);
-            value["warning"] = json!(format!(
-                "{error} Showing the stored sign-in without checking it."
-            ));
-            return (value, true);
-        }
+        Err(error) => return unconfirmed(error, &stored),
     };
-    let me = match Client::new(backend) {
-        Ok(client) => {
-            let context = RequestContext::authenticated(fresh.access_token.expose());
-            tokio::time::timeout(
-                Duration::from_secs(15),
-                async move { client.me(&context).await },
-            )
-            .await
-        }
-        Err(error) => Ok(Err(error)),
+    let Ok(client) = Client::new(backend) else {
+        return (status_json(&fresh, false), true);
     };
+    let mut me = ask_me(&client, &fresh).await;
+    // Refused like a command would be: refresh once, as commands do, before deciding.
+    if let Ok(Err(error)) = &me
+        && error.status() == Some(401)
+        && RETRY_CODES.iter().any(|code| error.is_code(code))
+    {
+        match file.fresh(Duration::from_secs(u64::from(u32::MAX))).await {
+            Ok(refreshed) => {
+                fresh = refreshed;
+                me = ask_me(&client, &fresh).await;
+            }
+            Err(error) => return unconfirmed(error, &fresh),
+        }
+    }
     match me {
         Ok(Ok(me)) => {
             let mut value = status_json(&fresh, true);
@@ -234,6 +231,41 @@ async fn verify(file: &SessionFile, backend: &str, stored: StoredSignIn) -> (Val
             let mut value = status_json(&fresh, false);
             value["warning"] =
                 json!("The backend did not answer within 15 seconds; showing the stored sign-in.");
+            (value, true)
+        }
+    }
+}
+
+/// The service codes after which a command refreshes once and tries again: the token
+/// expired early (clock skew), or a sign-out the service learned about. A 401 means
+/// nothing ran, so trying again is safe; if the sign-in really ended, the refresh says
+/// so and the stored sign-in is forgotten.
+pub const RETRY_CODES: [&str; 3] = ["token_expired", "signed_out", "sign_in_revoked"];
+
+async fn ask_me(
+    client: &Client,
+    signed_in: &StoredSignIn,
+) -> std::result::Result<
+    std::result::Result<mcport_client::Me, mcport_client::Error>,
+    tokio::time::error::Elapsed,
+> {
+    let context = RequestContext::authenticated(signed_in.access_token.expose());
+    tokio::time::timeout(Duration::from_secs(15), client.me(&context)).await
+}
+
+/// `login status` when refreshing failed: signed out if the sign-in ended, otherwise
+/// the stored sign-in with a warning.
+fn unconfirmed(error: SessionError, stored: &StoredSignIn) -> (Value, bool) {
+    match error {
+        SessionError::SignIn(error @ SignInError::SignInEnded { .. }) => {
+            signed_out(json!({"reason": "sign_in_ended", "message": error.message()}))
+        }
+        SessionError::NotSignedIn => signed_out(json!({})),
+        error => {
+            let mut value = status_json(stored, false);
+            value["warning"] = json!(format!(
+                "{error} Showing the stored sign-in without checking it."
+            ));
             (value, true)
         }
     }

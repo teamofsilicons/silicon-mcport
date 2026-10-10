@@ -313,9 +313,7 @@ async fn run(cli: Cli) -> Result<Value> {
                 // means nothing was executed, so repeating is safe.
                 Err(CliError::Client(error))
                     if error.status() == Some(401)
-                        && ["token_expired", "signed_out", "sign_in_revoked"]
-                            .iter()
-                            .any(|code| error.is_code(code)) =>
+                        && signin::RETRY_CODES.iter().any(|code| error.is_code(code)) =>
                 {
                     let session = signin::signed_in(&store, &backend, true).await?;
                     let context = request_context(&session, settings.telemetry);

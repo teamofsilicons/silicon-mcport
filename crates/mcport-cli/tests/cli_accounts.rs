@@ -168,8 +168,22 @@ async fn discovery(State(stub): State<Shared>) -> Json<Value> {
     )
 }
 
-async fn me(headers: HeaderMap) -> (StatusCode, Json<Value>) {
-    if !bearer(&headers).starts_with("access-") {
+async fn me(State(stub): State<Shared>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
+    let token = bearer(&headers);
+    for (refused, code) in [
+        (&stub.expired_access, "token_expired"),
+        (&stub.revoked_access, "sign_in_revoked"),
+    ] {
+        if refused.lock().unwrap().as_deref() == Some(token.as_str()) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(
+                    json!({"error":{"code":code,"message":"Refused.","recovery":"Sign in again.","outcome_unknown":false}}),
+                ),
+            );
+        }
+    }
+    if !token.starts_with("access-") {
         return (
             StatusCode::UNAUTHORIZED,
             Json(
@@ -683,6 +697,32 @@ async fn a_sign_in_revoked_elsewhere_is_confirmed_by_refresh_and_forgotten() {
     assert!(error["recovery"].as_str().unwrap().contains("mcport login"));
     assert!(sign_in_files(home.path()).is_empty());
     assert_eq!(*stub.bearers.lock().unwrap(), ["access-1"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn login_status_refreshes_once_before_deciding_like_a_command_would() {
+    let (stub, origin) = serve().await;
+    let home = tempfile::tempdir().unwrap();
+    run_with_stdin(
+        mcport(home.path(), &origin, &["login", "--slt-stdin"]),
+        "slt_ok",
+    )
+    .await;
+    // The service refuses the stored token (early expiry): a refresh fixes it.
+    *stub.expired_access.lock().unwrap() = Some("access-1".into());
+    let status = json_of(&run(mcport(home.path(), &origin, &["login", "status", "--json"])).await);
+    assert_eq!(status["authenticated"], true, "{status}");
+    assert_eq!(status["verified"], true);
+    assert_eq!(stub.rotations.load(Ordering::SeqCst), 1);
+    // The service says the sign-in was revoked and Silicon Accounts agrees: signed out.
+    *stub.revoked_access.lock().unwrap() = Some("access-2".into());
+    stub.refuse_refresh.store(true, Ordering::SeqCst);
+    let output = run(mcport(home.path(), &origin, &["login", "status", "--json"])).await;
+    assert!(output.status.success());
+    let status = json_of(&output);
+    assert_eq!(status["authenticated"], false, "{status}");
+    assert_eq!(status["reason"], "sign_in_ended");
+    assert!(sign_in_files(home.path()).is_empty());
 }
 
 #[cfg(unix)]
