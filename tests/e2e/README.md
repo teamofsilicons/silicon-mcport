@@ -1,5 +1,11 @@
 # MCPort end-to-end fixtures
 
+> **Status:** this journey predates 0.3.0. Its fixture still speaks the previous identity service's protocol and
+> testing-environment lifecycle, which 0.3.0 removed, so the journey cannot sign in to a 0.3.0 service.
+> `scripts/check.py --skip-e2e` (and CI) leave it out until it signs in with Silicon Accounts fixtures. Until then,
+> [deploy/testing.md](../../deploy/testing.md) describes acceptance against a test Silicon Accounts deployment, and the
+> migration's real-binary runs are recorded in [docs/migration/progress.md](../../docs/migration/progress.md).
+
 Run the real server and CLI through official IAM SDK wire protocols and actual HTTP/stdio MCP transports:
 
 ```sh

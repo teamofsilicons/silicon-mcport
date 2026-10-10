@@ -6,7 +6,8 @@
 cargo fmt --all --check
 cargo test --locked --workspace
 cargo clippy --locked --workspace --all-targets -- -D warnings
-python3 -m unittest discover -s scripts/tests -p 'test_*.py'    # needs PyYAML (scripts/requirements.txt)
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'    # packaging, backend bundle and catalog scripts
+python3 scripts/check.py --skip-e2e                            # all of the above, the discovery commands and the web
 ```
 
 The Rust tests need no database or network: the service uses temporary SQLite stores and in-process fixtures (a local
@@ -67,10 +68,15 @@ exact calls.
 ## Releases
 
 The CLI ships through Silicon Apps (`silicon-apps install mcport`); the Silicon Apps daemon updates installed apps, and
-MCPort has no updater of its own. A release is one `.tar.gz` per target with `apps.yaml` at its root, validated with
-`silicon-apps validate` and packed with `silicon-apps pack`; every target's binary must answer `mcport --help`, `mcport
-accounts --json` and `mcport login status --json` signed out, in an empty home, without a network. Development releases
-install as `mcport>dev`. The release workflow builds candidate artifacts only; uploading them is an operator step.
+MCPort has no updater of its own. A release is one `.tar.gz` per target with an `apps.yaml` that lists only that target,
+built by `scripts/package-apps.sh <version> <target> <binary>`: it checks the binary, runs `mcport --help`, `mcport
+accounts --json` and `mcport login status --json` signed out in an empty home whenever the machine can run it, then
+`silicon-apps validate` and `silicon-apps pack`. Linux packages are static musl builds (linked with Zig), so one binary
+runs on every distribution. The release workflow (`.github/workflows/release.yml`, on a `v<version>` tag) builds and
+checks every target and uploads the archives as the artifact `mcport-silicon-apps-release`; uploading them to Silicon
+Apps is an operator step. Only the four Linux validation workers are live today, so the macOS and Windows archives are
+kept for later. Development releases install as `mcport>dev`. [scripts/README.md](../scripts/README.md) has the
+commands.
 
 Publish the crates in dependency order: `mcport-core`, `mcport-mcp`, `mcport-api`, `mcport-daemon`, `mcport-client`,
 then `mcport-cli`. 0.3.0 changes the identity types and removes the old sign-in calls, so it is a breaking release for

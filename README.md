@@ -43,6 +43,8 @@ See [development](docs/development.md) for configuration, tests and releases.
 
 - [Usage and workflows](docs/usage.md)
 - [Development and deployment](docs/development.md)
+- [Release candidates and Silicon Apps packages](scripts/README.md)
+- [Service deployment](deploy/README.md) and [the website on Vercel](deploy/vercel.md)
 - [Architecture and trust boundaries](docs/architecture.md)
 - [API contract](docs/API.md) and [OpenAPI](docs/openapi.yaml)
 - [Rust package](crates/mcport-client/README.md) and [CLI guide](crates/mcport-cli/README.md)
