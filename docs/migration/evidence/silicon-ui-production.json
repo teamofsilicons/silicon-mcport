@@ -1,0 +1,78 @@
+{
+  "method": "Existing genuine Accounts CLI sessions rendered through a production BFF test cookie; no synthetic identity or authorization token",
+  "environment": "public production website and API",
+  "pages": [
+    {
+      "app": "mcport",
+      "route": "connections",
+      "status": 200,
+      "heading": "Your connections",
+      "violations": [],
+      "tokens": {
+        "--space-4": "16px",
+        "--space-6": "24px",
+        "--radius-surface": "14px"
+      }
+    },
+    {
+      "app": "mcport",
+      "route": "directory",
+      "status": 200,
+      "heading": "MCP directory",
+      "violations": [],
+      "tokens": {
+        "--space-4": "16px",
+        "--space-6": "24px",
+        "--radius-surface": "14px"
+      }
+    },
+    {
+      "app": "mcport",
+      "route": "hosts",
+      "status": 200,
+      "heading": "Hosts",
+      "violations": [],
+      "tokens": {
+        "--space-4": "16px",
+        "--space-6": "24px",
+        "--radius-surface": "14px"
+      }
+    },
+    {
+      "app": "mcport",
+      "route": "activity",
+      "status": 200,
+      "heading": "Activity",
+      "violations": [],
+      "tokens": {
+        "--space-4": "16px",
+        "--space-6": "24px",
+        "--radius-surface": "14px"
+      }
+    },
+    {
+      "app": "mcport",
+      "route": "settings",
+      "status": 200,
+      "heading": "Settings",
+      "violations": [],
+      "tokens": {
+        "--space-4": "16px",
+        "--space-6": "24px",
+        "--radius-surface": "14px"
+      }
+    },
+    {
+      "app": "mcport",
+      "route": "help",
+      "status": 200,
+      "heading": "A little setup. A lot of possibility.",
+      "violations": [],
+      "tokens": {
+        "--space-4": "16px",
+        "--space-6": "24px",
+        "--radius-surface": "14px"
+      }
+    }
+  ]
+}
