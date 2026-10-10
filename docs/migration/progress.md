@@ -322,11 +322,13 @@ What changed:
   (status: predates 0.3.0, left out of CI). Service wording: a test handle and two comments (P20).
 - **Migration records:** `cutover.md` rewritten end to end (order and dependencies, Silicon Accounts calls, mapping,
   bundle, CLI packages and a development release before the day, website environment, runtime env, the cutover in
-  seven steps, Silicons still on the Honeycomb CLI, rollback for service/website/CLI, after); 11 commands marked
-  `# run at cutover`.
+  seven steps, Silicons still on the Honeycomb CLI, rollback for service/website/CLI, after); 12 commands marked
+  `# run at cutover`. The webhook secret is generated before the day and the URL set only once 0.3.0 answers; the
+  IAM-era `runtime.env` is copied aside first because the installer's backup holds the edited file.
 
 Commits: `c85982b` packaging + CI · `fbc9633` service-only bundle · `a831b4f` website deployment · `686042a` docs ·
-`d94f1eb` service wording · `bc806c5` `--allow-dynamic` and bash in CI · (this record).
+`d94f1eb` service wording · `bc806c5` `--allow-dynamic` and bash in CI · `4b1ea5c` records · `3f54669` runbook
+refinements · (this update).
 
 Tests (all with `CARGO_TARGET_DIR=target/mig`):
 
