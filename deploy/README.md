@@ -3,13 +3,14 @@
 The `Native backend candidate` workflow builds and tests the Rust server natively
 on ARM64 inside a pinned Amazon Linux 2023 image. It checks required glibc symbols
 against 2.34 and starts/stops the real executable using a disposable data directory.
-The web job separately tests and builds the website. Assembly requires the same
-source revision and server checksum and emits an immutable `.tar.gz` plus SHA-256.
-The server embeds its full source revision and exposes it in `/health`; both
-native smoke and target installation require that exact revision and version.
-The bundle includes the server, website, systemd unit, proxy example, installer,
-license, build provenance and a checksum for every file. It contains no runtime
-credentials, database, encryption key or deployment settings.
+Assembly requires the same source revision and server checksum and emits an
+immutable `.tar.gz` plus SHA-256. The server embeds its full source revision and
+exposes it in `/health`; both native smoke and target installation require that
+exact revision and version. The bundle includes the server, systemd unit, proxy
+example, installer, license, build provenance and a checksum for every file. It
+contains no runtime credentials, database, encryption key or deployment settings,
+and no website: the website is a separate Next.js deployment on Vercel
+([vercel.md](vercel.md)), and the installer refuses a bundle that still carries one.
 
 This server bundle is separate from the `mcport` CLI packages distributed through
 Silicon Apps. No host, DNS name, runtime credentials, production upload or
@@ -20,7 +21,7 @@ calls, mail delivery or telemetry ingestion.
 ## Prepare and inspect
 
 Dispatch `.github/workflows/backend.yml` at the exact committed revision, wait for
-all three jobs and download `mcport-backend-candidate`. Confirm the run's head SHA
+both jobs and download `mcport-backend-candidate`. Confirm the run's head SHA
 and the downloaded archive's sidecar digest. Use this installer from the reviewed
 source revision; do not execute code from an unverified archive.
 

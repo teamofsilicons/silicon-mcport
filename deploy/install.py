@@ -34,12 +34,12 @@ BACKUPS = Path("/var/backups/mcport")
 
 
 def allowed_name(name):
+    # The bundle is the service alone: the website deploys separately (Next.js), so a
+    # bundle that still carries web/dist is refused rather than installed half-used.
     path = PurePosixPath(name)
     return (name == str(path) and not path.is_absolute() and ".." not in path.parts
             and "\\" not in name and not any(ord(c) < 32 for c in name)
-            and (name in FIXED_FILES or (name.startswith("web/dist/")
-                 and all(not part.startswith(".") for part in path.parts)
-                 and path.suffix.lower() in {".html", ".js", ".css", ".svg", ".txt", ".woff", ".woff2", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".map", ".json"})))
+            and name in FIXED_FILES)
 
 
 def validate_elf(data):
@@ -71,8 +71,8 @@ def validate_bundle(path, expected_digest, expected_revision):
                     or member.mode != expected_mode or member.uid != 0 or member.gid != 0):
                 raise ValueError("Unexpected, duplicate or unsafe archive member")
             members[member.name] = (archive.extractfile(member).read(), member.mode)
-    if not FIXED_FILES <= members.keys() or "web/dist/index.html" not in members:
-        raise ValueError("Bundle is missing required service, website or provenance files")
+    if not FIXED_FILES <= members.keys():
+        raise ValueError("Bundle is missing required service or provenance files")
     metadata = json.loads(members["BUILD.json"][0])
     if (metadata.get("format_version") != 1 or metadata.get("source_revision") != expected_revision
             or metadata.get("target") != "aarch64-unknown-linux-gnu"
@@ -257,7 +257,7 @@ def install_release(metadata, members, public_health_url, release, previous, tel
             destination.chmod(mode)
         # Validated payloads contain only public release files. Set directory
         # permissions explicitly so an operator's private umask cannot hide
-        # website assets from the unprivileged service account.
+        # release files from the unprivileged service account.
         for directory in staging.rglob("*"):
             if directory.is_dir():
                 directory.chmod(0o755)
