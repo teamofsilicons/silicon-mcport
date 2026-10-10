@@ -159,7 +159,9 @@ What changed:
   `README.md`, `docs/usage.md`, `docs/development.md`, `docs/architecture.md`, `docs/ASSETS.md`; pre-0.3.0 evidence
   moved to `docs/history/`. There is no docs sync script in this repo; a unit test guards the bundled guides instead.
 
-Commits: `2f2fa5a` legacy-accounts endpoint · `0ca4271` client crate and CLI · `9c3fee5` docs · (this record).
+Commits: `2f2fa5a` legacy-accounts endpoint · `0ca4271` client crate and CLI · `9c3fee5` docs · `d877e9b` records ·
+`cd43f1e` storage checked before a token is spent, `sign_in_revoked` refreshes once · `b186fc8` `login status` refreshes
+once before calling a sign-in ended · (this update).
 
 Tests (all with `CARGO_TARGET_DIR=target/mig`):
 
@@ -167,7 +169,7 @@ Tests (all with `CARGO_TARGET_DIR=target/mig`):
 |---|---|
 | `cargo fmt --all --check` | pass |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | pass |
-| `cargo test --locked --workspace --no-fail-fast` | pass: 153 tests + 3 doctests (server 71, daemon 18, mcp 12, cli 11 unit + 12 binary, client 11 unit + 8 sign-in, api 10) |
+| `cargo test --locked --workspace --no-fail-fast` (at `b186fc8`) | pass: 156 tests + 3 doctests (server 71, daemon 18, mcp 12, cli 11 unit + 15 binary, client 11 unit + 8 sign-in, api 10) |
 | `cargo check --workspace --all-targets --locked` on the exported tree of `2f2fa5a` alone | pass |
 | `cargo package --list --allow-dirty --offline -p <crate>` for core, api, client, daemon, cli | file lists include the bundled guides |
 
@@ -180,8 +182,9 @@ token deleting it, unreadable/old-format/linked files refused). The real binary 
 nothing written; Silicon `--slt-stdin` with no token in any file; refusals with recovery and no echo; Carbon device
 flow with `--json` lines and a replaced sign-in revoked; two concurrent commands refreshing once; a refused token
 refreshed and the command repeated; a spent refresh token; an unreachable Accounts while the token still works; logout
-revoke form; 0.2 sign-ins ignored and removed; backend/Accounts mismatch refused before spending the token; settings
-precedence). Unit: argument grammar (documented forms parse, removed ones do not), every help page has a description
+revoke form; 0.2 sign-ins ignored and removed; backend/Accounts mismatch refused before spending the token; an
+unwritable home refused before spending the token; `sign_in_revoked` confirmed by a refresh and forgotten; `login
+status` refreshing once on a refused token; settings precedence). Unit: argument grammar (documented forms parse, removed ones do not), every help page has a description
 and none names the removed concepts, the bundled guides.
 
 ### Proofs against the shared Accounts stack (real binaries)
@@ -256,6 +259,12 @@ ACCOUNTS_URL=http://localhost:9590 target/mig/debug/mcport …` with a fresh `$H
     both files `-rw-------`; `daemon status` → `registry_version 2`; `account show SVs` →
     `{"account":"2Cd","connected":true,…}`; `tool call SVs echo` through the v2 registry succeeded (call `Egf`);
     `daemon stop` stopped it.
+
+After `cd43f1e`/`b186fc8` the final binary was run again on the same stack: Silicon `--slt-stdin` → `login status`
+(`verified:true`) → `tool call 0sx echo` (call `6ec`) → `logout` (`revoked:true`) → `{"authenticated":false}`; Carbon
+device flow (code `MJZM-RUX7` approved, 204) → `login status` (`verified:true`) → `connection ls` →
+`[('0sx','custodian')]` → `logout`; the three discovery commands under the Silicon Apps macOS sandbox again exit 0, 0,
+0 with 0 files written.
 
 All sign-ins made here were signed out at the end (`logout` → `revoked:true`), and every process this stage started
 was stopped (`.mig/pids/` is empty; nothing listens on 4240-4259).
