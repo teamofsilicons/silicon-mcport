@@ -11,7 +11,6 @@ test-results/
 playwright-report/
 .DS_Store
 
-/targets/
 /dist/
 __pycache__/
 *.pyc

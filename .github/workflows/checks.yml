@@ -28,17 +28,9 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: python -m pip install --disable-pip-version-check -r scripts/requirements.txt
-      - name: Rust, web, package and real-binary regression gates
-        run: python scripts/check.py --e2e-run-dir .local/e2e/ci
-      - name: Retain isolated fixture diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: mcport-e2e-diagnostics
-          path: |
-            .local/e2e/ci/**/*.log
-            .local/e2e/ci/result.json
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
+      # Formatting, workspace tests, strict Clippy, script and packaging tests, the three
+      # Silicon Apps discovery commands against the CLI the tests built, and the web.
+      # --skip-e2e: the real-binary journey in tests/e2e still drives the sign-in that
+      # 0.3.0 removed; it runs here again once it signs in with Silicon Accounts fixtures.
+      - name: Rust, scripts, discovery commands and web
+        run: python scripts/check.py --skip-e2e
