@@ -118,12 +118,12 @@ def read_binary(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def check_format(data: bytes, target: str) -> str:
+def check_format(data: bytes, target: str, allow_dynamic: bool = False) -> str:
     """Describe the executable, or refuse bytes that are not a TARGET executable."""
     system, arch = TARGETS[target]
     try:
         if system == "Linux":
-            return check_elf(data, target, arch)
+            return check_elf(data, target, arch, allow_dynamic)
         if system == "Darwin":
             return check_macho(data, target, arch)
         return check_pe(data, target, arch)
@@ -131,7 +131,7 @@ def check_format(data: bytes, target: str) -> str:
         raise PackageError(f"The executable header is truncated, so this is not a complete {target} build.") from None
 
 
-def check_elf(data: bytes, target: str, arch: str) -> str:
+def check_elf(data: bytes, target: str, arch: str, allow_dynamic: bool = False) -> str:
     if data[:4] != b"\x7fELF":
         raise PackageError(f"The binary is not a Linux (ELF) executable, so it cannot be the {target} build.")
     width, machine, label = ELF_MACHINES[arch]
@@ -156,6 +156,8 @@ def check_elf(data: bytes, target: str, arch: str) -> str:
         raise PackageError("The ELF program headers are missing or truncated.")
     for index in range(phnum):
         kind, = struct.unpack_from("<I", data, phoff + index * phentsize)
+        if kind == 3 and allow_dynamic:
+            return f"dynamically linked {32 if width == 1 else 64}-bit ELF executable for {label} (a development build)"
         if kind == 3:  # PT_INTERP: the binary needs a dynamic loader from the system
             start = phoff + index * phentsize
             if width == 2:
@@ -393,7 +395,7 @@ def verify_archive(archive: Path, manifest: str, data: bytes, target: str, versi
 def check_only(args) -> dict:
     version, target = check_version(args.version), check_target(args.target)
     data = read_binary(args.binary)
-    description = check_format(data, target)
+    description = check_format(data, target, allow_dynamic=args.allow_dynamic)
     digest = hashlib.sha256(data).hexdigest()
     with tempfile.TemporaryDirectory(prefix="mcport-check-") as work:
         try:
@@ -465,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("binary", type=Path, help="the built mcport executable for that target")
     parser.add_argument("--check-only", action="store_true", help="run the binary checks on this machine and stop (CI's native runners)")
     parser.add_argument("--record", type=Path, help="with --check-only: write the check record (JSON) here")
+    parser.add_argument("--allow-dynamic", action="store_true", help="with --check-only: accept a dynamically linked Linux development build (packages are always static)")
     parser.add_argument("--checked-record", type=Path, help="a record from --check-only on a native runner, for binaries this machine cannot run")
     parser.add_argument("--require-discovery", action="store_true", help="refuse to pack unless the commands ran here or a matching record is given")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT, help="where archives go (default dist/apps)")
@@ -474,6 +477,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("'host' is only accepted with --check-only; packages name their target.")
     if args.record and not args.check_only:
         parser.error("--record goes with --check-only.")
+    if args.allow_dynamic and not args.check_only:
+        parser.error("--allow-dynamic goes with --check-only; packages are always static.")
     try:
         result = check_only(args) if args.check_only else package(args)
     except PackageError as error:

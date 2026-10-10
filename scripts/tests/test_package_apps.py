@@ -107,6 +107,14 @@ class FormatTests(unittest.TestCase):
             with self.subTest(target=target), self.assertRaisesRegex(package_apps.PackageError, "ld-linux.so.2.*musl"):
                 package_apps.check_format(header(target, dynamic=True), target)
 
+    def test_development_checks_may_accept_a_dynamic_build_but_packages_never_do(self):
+        description = package_apps.check_format(header("linux-x86_64", dynamic=True), "linux-x86_64", allow_dynamic=True)
+        self.assertIn("development build", description)
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+            package_apps.main([VERSION, "linux-x86_64", "mcport", "--allow-dynamic"])
+        self.assertIn("packages are always static", errors.getvalue())
+
     def test_armv7_needs_the_hard_float_abi(self):
         with self.assertRaisesRegex(package_apps.PackageError, "soft-float"):
             package_apps.check_format(header("linux-armv7hf", soft_float=True), "linux-armv7hf")

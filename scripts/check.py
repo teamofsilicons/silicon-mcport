@@ -30,7 +30,7 @@ def main():
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
     cli = target_dir / "debug" / ("mcport.exe" if os.name == "nt" else "mcport")
     version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
-    run(sys.executable, "-I", ROOT / "scripts" / "package_apps.py", "--check-only", version, "host", cli)
+    run(sys.executable, "-I", ROOT / "scripts" / "package_apps.py", "--check-only", "--allow-dynamic", version, "host", cli)
     if not args.skip_web:
         npm = shutil.which("npm") or shutil.which("npm.cmd")
         if not npm:

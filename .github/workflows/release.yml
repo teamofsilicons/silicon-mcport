@@ -107,7 +107,7 @@ jobs:
         run: |
           mkdir -p "native/$APPS_TARGET"
           cp "target/$RUST_TARGET/release/$BINARY" "native/$APPS_TARGET/$BINARY"
-          scripts/package-apps.sh --check-only --record "native/$APPS_TARGET/mcport-$APPS_TARGET.json" \
+          bash scripts/package-apps.sh --check-only --record "native/$APPS_TARGET/mcport-$APPS_TARGET.json" \
             "$VERSION" "$APPS_TARGET" "native/$APPS_TARGET/$BINARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -154,7 +154,7 @@ jobs:
             esac
             # Linux archives are checked again here (natively or through qemu); macOS and
             # Windows ones carry the record their native runner wrote for the same bytes.
-            PACKAGE_APPS_EMULATOR="$emulator" scripts/package-apps.sh --require-discovery \
+            PACKAGE_APPS_EMULATOR="$emulator" bash scripts/package-apps.sh --require-discovery \
               --checked-record "$dir/mcport-$target.json" "$VERSION" "$target" "$binary"
           done
           mkdir -p dist/apps/checks

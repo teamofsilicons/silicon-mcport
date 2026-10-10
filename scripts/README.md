@@ -45,7 +45,8 @@ copy, and writes the `.sha256`. It never overwrites an archive.
 qemu-user for those checks. `--check-only [--record FILE]` runs only the binary checks and
 writes a record of them; `--checked-record FILE` lets a machine that cannot run a binary
 pack it on the strength of that record (same target, version and SHA-256);
-`--require-discovery` refuses to pack when neither happened.
+`--require-discovery` refuses to pack when neither happened. `--allow-dynamic` (with `--check-only` only) accepts a
+dynamically linked Linux development build, which is how `check.py` checks the debug CLI; packages are always static.
 
 The packer is the official Silicon Apps CLI, 0.2.0 or newer:
 `cargo install --locked silicon-apps-cli --version 0.2.0`. `validate` and `pack` are local
