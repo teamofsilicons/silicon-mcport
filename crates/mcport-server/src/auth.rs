@@ -172,7 +172,8 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
     let mut account = row.ok_or_else(Error::internal)?;
     if lookup {
         match accounts::refresh(app, &account.uuid, false).await {
-            Ok(Some(fresh)) => account = fresh,
+            // Lookups carry no name or photo; the caller shared them by signing in.
+            Ok(Some(fresh)) => account = accounts::apply_profile(app, fresh).await,
             Ok(None) => {}
             Err(error) => {
                 tracing::warn!(code = %error.1.code, "Continuing with token claims after a failed account lookup");
@@ -234,7 +235,7 @@ mod tests {
     use super::*;
     use crate::test_support::{TestKey, fixture};
     use axum::http::StatusCode;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::sync::atomic::Ordering;
 
     #[tokio::test]
@@ -257,6 +258,73 @@ mod tests {
         // The JWKS was fetched once and reused; no introspection on plain reads.
         assert_eq!(f.stub.jwks_requests.load(Ordering::SeqCst), 1);
         assert_eq!(f.stub.introspections.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn names_and_photos_come_from_the_user_base_and_are_never_cleared_by_lookups() {
+        let f = fixture().await;
+        f.carbon("Ca1", "c:ada");
+        f.member(
+            "Ca1",
+            "c:ada",
+            "Ada Lovelace",
+            Some("https://accounts.example/ada.png"),
+        );
+        f.carbon("Ca2", "c:grace");
+        f.stub.users.lock().unwrap().remove("Ca2");
+        // A sign-in reads the user base once: an app's lookup carries no name or photo.
+        let (_, body) = f.as_("Ca1", "GET", "/api/v1/me", None).await;
+        assert_eq!(body["data"]["display_name"], "Ada Lovelace", "{body}");
+        assert_eq!(body["data"]["pfp_url"], "https://accounts.example/ada.png");
+        assert_eq!(f.stub.user_reads.load(Ordering::SeqCst), 1);
+        f.as_("Ca1", "GET", "/api/v1/me", None).await;
+        assert_eq!(
+            f.stub.user_reads.load(Ordering::SeqCst),
+            1,
+            "same sign-in: no new read"
+        );
+        // An account outside the user base keeps its id as its only name.
+        let (status, body) = f.as_("Ca2", "GET", "/api/v1/me", None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["data"]["display_name"], "");
+        assert!(
+            body["data"].get("pfp_url").is_none_or(Value::is_null),
+            "{body}"
+        );
+        // A photo learned from account.updated survives the next lookup (which has none).
+        let (status, _) = f
+            .webhook(&crate::test_support::event(
+                "evt-photo",
+                "account.updated",
+                &crate::test_support::at(0),
+                json!({"uuid":"Ca2","membership_id":"mcport:Ca2","changed":["display_name","pfp_url"],
+                    "account":{"uuid":"Ca2","membership_id":"mcport:Ca2","kind":"carbon","id":"c:grace",
+                        "display_name":"Grace Hopper","pfp_url":"https://accounts.example/grace.png","version":3}}),
+            ))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        refresh_row_now(&f, "Ca2").await;
+        let row = f.app.store.account("Ca2").unwrap().unwrap();
+        assert_eq!(row.display_name, "Grace Hopper");
+        assert_eq!(
+            row.pfp_url.as_deref(),
+            Some("https://accounts.example/grace.png")
+        );
+    }
+    async fn refresh_row_now(f: &crate::test_support::Fixture, uuid: &str) {
+        f.app
+            .store
+            .update_account(uuid, |row| {
+                let mut row = row?;
+                row.looked_up_at = 0;
+                Some(row)
+            })
+            .unwrap();
+        let fresh = accounts::refresh(&f.app, uuid, true)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(fresh.looked_up_at > 0);
     }
 
     #[tokio::test]

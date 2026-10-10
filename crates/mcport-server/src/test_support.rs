@@ -60,11 +60,15 @@ impl TestKey {
 #[derive(Default)]
 pub struct Stub {
     pub keys: Mutex<Vec<Value>>,
+    /// What an app's lookup answers: the public identity only (no name or photo).
     pub accounts: Mutex<BTreeMap<String, Value>>,
+    /// MCPort's user base: members' display names and photos.
+    pub users: Mutex<BTreeMap<String, Value>>,
     pub inactive: Mutex<HashSet<String>>,
     pub jwks_requests: AtomicUsize,
     pub lookups: AtomicUsize,
     pub introspections: AtomicUsize,
+    pub user_reads: AtomicUsize,
 }
 async fn jwks(State(stub): State<Arc<Stub>>) -> Json<Value> {
     stub.jwks_requests.fetch_add(1, Ordering::SeqCst);
@@ -92,6 +96,21 @@ async fn lookup(
     match stub.accounts.lock().unwrap().get(&uuid) {
         Some(account) => Json(account.clone()).into_response(),
         None => not_found(),
+    }
+}
+async fn user(
+    State(stub): State<Arc<Stub>>,
+    Path((app, uuid)): Path<(String, String)>,
+) -> Response {
+    stub.user_reads.fetch_add(1, Ordering::SeqCst);
+    assert_eq!(app, "mcport");
+    match stub.users.lock().unwrap().get(&uuid) {
+        Some(user) => Json(user.clone()).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error":{"code":"user_not_found","message":"No such user."}})),
+        )
+            .into_response(),
     }
 }
 async fn lookup_by_id(State(stub): State<Arc<Stub>>, Path(id): Path<String>) -> Response {
@@ -159,6 +178,7 @@ pub async fn fixture_with(change: impl FnOnce(&mut Config)) -> Fixture {
         .route("/.well-known/jwks.json", get(jwks))
         .route("/v1/accounts/by-id/{id}", get(lookup_by_id))
         .route("/v1/accounts/{uuid}", get(lookup))
+        .route("/v1/apps/{app}/users/{uuid}", get(user))
         .route("/v1/oauth/introspect", post(introspect))
         .with_state(stub.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -178,19 +198,35 @@ pub async fn fixture_with(change: impl FnOnce(&mut Config)) -> Fixture {
     }
 }
 impl Fixture {
-    /// Make Accounts know a Carbon.
+    /// Make Accounts know a Carbon (and a member of MCPort's user base).
     pub fn carbon(&self, uuid: &str, id: &str) {
+        // Like Silicon Accounts, an app's lookup carries no name or photo.
         self.stub.accounts.lock().unwrap().insert(
             uuid.into(),
-            json!({"uuid":uuid,"kind":"carbon","id":id,"display_name":id.trim_start_matches("c:"),"pfp_url":format!("https://accounts.example/pfp/{uuid}.png"),"status":"active"}),
+            json!({"uuid":uuid,"kind":"carbon","id":id,"status":"active"}),
+        );
+        self.member(
+            uuid,
+            id,
+            id.trim_start_matches("c:"),
+            Some(&format!("https://accounts.example/pfp/{uuid}.png")),
         );
     }
-    /// Make Accounts know a Silicon looked after by `custodian`.
+    /// Make Accounts know a Silicon looked after by `custodian` (and a member).
     pub fn silicon(&self, uuid: &str, id: &str, custodian: &str) {
         let custodian_id = self.stub.accounts.lock().unwrap()[custodian]["id"].clone();
         self.stub.accounts.lock().unwrap().insert(
             uuid.into(),
-            json!({"uuid":uuid,"kind":"silicon","id":id,"display_name":id.trim_start_matches("si:"),"pfp_url":"","status":"active","custodian":{"uuid":custodian,"id":custodian_id}}),
+            json!({"uuid":uuid,"kind":"silicon","id":id,"status":"active","custodian":{"uuid":custodian,"id":custodian_id}}),
+        );
+        self.member(uuid, id, id.trim_start_matches("si:"), None);
+    }
+    /// Put an account in MCPort's user base with this name and photo.
+    pub fn member(&self, uuid: &str, id: &str, display_name: &str, pfp_url: Option<&str>) {
+        let kind = self.stub.accounts.lock().unwrap()[uuid]["kind"].clone();
+        self.stub.users.lock().unwrap().insert(
+            uuid.into(),
+            json!({"membership_id":format!("mcport:{uuid}"),"uuid":uuid,"kind":kind,"id":id,"display_name":display_name,"pfp_url":pfp_url,"status":"active","account_status":"active","source":"signin","history":[]}),
         );
     }
     pub fn claims(&self, uuid: &str) -> Value {

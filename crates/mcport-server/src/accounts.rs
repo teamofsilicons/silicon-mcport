@@ -111,10 +111,14 @@ impl AccountRow {
         if !summary.id.is_empty() {
             self.id.clone_from(&summary.id);
         }
+        // An app's lookup carries neither name nor photo (they come from the user base
+        // and `account.updated`), so an empty value here never clears a known one.
         if !summary.display_name.is_empty() {
             self.display_name.clone_from(&summary.display_name);
         }
-        self.pfp_url = Some(summary.pfp_url.clone()).filter(|url| !url.is_empty());
+        if !summary.pfp_url.is_empty() {
+            self.pfp_url = Some(summary.pfp_url.clone());
+        }
         match &summary.custodian {
             Some(custodian) if self.is_silicon() => {
                 self.custodian_uuid = Some(custodian.uuid.clone());
@@ -304,6 +308,24 @@ impl Accounts {
             )),
         }
     }
+    /// `GET /v1/apps/{app_id}/users/{uuid}`: the display name and photo an account
+    /// shares by signing in to MCPort (an app's lookup carries neither). `None` for
+    /// an account that never signed in here, or when Accounts does not answer in
+    /// time: names are cosmetic, so this never fails a request.
+    pub async fn member_profile(&self, uuid: &str) -> Option<(String, Option<String>)> {
+        match tokio::time::timeout(LOOKUP_TIMEOUT, self.app().user(uuid)).await {
+            Ok(Ok(user)) => Some((
+                user.display_name,
+                user.pfp_url.filter(|url| !url.is_empty()),
+            )),
+            Ok(Err(error)) if error.is_not_found() => None,
+            Ok(Err(error)) => {
+                tracing::warn!(code = %error.code(), "Silicon Accounts user base read failed");
+                None
+            }
+            Err(_) => None,
+        }
+    }
     /// Count one id resolution for `caller`; refuse beyond the per-minute limit so
     /// one account cannot spend MCPort's Accounts lookup allowance for everyone.
     fn take_resolution(&self, caller: &str) -> Result<()> {
@@ -478,6 +500,39 @@ pub async fn refresh(app: &App, uuid: &str, required: bool) -> Result<Option<Acc
         Some(row)
     })?;
     Ok(row)
+}
+/// Fill in the display name and photo of `row` from MCPort's user base at Silicon
+/// Accounts. Called for a signed-in caller when its row is looked up (first sight,
+/// a new sign-in, hourly), so names follow what the account shares with MCPort;
+/// `account.updated` events keep them current in between.
+pub async fn apply_profile(app: &App, row: AccountRow) -> AccountRow {
+    let Some((display_name, pfp_url)) = app.accounts.member_profile(&row.uuid).await else {
+        return row;
+    };
+    if (display_name.is_empty() || display_name == row.display_name)
+        && (pfp_url.is_none() || pfp_url == row.pfp_url)
+    {
+        return row;
+    }
+    let updated = app.store.update_account(&row.uuid, |current| {
+        let mut current = current?;
+        if !display_name.is_empty() {
+            current.display_name.clone_from(&display_name);
+        }
+        if pfp_url.is_some() {
+            current.pfp_url.clone_from(&pfp_url);
+        }
+        current.updated_at = now();
+        Some(current)
+    });
+    match updated {
+        Ok(Some(updated)) => updated,
+        Ok(None) => row,
+        Err(error) => {
+            tracing::warn!(code = %error.1.code, "Could not store an account's display name");
+            row
+        }
+    }
 }
 /// The row for `uuid`, refreshed when older than `max_age` seconds. Lookup
 /// failures keep the cached row (webhooks are the primary update path).
