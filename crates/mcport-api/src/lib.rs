@@ -1034,7 +1034,7 @@ mod tests {
                 "https://api.mcport.teamofsilicons.com",
             ),
             (
-                "https://Backend.MCPort.teamofsilicons.com/",
+                "https://API.MCPort.teamofsilicons.com/",
                 "https://api.mcport.teamofsilicons.com",
             ),
             ("http://127.0.0.1:4241/api/v1", "http://127.0.0.1:4241"),
