@@ -1526,6 +1526,59 @@ mod access_tests {
     }
 
     #[tokio::test]
+    async fn uuids_that_differ_only_in_case_name_different_accounts() {
+        let f = people().await;
+        // Silicon Accounts uuids are case-sensitive: these are two Carbons.
+        f.carbon("zQo", "c:upper");
+        f.carbon("zqo", "c:lower");
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("ada-tools", "none", "")),
+            )
+            .await;
+        let id = body["data"]["id"].as_str().unwrap().to_owned();
+        // Back to back, so the second resolution would hit a case-folded cache entry.
+        for (input, id_of) in [("zQo", "c:upper"), ("zqo", "c:lower")] {
+            let (status, body) = f
+                .as_(
+                    "Ada",
+                    "POST",
+                    &format!("/api/v1/connections/{id}/access"),
+                    Some(json!({"account": input})),
+                )
+                .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert_eq!(body["data"]["account"]["uuid"], input, "{body}");
+            assert_eq!(body["data"]["account"]["id"], id_of, "{body}");
+        }
+        for uuid in ["zQo", "zqo"] {
+            let grant = f
+                .app
+                .store
+                .get::<GrantRecord>("grant", &grant_key(&id, uuid))
+                .unwrap()
+                .unwrap();
+            assert_eq!(grant.account_uuid, uuid);
+        }
+        assert_eq!(
+            f.app.accounts.resolve("Ada", "zqo").await.unwrap().uuid,
+            "zqo"
+        );
+        assert_eq!(
+            f.app.accounts.resolve("Ada", "zQo").await.unwrap().uuid,
+            "zQo"
+        );
+        // Ids are not case-sensitive: C:UPPER is c:upper.
+        assert_eq!(
+            f.app.accounts.resolve("Ada", "C:UPPER").await.unwrap().uuid,
+            "zQo"
+        );
+    }
+
+    #[tokio::test]
     async fn naming_accounts_is_limited_per_caller() {
         let f = people().await;
         let (_, body) = f
