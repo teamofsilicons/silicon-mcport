@@ -1,8 +1,13 @@
+//! Local MCP hosts: registered machines whose daemon long-polls for jobs.
+//! A host belongs to the account that registered it; the custodian of a Silicon
+//! owner may list, show and delete it, but only the owner adds connections to it.
 use crate::{
-    auth::{self, Auth},
+    accounts::{self, AccountRow},
+    auth::{self, Auth, Live},
     error::{Error, Result},
     execution::{self, CallRecord},
     state::{App, hash, now, secret},
+    store::ENV,
 };
 use axum::{
     Json,
@@ -10,65 +15,172 @@ use axum::{
     http::HeaderMap,
 };
 use mcport_core::{
-    Connection, Host, HostJob, HostJobResult, HostPoll, HostPollResult, HostRegistration,
+    Actor, Host, HostJob, HostJobResult, HostPoll, HostPollResult, HostRegistration,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::{
     collections::{BTreeMap, HashSet},
     time::Duration,
 };
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct HostData {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub owner_uuid: String,
+    pub created_at: i64,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct HostRecord {
-    pub host: Host,
+    pub host: HostData,
     pub token_hash: String,
-    pub generation: i64,
     pub last_seen: i64,
     pub registered: Vec<String>,
     pub capabilities: BTreeMap<String, Value>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
-pub fn resolve(app: &App, a: &Auth, name: &str) -> Result<HostRecord> {
-    let hosts = if let Some(h) = app.store.get::<HostRecord>("host", name)?
-        && h.host.environment == a.env()
-        && h.host.org_id == a.actor().org_id
-        && h.host.owner_id == a.actor().principal_id
-    {
-        vec![h]
-    } else {
-        app.store
-            .list::<HostRecord>("host", Some(a.env()))?
-            .into_iter()
-            .filter(|h| h.host.name == name)
+impl HostRecord {
+    /// The grouping value of a host registered before 0.3.0 (kept by link-identities).
+    pub fn legacy_org(&self) -> Option<String> {
+        self.other
+            .get("legacy")
+            .and_then(|legacy| legacy.get("fields"))
+            .and_then(|fields| fields.get("host.org_id"))
+            .or_else(|| self.host.other.get("org_id"))
+            .and_then(Value::as_str)
+            .filter(|org| !org.is_empty())
+            .map(str::to_owned)
+    }
+    /// The registry's pre-0.3.0 owner key (kept by link-identities).
+    pub fn legacy_owner(&self) -> Option<String> {
+        self.other
+            .get("legacy")
+            .and_then(|legacy| legacy.get("fields"))
+            .and_then(|fields| fields.get("host.owner_id"))
+            .or_else(|| self.host.other.get("owner_id"))
+            .and_then(Value::as_str)
+            .filter(|owner| !owner.is_empty())
+            .map(str::to_owned)
+    }
+    /// Personal-account keys the host's daemon reported on its last poll.
+    fn reported_account_keys(&self) -> std::collections::BTreeSet<String> {
+        self.capabilities
+            .values()
+            .filter_map(|value| value.get("account_owners"))
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned)
             .collect()
-    };
-    hosts
-        .into_iter()
-        .find(|h| {
-            h.host.environment == a.env()
-                && h.host.org_id == a.actor().org_id
-                && h.host.owner_id == a.actor().principal_id
-        })
-        .ok_or_else(Error::missing)
+    }
+    /// Whether the host's daemon still keys personal accounts by pre-0.3.0 ids: a
+    /// host registered before 0.3.0 whose daemon has not reported registry v2.
+    pub fn legacy_registry(&self) -> bool {
+        self.legacy_org().is_some()
+            && self
+                .capabilities
+                .get("registry_version")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                < 2
+    }
 }
-fn view(mut h: HostRecord) -> Host {
-    h.host.online = h.last_seen > now() - 35;
-    h.host.last_seen = if h.last_seen > 0 {
-        Some(h.last_seen)
-    } else {
-        None
-    };
-    h.host
+/// Keys a host registry may use for `uuid`'s personal account: the uuid, plus
+/// the account's linked pre-0.3.0 ids while the registry is not migrated.
+pub fn registry_keys(app: &App, uuid: &str, legacy: bool) -> Result<Vec<String>> {
+    let mut keys = vec![uuid.to_owned()];
+    if legacy {
+        keys.extend(app.store.legacy_ids(uuid)?);
+    }
+    Ok(keys)
 }
-pub async fn list(State(app): State<App>, headers: HeaderMap) -> Result<Json<Value>> {
-    let a = auth::authenticate(&app, &headers).await?;
-    let out = app
-        .store
-        .list::<HostRecord>("host", Some(a.env()))?
-        .into_iter()
-        .filter(|h| h.host.owner_id == a.actor().principal_id && h.host.org_id == a.actor().org_id)
-        .map(view)
-        .collect::<Vec<_>>();
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HostAccess {
+    Owner,
+    Custodian,
+}
+async fn host_access(app: &App, h: &HostRecord, who: &AccountRow) -> Result<Option<HostAccess>> {
+    if h.host.owner_uuid.is_empty() {
+        return Ok(None);
+    }
+    if h.host.owner_uuid == who.uuid {
+        return Ok(Some(HostAccess::Owner));
+    }
+    if let Some(owner) = app.store.account(&h.host.owner_uuid)?
+        && accounts::looks_after(app, who, &owner).await
+    {
+        return Ok(Some(HostAccess::Custodian));
+    }
+    Ok(None)
+}
+/// A host the caller owns or looks after, by exact id or name.
+pub async fn resolve(app: &App, who: &AccountRow, name: &str) -> Result<(HostRecord, HostAccess)> {
+    if let Some(h) = app.store.get::<HostRecord>("host", name)?
+        && let Some(access) = host_access(app, &h, who).await?
+    {
+        return Ok((h, access));
+    }
+    let mut candidates = Vec::new();
+    for h in app.store.list::<HostRecord>("host", Some(ENV))? {
+        if h.host.name == name
+            && let Some(access) = host_access(app, &h, who).await?
+        {
+            candidates.push((h, access));
+        }
+    }
+    if candidates
+        .iter()
+        .any(|(_, access)| *access == HostAccess::Owner)
+    {
+        candidates.retain(|(_, access)| *access == HostAccess::Owner);
+    }
+    if candidates.len() > 1 {
+        return Err(Error::new(
+            409,
+            "ambiguous_name",
+            format!("More than one host you look after is named `{name}`."),
+            "Use the host ID shown by host ls.",
+        ));
+    }
+    candidates.pop().ok_or_else(Error::missing)
+}
+/// A host the caller itself registered (required to add connections to it).
+pub async fn owned(app: &App, who: &AccountRow, name: &str) -> Result<HostRecord> {
+    match resolve(app, who, name).await? {
+        (h, HostAccess::Owner) => Ok(h),
+        _ => Err(Error::new(
+            403,
+            "access_denied",
+            "Only the account that registered a host can add connections to it.",
+            "Ask the host's owner to add the connection, or register your own host.",
+        )),
+    }
+}
+fn view(app: &App, h: HostRecord, can_manage: bool) -> Host {
+    Host {
+        id: h.host.id,
+        name: h.host.name,
+        owner: accounts::reference(app, &h.host.owner_uuid),
+        online: h.last_seen > now() - 35,
+        last_seen: (h.last_seen > 0).then_some(h.last_seen),
+        created_at: h.host.created_at,
+        can_manage,
+    }
+}
+pub async fn list(State(app): State<App>, a: Auth) -> Result<Json<Value>> {
+    let mut out = Vec::new();
+    for h in app.store.list::<HostRecord>("host", Some(ENV))? {
+        if host_access(&app, &h, &a.account).await?.is_some() {
+            out.push(view(&app, h, true));
+        }
+    }
     Ok(Json(json!({"data":out})))
 }
 #[derive(Deserialize)]
@@ -77,12 +189,9 @@ pub struct HostInput {
 }
 pub async fn create(
     State(app): State<App>,
-    headers: HeaderMap,
+    Live(a): Live,
     Json(input): Json<HostInput>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let a = auth::authenticate(&app, &headers).await?;
-    let _environment_guard = auth::mutation_guard(&app, &a).await?;
     if input.name.is_empty()
         || input.name.len() > 80
         || !input
@@ -95,83 +204,122 @@ pub async fn create(
         ));
     }
     let token = secret("mph_");
-    let host = Host {
-        id: String::new(),
-        name: input.name,
-        owner_id: a.actor().principal_id.clone(),
-        org_id: a.actor().org_id.clone(),
-        environment: a.env().into(),
-        online: false,
-        last_seen: None,
-        created_at: now(),
-    };
+    let owner = a.uuid().to_owned();
     let mut record = HostRecord {
-        host,
+        host: HostData {
+            id: String::new(),
+            name: input.name,
+            owner_uuid: owner.clone(),
+            created_at: now(),
+            other: Map::new(),
+        },
         token_hash: hash(&token),
-        generation: a.session.generation,
         last_seen: 0,
         registered: vec![],
         capabilities: BTreeMap::new(),
+        other: Map::new(),
     };
     let name = record.host.name.clone();
-    let (record, _) = app.store.create_public(
-        "host",
-        a.env(),
-        &a.actor().org_id,
-        &a.actor().principal_id,
-        Some(&name),
-        None,
-        |id| {
-            record.host.id = id;
-            record
-        },
-    )?;
+    let (record, _) =
+        app.store
+            .create_public("host", ENV, &owner, &owner, Some(&name), None, |id| {
+                record.host.id = id;
+                record
+            })?;
     Ok(Json(
-        json!({"data":HostRegistration{host:record.host,host_token:token}}),
+        json!({"data":HostRegistration{host:view(&app, record, true),host_token:token}}),
     ))
 }
-pub async fn get(
+pub async fn get(State(app): State<App>, a: Auth, Path(name): Path<String>) -> Result<Json<Value>> {
+    let (h, _) = resolve(&app, &a.account, &name).await?;
+    Ok(Json(json!({"data":view(&app, h, true)})))
+}
+/// `GET /hosts/{id}/legacy-accounts`: the accounts behind the keys of a host
+/// registry written before 0.3.0, so `mcport host migrate` can re-key it by uuid.
+/// Only the host's owner may ask, and only about the registry's own owner key and the
+/// keys its daemon reported (evidence they are in that registry); keys MCPort cannot
+/// link to an account are left out.
+pub async fn legacy_accounts(
     State(app): State<App>,
-    headers: HeaderMap,
+    a: Auth,
     Path(name): Path<String>,
 ) -> Result<Json<Value>> {
-    let a = auth::authenticate(&app, &headers).await?;
-    Ok(Json(json!({"data":view(resolve(&app,&a,&name)?)})))
+    let (h, access) = resolve(&app, &a.account, &name).await?;
+    if access != HostAccess::Owner {
+        return Err(Error::new(
+            403,
+            "access_denied",
+            "Only the account that registered a host can migrate its local registry.",
+            "Run mcport host migrate on the host's machine, signed in as the host's owner.",
+        ));
+    }
+    if h.legacy_org().is_none() {
+        return Err(Error::new(
+            403,
+            "not_legacy_host",
+            "This host has no pre-migration registry.",
+            "Only a host preserved by the identity migration can read its legacy mappings.",
+        ));
+    }
+    let legacy_owner_id = h.legacy_owner();
+    let mut keys = h.reported_account_keys();
+    keys.extend(legacy_owner_id.clone());
+    let mut accounts = Vec::new();
+    for key in keys {
+        if let Some(uuid) = app.store.linked_uuid(&key)? {
+            accounts.push(mcport_core::LegacyAccount {
+                legacy_id: key,
+                account: accounts::reference(&app, &uuid),
+            });
+        }
+    }
+    Ok(Json(json!({"data": mcport_core::LegacyHostAccounts {
+        host_id: h.host.id.clone(),
+        legacy: h.legacy_org().is_some(),
+        legacy_owner_id,
+        accounts,
+    }})))
 }
 pub async fn remove(
     State(app): State<App>,
-    headers: HeaderMap,
+    Live(a): Live,
     Path(name): Path<String>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let a = auth::authenticate(&app, &headers).await?;
-    let h = resolve(&app, &a, &name)?;
+    let (h, _) = resolve(&app, &a.account, &name).await?;
     let lock = app.lock(&format!("host:{}", h.host.id));
     let _guard = lock.lock().await;
-    let _environment_guard = auth::mutation_guard(&app, &a).await?;
-    resolve(&app, &a, &h.host.id)?;
+    resolve(&app, &a.account, &h.host.id).await?;
     app.store.delete("host", &h.host.id)?;
-    for c in app.store.list::<Connection>("connection", Some(a.env()))? {
+    for c in app
+        .store
+        .list::<crate::connections::ConnectionRecord>("connection", None)?
+    {
         if c.host_id.as_deref() == Some(&h.host.id) {
             execution::invalidate_connection(&app, &c.id)?;
         }
     }
     Ok(Json(json!({"data":{"deleted":true}})))
 }
+/// Host daemons authenticate with their host token (`mph_…`), never a user token.
 fn authenticate(app: &App, headers: &HeaderMap, id: &str) -> Result<HostRecord> {
     use subtle::ConstantTimeEq;
     let h = app
         .store
         .get::<HostRecord>("host", id)?
-        .ok_or_else(Error::expired)?;
-    let token = auth::bearer(headers).ok_or_else(Error::expired)?;
-    if !bool::from(hash(&token).as_bytes().ct_eq(h.token_hash.as_bytes()))
-        || auth::environment_header(headers)? != h.host.environment
-    {
-        return Err(Error::expired());
+        .ok_or_else(host_rejected)?;
+    let token = auth::bearer(headers).ok_or_else(host_rejected)?;
+    if !bool::from(hash(&token).as_bytes().ct_eq(h.token_hash.as_bytes())) {
+        return Err(host_rejected());
     }
-    app.assert_generation(&h.host.environment, h.generation)?;
     Ok(h)
+}
+fn host_rejected() -> Error {
+    Error::new(
+        401,
+        "host_authentication_required",
+        "This host token is missing, wrong or belongs to a deleted host.",
+        "Register the host again with mcport host new on that machine.",
+    )
 }
 fn active_job_ids(host: &HostRecord) -> HashSet<String> {
     host.capabilities
@@ -219,9 +367,7 @@ fn try_lease(app: &App, candidate: &CallRecord) -> Result<Option<CallRecord>> {
             if current.invocation.status != "queued"
                 || current.expires_at <= now()
                 || current.host_id != candidate.host_id
-                || current.environment != candidate.environment
-                || current.org_id != candidate.org_id
-                || current.generation != candidate.generation
+                || current.caller_uuid != candidate.caller_uuid
                 || current.fingerprint != candidate.fingerprint
             {
                 return false;
@@ -231,6 +377,30 @@ fn try_lease(app: &App, candidate: &CallRecord) -> Result<Option<CallRecord>> {
             true
         })?;
     Ok(result.filter(|_| leased))
+}
+/// The job identity sent to the daemon, with the transition fields daemons
+/// released before 0.3.0 read (`principal_id` keys personal accounts in their
+/// registry; `org_id` must equal the registry's grouping value).
+fn job_actor(app: &App, host: &HostRecord, caller: &AccountRow) -> Result<Actor> {
+    let legacy = host.legacy_registry();
+    let principal_id = if legacy {
+        app.store
+            .legacy_ids(&caller.uuid)?
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| caller.uuid.clone())
+    } else {
+        caller.uuid.clone()
+    };
+    Ok(Actor {
+        uuid: caller.uuid.clone(),
+        id: caller.id.clone(),
+        kind: caller.kind.clone(),
+        display_name: caller.display_name.clone(),
+        principal_id,
+        identity_kind: caller.kind.clone(),
+        org_id: host.legacy_org().filter(|_| legacy).unwrap_or_default(),
+    })
 }
 pub async fn poll(
     State(app): State<App>,
@@ -257,22 +427,16 @@ pub async fn poll(
     }
     let host_lock = app.lock(&format!("host:{id}"));
     let guard = host_lock.lock().await;
-    let environment_guard = app
-        .lock(&format!(
-            "environment:{}",
-            auth::environment_header(&headers)?
-        ))
-        .lock_owned()
-        .await;
     let mut host = authenticate(&app, &headers, &id)?;
-    // A connector can only register this owner's explicitly configured connections.
+    // A connector can only register its owner's explicitly configured connections.
     let mut registered = Vec::new();
     for cid in input.registered_connections {
-        if let Some(c) = app.store.get::<Connection>("connection", &cid)?
+        if let Some(c) = app
+            .store
+            .get::<crate::connections::ConnectionRecord>("connection", &cid)?
             && c.host_id.as_deref() == Some(&id)
-            && c.environment == host.host.environment
-            && c.org_id == host.host.org_id
-            && c.owner_id == host.host.owner_id
+            && !c.owner_uuid.is_empty()
+            && c.owner_uuid == host.host.owner_uuid
         {
             registered.push(cid)
         }
@@ -283,14 +447,13 @@ pub async fn poll(
     app.store.put(
         "host",
         &id,
-        &host.host.environment,
-        &host.host.org_id,
-        &host.host.owner_id,
+        ENV,
+        &host.host.owner_uuid,
+        &host.host.owner_uuid,
         Some(&host.host.name),
         &host,
         None,
     )?;
-    drop(environment_guard);
     drop(guard);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
@@ -301,10 +464,7 @@ pub async fn poll(
         let active_ids = active_job_ids(&current_host);
         let mut jobs = Vec::new();
         let mut cancelled = Vec::new();
-        for r in app
-            .store
-            .list::<CallRecord>("call", Some(&host.host.environment))?
-        {
+        for r in app.store.list::<CallRecord>("call", None)? {
             if r.host_id.as_deref() != Some(&id) {
                 continue;
             }
@@ -367,9 +527,7 @@ pub async fn poll(
             {
                 continue;
             }
-            let calls = app
-                .store
-                .list::<CallRecord>("call", Some(&host.host.environment))?;
+            let calls = app.store.list::<CallRecord>("call", None)?;
             if available_slots(&current_host, &calls) == 0 {
                 continue;
             }
@@ -391,26 +549,29 @@ pub async fn poll(
             // Concurrent pollers share the capacity check and lease boundary.
             let lease_lock = app.lock(&format!("host-lease:{id}"));
             let _lease_guard = lease_lock.lock().await;
-            let _environment_guard = auth::mutation_guard(&app, &a).await?;
             // No await between the final local state checks and the durable lease.
             let fresh_host = authenticate(&app, &headers, &id)?;
-            let fresh_connection = crate::connections::resolve(&app, &a, &c.id, false)?;
+            let Some(fresh_connection) = app
+                .store
+                .get::<crate::connections::ConnectionRecord>("connection", &c.id)?
+            else {
+                continue;
+            };
             if !fresh_host.registered.contains(&c.id)
                 || fresh_connection.version != r.connection_version
             {
                 continue;
             }
-            let calls = app
-                .store
-                .list::<CallRecord>("call", Some(&host.host.environment))?;
+            let calls = app.store.list::<CallRecord>("call", None)?;
             if available_slots(&fresh_host, &calls) == 0 {
                 continue;
             }
             if let Some(t) = &r.invocation.tool_name
-                && !crate::connections::allowed_tool(&app, &fresh_connection, &a, t)?
+                && !crate::connections::allowed_tool(&app, &fresh_connection, a.uuid(), t)?
             {
                 continue;
             }
+            let actor = job_actor(&app, &fresh_host, &a.account)?;
             let Some(current) = try_lease(&app, &r)? else {
                 continue;
             };
@@ -421,7 +582,7 @@ pub async fn poll(
                 params: current.params,
                 timeout_ms: current.timeout_ms,
                 expires_at: current.expires_at,
-                actor: a.actor().clone(),
+                actor,
             });
             if jobs.len() >= 16 {
                 break;
@@ -440,15 +601,12 @@ pub async fn complete(
     Path((host_id, job_id)): Path<(String, String)>,
     Json(mut result): Json<HostJobResult>,
 ) -> Result<Json<Value>> {
-    let h = authenticate(&app, &headers, &host_id)?;
+    authenticate(&app, &headers, &host_id)?;
     let r = app
         .store
         .get::<CallRecord>("call", &job_id)?
         .ok_or_else(Error::missing)?;
-    if r.host_id.as_deref() != Some(&host_id)
-        || r.environment != h.host.environment
-        || r.org_id != h.host.org_id
-    {
+    if r.host_id.as_deref() != Some(&host_id) {
         return Err(Error::denied());
     }
     if r.invocation.status == "queued" {
@@ -465,7 +623,7 @@ pub async fn complete(
                 if r.invocation.method == "tools/list"
                     && let Some(v) = &mut result.result
                 {
-                    execution::decorate_tools(&app, &c, &a, v)?;
+                    execution::decorate_tools(&app, &c, a.uuid(), v)?;
                 }
             }
             Err(e) => {
@@ -489,7 +647,7 @@ pub async fn progress(
     Path((host_id, job_id)): Path<(String, String)>,
     Json(input): Json<Progress>,
 ) -> Result<Json<Value>> {
-    let h = authenticate(&app, &headers, &host_id)?;
+    authenticate(&app, &headers, &host_id)?;
     if serde_json::to_vec(&input.progress)?.len() > 65536 {
         return Err(Error::bad("Progress payload exceeds 64 KiB."));
     }
@@ -497,10 +655,7 @@ pub async fn progress(
         .store
         .get::<CallRecord>("call", &job_id)?
         .ok_or_else(Error::missing)?;
-    if r.host_id.as_deref() != Some(&host_id)
-        || r.environment != h.host.environment
-        || r.org_id != h.host.org_id
-    {
+    if r.host_id.as_deref() != Some(&host_id) {
         return Err(Error::denied());
     }
     app.store.update::<CallRecord>("call", &job_id, |current| {
@@ -516,26 +671,22 @@ pub async fn progress(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mcport_core::Invocation;
+    use crate::{
+        execution::InvocationData,
+        test_support::{Fixture, fixture},
+    };
+    use axum::http::StatusCode;
 
-    fn fixture() -> (App, tempfile::TempDir, HostRecord) {
-        let directory = tempfile::tempdir().unwrap();
-        let mut config = crate::state::Config::from_env();
-        config.data_dir = directory.path().into();
-        let app = App::new(config).unwrap();
-        let host = HostRecord {
-            host: Host {
+    fn record(owner: &str) -> HostRecord {
+        HostRecord {
+            host: HostData {
                 id: "host".into(),
                 name: "desktop".into(),
-                owner_id: "c:alice".into(),
-                org_id: "tos".into(),
-                environment: "production".into(),
-                online: true,
-                last_seen: Some(now()),
+                owner_uuid: owner.into(),
                 created_at: now(),
+                other: Map::new(),
             },
             token_hash: hash("host-token"),
-            generation: 0,
             last_seen: now(),
             registered: vec!["connection".into()],
             capabilities: BTreeMap::from([
@@ -543,72 +694,77 @@ mod tests {
                 ("active_jobs".into(), json!(0)),
                 ("active_job_ids".into(), json!([])),
             ]),
-        };
-        app.store
+            other: Map::new(),
+        }
+    }
+    fn stored(f: &Fixture) -> HostRecord {
+        let host = record("Ada");
+        f.app
+            .store
             .put(
                 "host",
-                &host.host.id,
-                "production",
-                "tos",
-                "c:alice",
-                Some(&host.host.name),
+                "host",
+                ENV,
+                "Ada",
+                "Ada",
+                Some("desktop"),
                 &host,
                 Some(0),
             )
             .unwrap();
-        (app, directory, host)
+        host
     }
     fn call(id: &str, status: &str) -> CallRecord {
         CallRecord {
-            invocation: Invocation {
+            invocation: InvocationData {
                 id: id.into(),
                 connection_id: "connection".into(),
                 connection_name: "fixture".into(),
-                actor_id: "c:alice".into(),
-                execution_account_id: "c:alice".into(),
                 method: "tools/call".into(),
                 tool_name: Some("echo".into()),
                 status: status.into(),
                 created_at: now(),
-                completed_at: None,
-                result: None,
-                error: None,
+                ..Default::default()
             },
-            environment: "production".into(),
-            org_id: "tos".into(),
-            family: "family".into(),
-            generation: 0,
+            caller_uuid: "Ada".into(),
             host_id: Some("host".into()),
             params: json!({"name":"echo","arguments":{}}),
             timeout_ms: 30000,
             expires_at: now() + 30,
             connection_version: 1,
             fingerprint: format!("fingerprint-{id}"),
-            progress: None,
-            telemetry_enabled: false,
+            ..Default::default()
         }
     }
-    fn headers() -> HeaderMap {
+    fn headers(token: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert("authorization", "Bearer host-token".parse().unwrap());
+        headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
         headers
     }
 
-    #[test]
-    fn host_tokens_cannot_cross_environment_or_host() {
-        let (app, _directory, _host) = fixture();
-        let mut headers = headers();
-        assert!(authenticate(&app, &headers, "host").is_ok());
-        assert!(authenticate(&app, &headers, "other-host").is_err());
-        headers.insert("x-mcport-test", "other-test".parse().unwrap());
-        assert!(authenticate(&app, &headers, "host").is_err());
-        headers.remove("x-mcport-test");
-        headers.insert("authorization", "Bearer unrelated-token".parse().unwrap());
-        assert!(authenticate(&app, &headers, "host").is_err());
+    #[tokio::test]
+    async fn host_tokens_cannot_cross_hosts_and_user_tokens_are_not_host_tokens() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        stored(&f);
+        assert!(authenticate(&f.app, &headers("host-token"), "host").is_ok());
+        assert!(authenticate(&f.app, &headers("host-token"), "other-host").is_err());
+        assert!(authenticate(&f.app, &headers("unrelated-token"), "host").is_err());
+        let user = f.token("Ada");
+        let error = authenticate(&f.app, &headers(&user), "host").err().unwrap();
+        assert_eq!(error.1.code, "host_authentication_required");
+        // A testing header from older daemons is ignored, not a separate world.
+        let mut legacy = headers("host-token");
+        legacy.insert(
+            "x-mcport-test",
+            "11111111-1111-4111-8111-111111111111".parse().unwrap(),
+        );
+        assert!(authenticate(&f.app, &legacy, "host").is_ok());
     }
-    #[test]
-    fn capacity_counts_cancelling_jobs_and_unacknowledged_leases() {
-        let (_app, _directory, mut host) = fixture();
+    #[tokio::test]
+    async fn capacity_counts_cancelling_jobs_and_unacknowledged_leases() {
+        let f = fixture().await;
+        let mut host = stored(&f);
         assert_eq!(available_slots(&host, &[call("one", "running")]), 3);
         host.capabilities.insert("active_jobs".into(), json!(2));
         host.capabilities
@@ -630,16 +786,17 @@ mod tests {
             .insert("max_concurrent_jobs".into(), json!(0));
         assert_eq!(available_slots(&host, &[]), 0);
     }
-    #[test]
-    fn concurrent_terminal_transitions_cannot_be_resurrected_by_leasing() {
-        let (app, _directory, _host) = fixture();
+    #[tokio::test]
+    async fn concurrent_terminal_transitions_cannot_be_resurrected_by_leasing() {
+        let f = fixture().await;
+        stored(&f);
         for terminal in ["cancelled", "completed"] {
             for index in 0..20 {
                 let record = call(&format!("{terminal}-{index}"), "queued");
-                execution::save(&app, &record).unwrap();
+                execution::save(&f.app, &record).unwrap();
                 let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
                 std::thread::scope(|scope| {
-                    let other = app.clone();
+                    let other = f.app.clone();
                     let candidate = record.clone();
                     let start = barrier.clone();
                     scope.spawn(move || {
@@ -647,27 +804,30 @@ mod tests {
                         try_lease(&other, &candidate).unwrap();
                     });
                     barrier.wait();
-                    app.store
+                    f.app
+                        .store
                         .update::<CallRecord>("call", &record.invocation.id, |current| {
                             current.invocation.status = terminal.into();
                             true
                         })
                         .unwrap();
                 });
-                let current = app
+                let current = f
+                    .app
                     .store
                     .get::<CallRecord>("call", &record.invocation.id)
                     .unwrap()
                     .unwrap();
                 assert_eq!(current.invocation.status, terminal);
-                assert!(try_lease(&app, &record).unwrap().is_none());
+                assert!(try_lease(&f.app, &record).unwrap().is_none());
             }
         }
     }
     #[tokio::test]
     async fn cancelled_history_does_not_short_circuit_long_poll() {
-        let (app, _directory, _host) = fixture();
-        execution::save(&app, &call("old-cancelled", "cancelled")).unwrap();
+        let f = fixture().await;
+        stored(&f);
+        execution::save(&f.app, &call("old-cancelled", "cancelled")).unwrap();
         let input = HostPoll {
             registered_connections: vec![],
             capabilities: BTreeMap::from([
@@ -679,8 +839,8 @@ mod tests {
             tokio::time::timeout(
                 Duration::from_millis(30),
                 poll(
-                    State(app.clone()),
-                    headers(),
+                    State(f.app.clone()),
+                    headers("host-token"),
                     Path("host".into()),
                     Json(input)
                 )
@@ -696,13 +856,254 @@ mod tests {
             ]),
         };
         let Json(response) = poll(
-            State(app.clone()),
-            headers(),
+            State(f.app.clone()),
+            headers("host-token"),
             Path("host".into()),
             Json(input),
         )
         .await
         .unwrap();
         assert_eq!(response["data"]["cancelled"], json!(["old-cancelled"]));
+    }
+
+    async fn host_with_connection(
+        f: &Fixture,
+        owner: &str,
+        auth_mode: &str,
+    ) -> (String, String, String) {
+        let (status, body) = f
+            .as_(
+                owner,
+                "POST",
+                "/api/v1/hosts",
+                Some(json!({"name":"studio"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let host = body["data"]["host"]["id"].as_str().unwrap().to_owned();
+        let token = body["data"]["host_token"].as_str().unwrap().to_owned();
+        let (status, body) = f.as_(owner, "POST", "/api/v1/connections", Some(json!({"name":"figma","transport":"http","url":"http://127.0.0.1:3845/mcp","host_id":host,"auth_mode":auth_mode,"visibility":"circle"}))).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        (host, token, body["data"]["id"].as_str().unwrap().to_owned())
+    }
+
+    #[tokio::test]
+    async fn custodians_see_and_delete_a_silicons_host_but_never_add_to_it() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.silicon("Scout", "si:scout", "Ada");
+        f.carbon("Cy", "c:cy");
+        let (host, _, _) = host_with_connection(&f, "Scout", "none").await;
+        let (_, body) = f.as_("Ada", "GET", "/api/v1/hosts", None).await;
+        assert_eq!(body["data"][0]["id"], host.as_str());
+        assert_eq!(body["data"][0]["owner"]["id"], "si:scout");
+        assert_eq!(
+            f.as_("Cy", "GET", "/api/v1/hosts", None).await.1["data"],
+            json!([])
+        );
+        assert_eq!(
+            f.as_("Cy", "GET", &format!("/api/v1/hosts/{host}"), None)
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        let (status, body) = f.as_("Ada", "POST", "/api/v1/connections", Some(json!({"name":"mine","transport":"http","url":"http://127.0.0.1:3845/mcp","host_id":host,"auth_mode":"none"}))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(
+            f.as_("Ada", "DELETE", &format!("/api/v1/hosts/{host}"), None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            f.as_("Scout", "GET", &format!("/api/v1/hosts/{host}"), None)
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// Register `connection` through a long poll, make `caller` call it, and
+    /// return the job the poll hands the daemon (then complete it).
+    async fn dispatch(
+        f: &Fixture,
+        caller: &str,
+        host: &str,
+        token: &str,
+        connection: &str,
+        capabilities: Value,
+    ) -> HostJob {
+        let poll_body = json!({"registered_connections":[connection],"capabilities":capabilities});
+        let poll = {
+            let app = f.app.clone();
+            let headers = headers(token);
+            let host = host.to_owned();
+            let input: HostPoll = serde_json::from_value(poll_body.clone()).unwrap();
+            tokio::spawn(async move { poll(State(app), headers, Path(host), Json(input)).await })
+        };
+        for _ in 0..200 {
+            if f.app
+                .store
+                .get::<HostRecord>("host", host)
+                .unwrap()
+                .unwrap()
+                .registered
+                .contains(&connection.to_owned())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pending = {
+            let app = f.app.clone();
+            let caller_token = f.token(caller);
+            let connection = connection.to_owned();
+            tokio::spawn(async move {
+                use tower::ServiceExt;
+                crate::router(app)
+                    .oneshot(
+                        axum::http::Request::post(format!("/api/v1/connections/{connection}/mcp"))
+                            .header("authorization", format!("Bearer {caller_token}"))
+                            .header("content-type", "application/json")
+                            .body(axum::body::Body::from(
+                                json!({"method":"tools/list","timeout_ms":5000}).to_string(),
+                            ))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+                    .status()
+            })
+        };
+        let Json(reply) = tokio::time::timeout(Duration::from_secs(10), poll)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let job: HostJob = serde_json::from_value(reply["data"]["jobs"][0].clone()).unwrap();
+        let (status, _) = f
+            .call(
+                "POST",
+                &format!("/api/v1/hosts/{host}/jobs/{}/result", job.id),
+                Some(token),
+                Some(json!({"result":{"tools":[{"name":"echo"}]},"error":null})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(pending.await.unwrap(), StatusCode::OK);
+        job
+    }
+
+    #[tokio::test]
+    async fn jobs_name_the_caller_and_keep_transition_fields_for_older_daemons() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.silicon("Scout", "si:scout", "Ada");
+        let (host, token, connection) = host_with_connection(&f, "Ada", "none").await;
+        let job = dispatch(&f, "Scout", &host, &token, &connection, json!({})).await;
+        assert_eq!(job.actor.uuid, "Scout");
+        assert_eq!(job.actor.id, "si:scout");
+        assert_eq!(job.actor.kind, "silicon");
+        assert_eq!(job.actor.principal_id, "Scout");
+        assert_eq!(job.actor.org_id, "");
+        // A host registered before 0.3.0 whose daemon still uses its old registry.
+        f.app
+            .store
+            .update::<HostRecord>("host", &host, |h| {
+                h.other.insert(
+                    "legacy".into(),
+                    json!({"fields":{"host.org_id":"tos","host.owner_id":"c:ada"}}),
+                );
+                true
+            })
+            .unwrap();
+        f.app.store.db.lock().unwrap().execute(
+            "INSERT INTO identity_links(iam_principal_id,iam_public_id,accounts_uuid,linked_at,source) VALUES('si:scout-old','si:scout-old','Scout',1,'test')",
+            [],
+        ).unwrap();
+        let job = dispatch(&f, "Scout", &host, &token, &connection, json!({})).await;
+        assert_eq!(job.actor.principal_id, "si:scout-old");
+        assert_eq!(job.actor.org_id, "tos");
+        assert_eq!(job.actor.identity_kind, "silicon");
+        // Once the daemon reports a migrated registry, jobs use uuids only.
+        let job = dispatch(
+            &f,
+            "Scout",
+            &host,
+            &token,
+            &connection,
+            json!({"registry_version":2}),
+        )
+        .await;
+        assert_eq!(job.actor.principal_id, "Scout");
+        assert_eq!(job.actor.org_id, "");
+    }
+
+    #[tokio::test]
+    async fn owners_learn_the_accounts_behind_their_old_registry_keys_and_nobody_else_does() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.silicon("Scout", "si:scout", "Ada");
+        f.carbon("Cy", "c:cy");
+        let (host, _, connection) = host_with_connection(&f, "Ada", "per-user").await;
+        let path = format!("/api/v1/hosts/{host}/legacy-accounts");
+        // A host created after 0.3.0 has no old keys.
+        let (status, body) = f.as_("Ada", "GET", &path, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["error"]["code"], "not_legacy_host");
+        // A host registered before 0.3.0: its old owner key and what its daemon reported.
+        f.app
+            .store
+            .update::<HostRecord>("host", &host, |h| {
+                h.other.insert(
+                    "legacy".into(),
+                    json!({"fields":{"host.org_id":"tos","host.owner_id":"c:ada-old"}}),
+                );
+                h.capabilities.insert(
+                    connection.clone(),
+                    json!({"account_owners":["c:ada-old","si:scout-old","si:never-linked"]}),
+                );
+                true
+            })
+            .unwrap();
+        for (old, uuid) in [
+            ("c:ada-old", "Ada"),
+            ("si:scout-old", "Scout"),
+            ("c:cy-old", "Cy"),
+        ] {
+            f.app.store.db.lock().unwrap().execute(
+                "INSERT INTO identity_links(iam_principal_id,iam_public_id,accounts_uuid,linked_at,source) VALUES(?1,?1,?2,1,'test')",
+                rusqlite::params![old, uuid],
+            ).unwrap();
+        }
+        let (status, body) = f.as_("Ada", "GET", &path, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let data = &body["data"];
+        assert_eq!(data["legacy"], true);
+        assert_eq!(data["legacy_owner_id"], "c:ada-old");
+        let accounts = data["accounts"].as_array().unwrap();
+        // Unlinked keys are left out, and so are linked ids the daemon never reported.
+        assert_eq!(accounts.len(), 2, "{body}");
+        assert_eq!(accounts[0]["legacy_id"], "c:ada-old");
+        assert_eq!(accounts[0]["account"]["uuid"], "Ada");
+        assert_eq!(accounts[0]["account"]["id"], "c:ada");
+        assert_eq!(accounts[1]["legacy_id"], "si:scout-old");
+        assert_eq!(accounts[1]["account"]["uuid"], "Scout");
+        // Strangers cannot find the host; custodians may see a Silicon's host but not migrate it.
+        assert_eq!(
+            f.as_("Cy", "GET", &path, None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        let (silicon_host, _, _) = host_with_connection(&f, "Scout", "none").await;
+        let (status, body) = f
+            .as_(
+                "Ada",
+                "GET",
+                &format!("/api/v1/hosts/{silicon_host}/legacy-accounts"),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["error"]["code"], "access_denied");
     }
 }

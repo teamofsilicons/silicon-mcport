@@ -6,12 +6,11 @@ import sys
 import threading
 import time
 import unittest
-from urllib.parse import urlencode
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fixtures import Fixtures, Handler, TEST_ID, TEST_KEY, ThreadingHTTPServer
+from fixtures import Fixtures, Handler, ThreadingHTTPServer
 
 
 class ProtocolFixturesTest(unittest.TestCase):
@@ -29,19 +28,14 @@ class ProtocolFixturesTest(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
-    def request(self, path, value=None, iam=False, test=False, bearer=None, expected=200):
+    def request(self, path, value=None, bearer=None, expected=200):
         headers = {}
-        if iam:
-            secret = "fixture-test-app-secret" if test else "fixture-app-secret"
-            headers = {"Authorization": "Basic " + base64.b64encode(("mcport:" + secret).encode()).decode(), "Silicon-IAM-Supported-API-Versions": "v1", "Idempotency-Key": "fixture-" + str(id(value)) + "-key"}
-            if test:
-                headers["X-Testing-Environment-Key"] = TEST_KEY
         if bearer:
             headers["Authorization"] = "Bearer " + bearer
         data = None
         if value is not None:
-            headers["Content-Type"] = "application/x-www-form-urlencoded" if iam else "application/json"
-            data = (urlencode(value) if iam else json.dumps(value)).encode()
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(value).encode()
         try:
             with urlopen(Request(self.origin + path, data=data, headers=headers)) as response:
                 status, result = response.status, json.load(response)
@@ -77,24 +71,6 @@ class ProtocolFixturesTest(unittest.TestCase):
         second = self.request("/oauth/token", dict(refresh, refresh_token=rotated["refresh_token"]))
         self.request("/mcp/oauth", call, bearer=rotated["access_token"], expected=401)
         self.assertEqual(self.request("/mcp/oauth", call, bearer=second["access_token"])["result"]["structuredContent"]["token_generation"], 2)
-
-    def test_official_application_exchange_and_current_authorization(self):
-        slt = self.request("/fixture/slt", {"role": "owner"})["slt"]
-        tokens = self.request("/api/v1/app-auth/tokens", {"app_id": "mcport", "slt": slt}, iam=True)
-        actor = self.request("/api/v1/oauth/introspect", {"token": tokens["access_token"]}, iam=True)
-        self.assertEqual(actor["authorization"]["public_id"], "c:owner")
-        self.assertEqual(actor["authorization"]["org_role"], "member")
-        self.request("/fixture/revoke", {"principal_id": "c:owner"})
-        self.assertFalse(self.request("/api/v1/oauth/introspect", {"token": tokens["access_token"]}, iam=True)["active"])
-        self.request("/fixture/revoke", {"principal_id": "c:owner", "revoked": False})
-
-    def test_testing_context_requires_matching_test_credential(self):
-        context = self.request("/api/v1/application/testing-context", iam=True, test=True)
-        self.assertEqual(context["environment_id"], TEST_ID)
-        slt = self.request("/fixture/slt", {"role": "silicon", "environment": TEST_ID})["slt"]
-        tokens = self.request("/api/v1/app-auth/tokens", {"app_id": "mcport", "slt": slt}, iam=True, test=True)
-        actor = self.request("/api/v1/oauth/introspect", {"token": tokens["access_token"]}, iam=True, test=True)
-        self.assertEqual(actor["authorization"]["testing_environment_id"], TEST_ID)
 
     def test_mcp_list_pagination_and_structured_results(self):
         first = self.request("/mcp/public", {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})["result"]

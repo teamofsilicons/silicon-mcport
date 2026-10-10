@@ -1,4 +1,4 @@
-"""Directory and sharing journeys against the actual CLI, gateway and IAM fixture."""
+"""Directory and sharing journeys against the actual CLI, service and the fake Silicon Accounts."""
 import json
 import re
 
@@ -19,7 +19,7 @@ def run(journey, request):
         "github" in (entry["name"] + entry["description"]).lower() for entry in matches
     ))
     body = {
-        "name": "fixture-catalog", "description": "Org-owned fixture template",
+        "name": "fixture-catalog", "description": "A Carbon's fixture template",
         "category": "Testing", "source_url": "https://example.com/mcp-setup",
         "template": {"transport": "http", "url": journey.provider + "/mcp/public",
                      "command": None, "args": [], "auth_mode": "none"},
@@ -27,22 +27,26 @@ def run(journey, request):
     path = journey.directory / "directory-input.json"
     path.write_text(json.dumps(body))
     entry = cli("owner", "directory", "new", "--input", "@" + str(path))
-    check("Ordinary Carbon adds org directory entry without creating a connection",
-          entry["source"] == "org" and entry["can_manage"]
+    check("A Carbon adds a personal directory entry without creating a connection",
+          entry["source"] == "personal" and entry["can_manage"] and entry["owner"]["id"] == "c:owner"
           and cli("owner", "connection", "ls") == before_connections)
+    cli("silicon", "directory", "show", entry["id"], expected=False)
+    check("A personal entry stays with its creator until shared, even from the Silicons it looks after")
+    cli("owner", "directory", "share", entry["id"], "--account", "si:researcher")
     seen = cli("silicon", "directory", "show", entry["id"])
-    check("Org entry is discoverable by Silicon without management rights", not seen["can_manage"])
-    cli("crossorg", "directory", "show", entry["id"], expected=False)
+    check("Shared by id, the Silicon discovers the entry without management rights", not seen["can_manage"])
+    cli("outsider", "directory", "show", entry["id"], expected=False)
     cli("silicon", "directory", "rm", entry["id"], expected=False)
     cli("silicon", "directory", "set", entry["id"], "--input", "@" + str(path), expected=False)
-    check("Directory rejects cross-org reads and non-owner edits or deletion")
+    check("Directory refuses reads by accounts it was not shared with, and edits or deletion by non-managers")
 
     dry = cli("silicon", "connection", "new", "catalog-dry", "--from", entry["id"], "--dry-run")
     check("Directory review performs no connection write", cli("owner", "connection", "ls") == before_connections and bool(dry))
     connection = cli("silicon", "connection", "new", "catalog-public", "--from", entry["id"])
-    check("Unauthenticated catalog connection defaults to org access", connection["visibility"] == "org")
+    check("A connection made from the directory is invite-only by default, even without provider authentication",
+          connection["visibility"] == "invited" and connection["owner"]["id"] == "si:researcher")
     result = cli("owner", "tool", "call", connection["id"], "echo", "--input", '{"message":"directory works"}')
-    check("Another org member invokes a connection created from the directory", "directory works" in json.dumps(result))
+    check("The custodian uses the connection its Silicon made from the directory", "directory works" in json.dumps(result))
 
     body["description"] = "Updated without changing existing connections"
     body["template"]["url"] = journey.provider + "/mcp/bearer"
@@ -54,30 +58,34 @@ def run(journey, request):
     personal = cli("owner", "connection", "new", "catalog-personal", "--from", entry["id"])
     check("Provider-account catalog connection defaults to invite-only", personal["visibility"] == "invited")
     cli("stranger", "connection", "show", personal["id"], expected=False)
-    cli("owner", "access", "new", personal["id"], "--principal", "si:researcher")
+    cli("owner", "access", "new", personal["id"], "--account", "si:researcher")
     check("Invite-only gives the invited Silicon access", cli("silicon", "connection", "show", personal["id"])["id"] == personal["id"])
     cli("owner", "connection", "set", personal["id"], "--visibility", "private")
     cli("silicon", "connection", "show", personal["id"], expected=False)
-    check("Legacy owner-only reset removes invites without exposing another access mode", cli("owner", "access", "ls", personal["id"]) == [] and cli("owner", "connection", "show", personal["id"])["visibility"] == "invited")
+    check("Legacy owner-only reset removes invites without exposing another access mode",
+          cli("owner", "access", "ls", personal["id"]) == [] and cli("owner", "connection", "show", personal["id"])["visibility"] == "invited")
 
     # Defaulting is a server contract, including callers that omit visibility entirely.
-    headers = journey.api_session()
+    headers = journey.api_session("owner")
     api_connections = []
-    for mode, expected in (("none", "org"), ("shared", "invited"), ("per-user", "invited")):
+    for mode in ("none", "shared", "per-user"):
         raw = request(journey.backend + "/api/v1/connections", {
             "name": "api-default-" + mode, "transport": "http",
             "url": journey.provider + "/mcp/public", "auth_mode": mode,
         }, headers=headers)["data"]
         api_connections.append(raw["id"])
-        assert raw["visibility"] == expected
-    check("Raw API omission follows account-aware visibility defaults")
+        assert raw["visibility"] == "invited", raw
+    check("Raw API omission defaults to invite-only for every authentication mode")
+    refused = request(journey.backend + "/api/v1/connections", {
+        "name": "api-org", "transport": "http", "url": journey.provider + "/mcp/public", "auth_mode": "none", "visibility": "org",
+    }, headers=headers, expected=400)
+    check("A visibility value from before 0.3.0 is refused with a precise error", refused["error"]["code"] == "visibility_removed")
     stale = request(journey.backend + "/api/v1/directory/" + entry["id"],
                     {"input": body, "version": entry["version"]}, method="PUT", headers=headers, expected=409)
     check("Concurrent directory edit returns revision conflict", stale["error"]["code"] == "revision_conflict")
     unsafe = dict(body, source_url="https://user:password@example.com/setup")
     request(journey.backend + "/api/v1/directory", unsafe, headers=headers, expected=400)
     check("Directory rejects credentials in source URLs")
-
     cli("owner", "directory", "rm", entry["id"])
     cli("owner", "directory", "show", entry["id"], expected=False)
     check("Removing a directory template does not remove configured connections", cli("silicon", "connection", "show", connection["id"])["id"] == connection["id"])
@@ -85,23 +93,3 @@ def run(journey, request):
         cli("owner", "connection", "rm", identifier)
     cli("silicon", "connection", "rm", connection["id"])
     check("Directory journey removes only its fixture entries and connections", cli("owner", "connection", "ls") == before_connections)
-
-
-def test_environment(journey):
-    """Called after the common journey provisions and logs into its testing world."""
-    from fixtures import TEST_ID
-    cli, check = journey.cli, journey.check
-    body = {"name": "test-directory", "description": "Test-only template", "category": "Testing", "source_url": None, "template": None}
-    path = journey.directory / "test-directory-input.json"
-    path.write_text(json.dumps(body))
-    entry = cli("owner", "directory", "new", "--input", "@" + str(path), test=TEST_ID)
-    cli("owner", "directory", "show", entry["id"], expected=False)
-    check("Test directory entries stay out of production", entry["environment"] == TEST_ID)
-    return entry["id"]
-
-
-def after_clean(journey, identifier):
-    from fixtures import TEST_ID
-    journey.cli("owner", "directory", "show", identifier, test=TEST_ID, expected=False)
-    entries = journey.cli("owner", "directory", "ls", test=TEST_ID)
-    journey.check("Lifecycle clean removes org templates and preserves the shared public catalog", entries and all(entry["source"] == "community" for entry in entries))

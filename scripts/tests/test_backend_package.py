@@ -34,9 +34,8 @@ class BackendPackageTests(unittest.TestCase):
         struct.pack_into("<H", elf, 52, 64)
         self.binary.write_bytes(elf)
         self.binary.chmod(0o755)
-        self.web = self.path / "web"
-        self.web.mkdir()
-        (self.web / "index.html").write_text("<html>Fixture only</html>")
+        self.state = self.path / "state-fixture"
+        self.state.mkdir()
         self.evidence = self.path / "provenance.json"
         self.evidence.write_text(json.dumps({"source_revision": REVISION, "target": "aarch64-unknown-linux-gnu", "build_distribution": "Amazon Linux 2023", "glibc_baseline": "2.34", "build_image": "public.ecr.aws/amazonlinux/amazonlinux@sha256:" + "b" * 64, "rustc": "rustc fixture", "binary_sha256": hashlib.sha256(elf).hexdigest(), "native_tests_passed": True, "native_health_smoke_passed": True, "health_version": backend.tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"], "health_source_revision": REVISION}))
 
@@ -45,7 +44,7 @@ class BackendPackageTests(unittest.TestCase):
 
     def package(self, name="candidate.tar.gz"):
         output = self.path / name
-        result = backend.package(self.binary, self.web, self.evidence, REVISION, output)
+        result = backend.package(self.binary, self.evidence, REVISION, output)
         return output, result
 
     def rebuild(self, output, mutate):
@@ -63,7 +62,7 @@ class BackendPackageTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(), second.read_bytes())
         metadata, members = backend.installer.validate_bundle(output, result["sha256"], REVISION)
         self.assertEqual(metadata["source_revision"], REVISION)
-        self.assertEqual(set(members), backend.installer.FIXED_FILES | {"web/dist/index.html"})
+        self.assertEqual(set(members), backend.installer.FIXED_FILES)
         before = set(self.path.iterdir())
         run = subprocess.run([sys.executable, str(ROOT / "deploy/install.py"), "--bundle", str(output), "--sha256", result["sha256"], "--revision", REVISION], capture_output=True, text=True, check=True)
         self.assertFalse(json.loads(run.stdout)["apply"])
@@ -91,7 +90,7 @@ class BackendPackageTests(unittest.TestCase):
             backend.installer.validate_bundle(output, "0" * 64, REVISION)
         with self.assertRaisesRegex(ValueError, "provenance"):
             backend.installer.validate_bundle(output, result["sha256"], "c" * 40)
-        changed, digest = self.rebuild(output, lambda entries: [(member, data.replace(b"Fixture", b"Altered") if member.name == "web/dist/index.html" else data) for member, data in entries])
+        changed, digest = self.rebuild(output, lambda entries: [(member, data.replace(b"#", b"!", 1) if member.name == "README.md" else data) for member, data in entries])
         with self.assertRaisesRegex(ValueError, "checksum"):
             backend.installer.validate_bundle(changed, digest, REVISION)
 
@@ -100,7 +99,7 @@ class BackendPackageTests(unittest.TestCase):
         for kind in ("traversal", "symlink", "duplicate"):
             with self.subTest(kind=kind):
                 def mutate(entries):
-                    member = tarfile.TarInfo("../outside" if kind == "traversal" else "web/dist/link.js")
+                    member = tarfile.TarInfo("../outside" if kind == "traversal" else "link.js")
                     member.mode = 0o644
                     if kind == "symlink":
                         member.type, member.linkname = tarfile.SYMTYPE, "/etc/passwd"
@@ -109,21 +108,25 @@ class BackendPackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unsafe"):
                     backend.installer.validate_bundle(changed, digest, REVISION)
 
-    def test_missing_web_index_and_secret_named_assets_rejected(self):
-        (self.web / "index.html").unlink()
-        with self.assertRaisesRegex(ValueError, "index"):
-            self.package()
-        (self.web / ".env").write_text("FIXTURE_ONLY=not-a-secret")
-        with self.assertRaisesRegex(ValueError, "Unexpected"):
-            self.package()
+    def test_bundles_that_still_carry_a_website_are_refused(self):
+        # The website deploys separately; an older bundle layout must not install half-used.
+        output, _ = self.package()
+        for name in ("web/dist/index.html", ".env"):
+            with self.subTest(name=name):
+                def mutate(entries):
+                    member = tarfile.TarInfo(name)
+                    member.mode, member.size = 0o644, 9
+                    return entries + [(member, b"<html/>\n\n")]
+                changed, digest = self.rebuild(output, mutate)
+                with self.assertRaisesRegex(ValueError, "unsafe"):
+                    backend.installer.validate_bundle(changed, digest, REVISION)
+        self.assertFalse(backend.installer.allowed_name("web/dist/index.html"))
 
     @unittest.skipIf(os.name == "nt", "Windows developer symlink privilege varies")
-    def test_website_and_state_symlinks_rejected(self):
-        (self.web / "link.js").symlink_to(self.evidence)
+    def test_state_symlinks_rejected(self):
+        (self.state / "link.js").symlink_to(self.evidence)
         with self.assertRaisesRegex(ValueError, "symlinks"):
-            self.package()
-        with self.assertRaisesRegex(ValueError, "symlinks"):
-            backend.installer.validate_state_tree(self.web)
+            backend.installer.validate_state_tree(self.state)
 
     @unittest.skipIf(os.name == "nt", "Installer is a Unix systemd host operation")
     def test_failed_cutover_restores_previous_release_and_leaves_service_stopped(self):
@@ -233,9 +236,6 @@ class BackendPackageTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "Unix permission bits are required for this installer regression")
     def test_release_directories_are_traversable_under_private_umask(self):
-        assets = self.web / "assets" / "nested"
-        assets.mkdir(parents=True)
-        (assets / "application.js").write_text("/* fixture */")
         output, result = self.package()
         metadata, members = backend.installer.validate_bundle(output, result["sha256"], REVISION)
         prefix = self.path / "opt"
@@ -257,9 +257,8 @@ class BackendPackageTests(unittest.TestCase):
                     backend.installer.install_release(metadata, members, "https://fixture.example/health", release, None)
         finally:
             os.umask(previous_umask)
-        for directory in (release, release / "web", release / "web/dist", release / "web/dist/assets", release / "web/dist/assets/nested"):
-            self.assertEqual(directory.stat().st_mode & 0o777, 0o755, str(directory))
-        self.assertEqual((release / "web/dist/assets/nested/application.js").stat().st_mode & 0o777, 0o644)
+        self.assertEqual(release.stat().st_mode & 0o777, 0o755, str(release))
+        self.assertEqual((release / "README.md").stat().st_mode & 0o777, 0o644)
         self.assertEqual((release / "mcport-server").stat().st_mode & 0o777, 0o755)
         self.assertEqual(releases.stat().st_mode & 0o777, 0o700)
         self.assertEqual(private.stat().st_mode & 0o777, 0o700)

@@ -1,13 +1,27 @@
 # mcport-daemon
 
-The outbound execution host connector, embedded in the `mcport` CLI. The public `mcport-client` local feature exposes registry/account helpers and explicit run/start/stop/status operations. The CLI supplies its protected home/session storage and executable path without requiring a system service.
+The outbound host connector, embedded in the `mcport` CLI (`mcport daemon run`, started by `mcport host new` and
+`mcport daemon start`). `mcport-client`'s `local` feature exposes the registry helpers and explicit run/start/stop/status
+operations; the daemon installs no system service and has no updater (Silicon Apps updates the CLI).
 
-Gateway poll, progress and result calls use the stateless `mcport-api` transport (also re-exported by the public `mcport-client` package) with explicit `HostContext` credentials. No ambient user session or production fallback is used. The daemon retains polling/backoff, cancellation, account isolation and the durable job journal; the client does not retry requests. Result acknowledgements may be retried by job ID, while provider operations are never replayed after an unknown outcome.
+The daemon long-polls the service with its host token through the stateless `mcport-api` client, runs only endpoints
+registered in its local registry, and keeps a durable job journal. Jobs carry ids and MCP params, never executable
+paths, URLs or provider credentials. Each job is checked against the registered connection, the caller's local provider
+account, its deadline and the concurrency limit (four jobs). A restart marks unfinished work outcome-unknown; result
+uploads are retried by job id, provider actions never are.
 
-Local registry changes cancel affected active jobs and health probes on the next 250 ms control tick. An in-flight gateway poll is drained because it may already contain a leased job; every returned job uses the latest local registry. Advertising newly registered connections can therefore wait for the current 20-second gateway poll (the HTTP client limit is 25 seconds), without discarding leased work.
+The registry (`registry.json`, mode 0600) holds the host token, registered endpoints and local provider credentials.
+Version 2 keys the owner and each caller's personal provider account by Silicon Accounts uuid, using the uuid the
+service sends with each job and never a changeable public id. Version 1 registries (mcport 0.2 and earlier) keyed them by
+old ids: they still load and run, the service keeps sending the old key for such hosts, and `mcport host migrate`
+rewrites them as version 2. The daemon reports `registry_version` with its capabilities.
 
-Only endpoints registered in the local allowlist execute. Gateway jobs carry IDs and MCP params, never executable paths, URLs or provider credentials. Each job is checked against host organization, current registered account, deadline and concurrency limits. A restart marks unfinished work outcome-unknown. Local account changes cancel existing work and invalidate pooled provider sessions.
+Local registry changes cancel affected jobs and health probes on the next 250 ms control tick. A gateway poll in flight
+is drained because it may already hold a leased job; newly registered connections can therefore wait for the current
+20-second poll. Local account changes also invalidate pooled provider sessions, which are kept per connection and
+caller.
 
-MCP HTTP/stdio sessions and bounded local result assets stay in `mcport-mcp` and daemon runtime code. This is distinct from the gateway API transport.
+MCP HTTP and stdio sessions and bounded local result assets live in `mcport-mcp` and the daemon's runtime.
 
-Run `cargo test -p mcport-daemon` for outbound HTTP execution, duplicate-lease/restart protection, local credential isolation and asset materialization tests. The workspace `tests/e2e/run.py` also invokes local HTTP and stdio MCPs from a separate authorized caller home.
+Run `cargo test -p mcport-daemon` for outbound execution, duplicate-lease and restart protection, local credential
+isolation, registry versions and asset materialization.

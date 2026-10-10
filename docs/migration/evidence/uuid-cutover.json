@@ -1,0 +1,104 @@
+{
+  "scope": "isolated local shared Accounts migration; no production change",
+  "mapping_rows": 211,
+  "mapping_sha256": "750423f3117e11f5eb42025b457ff0f1bf42bd463c31b7e106d9cd10978ca4d9",
+  "migration": {
+    "apply": {
+      "already_applied": 0,
+      "apply": true,
+      "mapping_rows": 211,
+      "new_mappings": 211,
+      "oauth_attempts_expired": 0,
+      "reauthorization": "Sign in again; provider credentials and host tokens are preserved",
+      "records_resealed": 10
+    },
+    "replay": {
+      "already_applied": 211,
+      "apply": true,
+      "mapping_rows": 211,
+      "new_mappings": 0,
+      "oauth_attempts_expired": 0,
+      "reauthorization": "Sign in again; provider credentials and host tokens are preserved",
+      "records_resealed": 0
+    },
+    "homes": {
+      "c1-dry-run": {
+        "apply": false,
+        "hosts": [
+          {
+            "already_applied": 0,
+            "apply": false,
+            "new_mappings": 211
+          }
+        ],
+        "next": "After coordinated server cutover, sign in again and start the stopped daemons",
+        "sign_in_expired": true
+      },
+      "c1-apply": {
+        "apply": true,
+        "hosts": [
+          {
+            "already_applied": 0,
+            "apply": true,
+            "new_mappings": 211
+          }
+        ],
+        "next": "After coordinated server cutover, sign in again and start the stopped daemons",
+        "sign_in_expired": true
+      },
+      "c1-replay": {
+        "apply": true,
+        "hosts": [
+          {
+            "already_applied": 211,
+            "apply": true,
+            "new_mappings": 0
+          }
+        ],
+        "next": "After coordinated server cutover, sign in again and start the stopped daemons",
+        "sign_in_expired": false
+      },
+      "c2-dry-run": {
+        "apply": false,
+        "hosts": [],
+        "next": "After coordinated server cutover, sign in again and start the stopped daemons",
+        "sign_in_expired": true
+      },
+      "c2-apply": {
+        "apply": true,
+        "hosts": [],
+        "next": "After coordinated server cutover, sign in again and start the stopped daemons",
+        "sign_in_expired": true
+      },
+      "c2-replay": {
+        "apply": true,
+        "hosts": [],
+        "next": "After coordinated server cutover, sign in again and start the stopped daemons",
+        "sign_in_expired": false
+      }
+    },
+    "master_key_preserved": true,
+    "replay_logical_dump_unchanged": true
+  },
+  "runtime_verification": {
+    "passed": true,
+    "old_subjects_rejected": 2,
+    "fresh_device_signins": 2,
+    "existing_daemon_host_reconnected": true,
+    "invited_access_retained": true,
+    "official_filesystem_bytes_retained": true,
+    "historical_calls_retained": 2,
+    "encrypted_bearer_credential_retained": true
+  },
+  "source_fixture_note": "Waveform current namespace retained; unrelated older MCPort and Apps fixtures preserved separately without rekeying",
+  "source_cache_provenance_audit": {
+    "total": 50,
+    "kind_mismatch": 16,
+    "handle_mismatch": 12,
+    "public_id_missing": 6,
+    "missing": 4,
+    "matching_current_handle": 12
+  },
+  "native_candidate_build_profile": "unoptimized development profile; debug information disabled",
+  "task_owned_development_processes": "stopped after final state backup"
+}

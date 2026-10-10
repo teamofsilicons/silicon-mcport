@@ -3,7 +3,9 @@
 //! Registry persistence and process start/stop happen only when requested.
 use crate::{Connection, HostRegistration};
 use fs2::FileExt;
-pub use mcport_daemon::{DaemonError, HostConfig, LocalAccount, RegisteredConnection, Registry};
+pub use mcport_daemon::{
+    DaemonError, HostConfig, LocalAccount, REGISTRY_VERSION, RegisteredConnection, Registry,
+};
 pub use mcport_mcp::Endpoint;
 use serde_json::{Value, json};
 use std::{
@@ -26,6 +28,12 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(String),
+    /// The registry was written before 0.3.0 and still keys personal provider
+    /// accounts by old ids. `mcport host migrate <host>` rewrites it once.
+    #[error(
+        "This host's local registry ({host_id}) was written by mcport before 0.3.0 and still uses the old account keys. Run mcport host migrate {host_id} on this machine once, then retry."
+    )]
+    LegacyRegistry { host_id: String },
 }
 pub type Result<T> = std::result::Result<T, Error>;
 fn invalid(message: &str) -> Error {
@@ -38,26 +46,34 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
-/// Identity already authenticated by the caller through MCPort. This value is
-/// not itself a credential; the gateway remains the authority for remote actions.
+/// The signed-in account (its Silicon Accounts uuid) and the backend it uses, as
+/// already authenticated by the caller. This value is not itself a credential; the
+/// service remains the authority for remote actions.
 #[derive(Clone, Debug)]
 pub struct Scope {
     pub backend_url: String,
-    pub environment: String,
-    pub principal_id: String,
-    pub org_id: String,
+    pub account_uuid: String,
 }
 impl Scope {
-    pub fn validate_registry(&self, registry: &Registry, host_id: &str) -> Result<()> {
+    /// The registry serves `host_id` for this backend (any registry version).
+    pub fn validate_host(&self, registry: &Registry, host_id: &str) -> Result<()> {
         if registry.host.host_id != host_id
-            || registry.host.org_id != self.org_id
-            || registry.host.environment != self.environment
             || registry.host.backend_url.trim_end_matches('/')
                 != self.backend_url.trim_end_matches('/')
         {
             return Err(invalid(
-                "Local host registry does not match the selected backend, organization and testing environment.",
+                "This local host registry belongs to another host or MCPort backend.",
             ));
+        }
+        Ok(())
+    }
+    /// [`Scope::validate_host`], and the registry keys accounts by uuid (version 2).
+    pub fn validate_registry(&self, registry: &Registry, host_id: &str) -> Result<()> {
+        self.validate_host(registry, host_id)?;
+        if registry.is_legacy() {
+            return Err(Error::LegacyRegistry {
+                host_id: host_id.into(),
+            });
         }
         Ok(())
     }
@@ -66,13 +82,7 @@ impl Scope {
             .host_id
             .as_deref()
             .ok_or_else(|| invalid("This connection has no local execution host."))?;
-        self.validate_registry(registry, host_id)?;
-        if connection.org_id != self.org_id || connection.environment != self.environment {
-            return Err(invalid(
-                "Connection does not match the selected organization and testing environment.",
-            ));
-        }
-        Ok(())
+        self.validate_registry(registry, host_id)
     }
 }
 
@@ -83,23 +93,18 @@ pub fn registry_for_host(
     isi: Option<String>,
 ) -> Result<Registry> {
     let host = registration.host;
-    if host.owner_id != scope.principal_id
-        || host.org_id != scope.org_id
-        || host.environment != scope.environment
-    {
+    if host.owner.uuid != scope.account_uuid {
         return Err(invalid(
-            "The registered host belongs to a different account, organization or environment.",
+            "The registered host belongs to a different account.",
         ));
     }
-    Ok(Registry::new(HostConfig {
-        backend_url: scope.backend_url.clone(),
-        host_id: host.id,
-        host_token: registration.host_token,
-        environment: host.environment,
-        org_id: host.org_id,
-        owner_id: host.owner_id,
+    Ok(Registry::new(HostConfig::new(
+        scope.backend_url.clone(),
+        host.id,
+        registration.host_token,
+        host.owner.uuid,
         isi,
-    }))
+    )))
 }
 
 /// Validate and map central connection metadata into a local execution endpoint.
@@ -112,7 +117,8 @@ pub fn register_connection(
     env: BTreeMap<String, String>,
 ) -> Result<bool> {
     scope.validate_connection(registry, connection)?;
-    if connection.owner_id != scope.principal_id || registry.host.owner_id != scope.principal_id {
+    if connection.owner.uuid != scope.account_uuid || registry.host.owner_uuid != scope.account_uuid
+    {
         return Err(invalid(
             "Only the connection and host owner may approve local execution.",
         ));
@@ -165,9 +171,13 @@ fn selected<'a>(
     mutation: bool,
 ) -> Result<&'a mut RegisteredConnection> {
     scope.validate_connection(registry, connection)?;
-    if mutation && connection.auth_mode == "shared" && connection.owner_id != scope.principal_id {
+    if mutation
+        && connection.auth_mode == "shared"
+        && connection.owner.uuid != scope.account_uuid
+        && !connection.can_manage
+    {
         return Err(invalid(
-            "Only the connection owner can change its shared provider account.",
+            "Only the connection's owner (or the custodian of a Silicon owner) can change its shared provider account.",
         ));
     }
     let registered = registry
@@ -206,10 +216,15 @@ pub fn connect_account(
     } else {
         registered
             .personal_accounts
-            .insert(scope.principal_id.clone(), account);
+            .insert(scope.account_uuid.clone(), account);
     }
+    let account = if connection.auth_mode == "shared" {
+        &connection.owner.uuid
+    } else {
+        &scope.account_uuid
+    };
     Ok(
-        json!({"connected":true,"owner_id":scope.principal_id,"label":label,"kind":"local","credentials_uploaded":false,"provider_verified":false}),
+        json!({"connected":true,"account":account,"label":label,"kind":"local","credentials_uploaded":false,"provider_verified":false}),
     )
 }
 pub fn disconnect_account(
@@ -222,7 +237,7 @@ pub fn disconnect_account(
         registered.shared_account = None;
         registered.shared_account_disconnected = true;
     } else {
-        registered.personal_accounts.remove(&scope.principal_id);
+        registered.personal_accounts.remove(&scope.account_uuid);
     }
     Ok(
         json!({"disconnected":true,"note":"Saved MCPort credentials were removed. A desktop application's own session remains controlled by that application."}),
@@ -245,24 +260,110 @@ pub fn account_status(
     let account = if connection.auth_mode == "shared" {
         registered.shared_account.as_ref()
     } else {
-        registered.personal_accounts.get(&scope.principal_id)
+        registered.personal_accounts.get(&scope.account_uuid)
     };
     Ok(
-        json!({"connected":account.is_some(),"owner_id":if connection.auth_mode == "shared" { &connection.owner_id } else { &scope.principal_id },"label":account.map(|a|a.label.as_str()),"kind":"local","uses_host_account":connection.auth_mode == "shared" && account.is_none() && !registered.shared_account_disconnected,"disconnected":registered.shared_account_disconnected,"provider_verified":false}),
+        json!({"connected":account.is_some(),"account":if connection.auth_mode == "shared" { &connection.owner.uuid } else { &scope.account_uuid },"label":account.map(|a|a.label.as_str()),"kind":"local","uses_host_account":connection.auth_mode == "shared" && account.is_none() && !registered.shared_account_disconnected,"disconnected":registered.shared_account_disconnected,"provider_verified":false}),
     )
 }
+/// Remove a connection from the host's local allowlist. Works on registries of any
+/// version, so a deleted connection never keeps running from an unmigrated host.
 pub fn unregister_connection(
     registry: &mut Registry,
     connection: &Connection,
     scope: &Scope,
 ) -> Result<bool> {
-    scope.validate_connection(registry, connection)?;
-    if connection.owner_id != scope.principal_id || registry.host.owner_id != scope.principal_id {
+    let host_id = connection
+        .host_id
+        .as_deref()
+        .ok_or_else(|| invalid("This connection has no local execution host."))?;
+    scope.validate_host(registry, host_id)?;
+    let owner = if registry.is_legacy() {
+        connection.owner.uuid == scope.account_uuid
+    } else {
+        connection.owner.uuid == scope.account_uuid
+            && registry.host.owner_uuid == scope.account_uuid
+    };
+    if !owner {
         return Err(invalid(
             "Only the connection and host owner may remove its local registration.",
         ));
     }
     Ok(registry.connections.remove(&connection.id).is_some())
+}
+
+/// What [`migrate_registry`] did with each old key.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Migration {
+    /// Old key → uuid, for every personal account that moved.
+    pub moved: BTreeMap<String, String>,
+    /// Old keys with no uuid in the mapping; their local credentials are dropped.
+    pub unmapped: Vec<String>,
+    /// Old keys whose uuid already had an account on the same connection (another
+    /// old key of the same account); the first one in key order was kept.
+    pub duplicates: Vec<String>,
+}
+
+/// Rewrite a registry written before 0.3.0 (version 1) as version 2: the host belongs
+/// to `owner_uuid`, and each personal provider account moves from its old key to the
+/// uuid `mapping` gives it. Endpoints, shared accounts and disconnection marks stay.
+/// Nothing is saved; inspect [`Migration::unmapped`] before saving.
+pub fn migrate_registry(
+    registry: &Registry,
+    owner_uuid: &str,
+    mapping: &BTreeMap<String, String>,
+) -> Result<(Registry, Migration)> {
+    if !registry.is_legacy() {
+        return Err(invalid("This registry already keys accounts by uuid."));
+    }
+    if owner_uuid.is_empty() {
+        return Err(invalid("The host owner's uuid is required."));
+    }
+    let host = &registry.host;
+    let mut migrated = Registry::new(HostConfig::new(
+        host.backend_url.clone(),
+        host.host_id.clone(),
+        host.host_token.clone(),
+        owner_uuid,
+        host.isi.clone(),
+    ));
+    let mut report = Migration::default();
+    for (id, connection) in &registry.connections {
+        let mut moved = connection.clone();
+        moved.personal_accounts = BTreeMap::new();
+        for (key, account) in &connection.personal_accounts {
+            match mapping.get(key).filter(|uuid| !uuid.is_empty()) {
+                Some(uuid) if moved.personal_accounts.contains_key(uuid) => {
+                    report.duplicates.push(key.clone());
+                }
+                Some(uuid) => {
+                    moved
+                        .personal_accounts
+                        .insert(uuid.clone(), account.clone());
+                    report.moved.insert(key.clone(), uuid.clone());
+                }
+                None => report.unmapped.push(key.clone()),
+            }
+        }
+        migrated.connections.insert(id.clone(), moved);
+    }
+    report.unmapped.sort();
+    report.unmapped.dedup();
+    report.duplicates.sort();
+    report.duplicates.dedup();
+    Ok((migrated, report))
+}
+
+/// The old keys of every personal provider account in a registry.
+pub fn account_keys(registry: &Registry) -> Vec<String> {
+    let mut keys: Vec<String> = registry
+        .connections
+        .values()
+        .flat_map(|connection| connection.personal_accounts.keys().cloned())
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
 }
 
 /// Parse transport-specific local account data without doing I/O.
@@ -586,6 +687,33 @@ pub async fn stop(registry_path: &Path) -> Result<Value> {
     )
 }
 
+/// Offline UUID cutover for one host. A running daemon is refused, never killed.
+/// Journal files contain job IDs and outcomes, so they are preserved byte for byte.
+pub fn migrate_account_uuids(
+    path: &Path,
+    mapping: &crate::uuid_mapping::Mapping,
+    apply: bool,
+) -> Result<Value> {
+    let _registry_lock = lock_registry(path)?;
+    let daemon_lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_file_name("daemon.lock"))?;
+    daemon_lock
+        .try_lock_exclusive()
+        .map_err(|_| invalid("Stop this daemon before account UUID migration"))?;
+    let mut registry = Registry::load(path)?;
+    let count = registry.migrate_account_uuids(mapping)?;
+    if apply && count > 0 {
+        registry.save(path)?;
+    }
+    Ok(
+        json!({"apply":apply,"host_id":registry.host.host_id,"new_mappings":count,"already_applied":mapping.len()-count}),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,27 +721,103 @@ mod tests {
     fn scope() -> Scope {
         Scope {
             backend_url: "http://127.0.0.1:4380".into(),
-            environment: "test-one".into(),
-            principal_id: "ca:owner".into(),
-            org_id: "org-one".into(),
+            account_uuid: "Own".into(),
         }
     }
     fn registry() -> Registry {
         let scope = scope();
-        Registry::new(HostConfig {
-            backend_url: scope.backend_url,
-            host_id: "host-one".into(),
-            host_token: "local-test-token".into(),
-            environment: scope.environment,
-            org_id: scope.org_id,
-            owner_id: scope.principal_id,
-            isi: None,
-        })
+        Registry::new(HostConfig::new(
+            scope.backend_url,
+            "host-one",
+            "local-test-token",
+            scope.account_uuid,
+            None,
+        ))
     }
     fn connection(mode: &str) -> Connection {
         serde_json::from_value(json!({
-            "id":"connection-one", "name":"Local fixture", "description":"", "org_id":"org-one", "owner_id":"ca:owner", "environment":"test-one", "transport":"http", "url":"http://127.0.0.1:4392/mcp", "host_id":"host-one", "command":null, "args":[], "auth_mode":mode, "visibility":"invited", "status":"checking", "can_manage":true, "account":null, "created_at":0, "updated_at":0, "version":1
+            "id":"connection-one", "name":"Local fixture", "description":"", "owner":{"uuid":"Own","id":"c:owner","kind":"carbon","display_name":"Owner"}, "transport":"http", "url":"http://127.0.0.1:4392/mcp", "host_id":"host-one", "command":null, "args":[], "auth_mode":mode, "visibility":"invited", "status":"checking", "can_manage":true, "account":null, "created_at":0, "updated_at":0, "version":1
         })).unwrap()
+    }
+    /// The same connection as an invitee sees it (no management rights).
+    fn invited_view(mode: &str) -> Connection {
+        let mut connection = connection(mode);
+        connection.can_manage = false;
+        connection
+    }
+
+    #[test]
+    fn uuid_registry_backfill_preserves_secrets_and_journal_and_refuses_running_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("registry.json");
+        let mut original = registry();
+        let conn = connection("per-user");
+        register_connection(&mut original, &conn, &scope(), BTreeMap::new()).unwrap();
+        connect_account(
+            &mut original,
+            &conn,
+            &scope(),
+            json!({"kind":"bearer","secret":"local-provider-secret"}),
+        )
+        .unwrap();
+        original.save(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let journal=br#"{"jobs":{"job":{"started_at":1,"result":{"account_uuid":"Own"},"delivered":true}}}"#;
+        std::fs::write(dir.path().join("journal.json"), journal).unwrap();
+        let target = "f858d0b5-98ba-4a4d-8ce5-114e93136f23";
+        let mapping =
+            crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOwn,{target},carbon\n"))
+                .unwrap();
+        let incomplete =
+            crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOther,{target},carbon\n"))
+                .unwrap();
+        assert!(migrate_account_uuids(&path, &incomplete, true).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            migrate_account_uuids(&path, &mapping, false).unwrap()["new_mappings"],
+            1
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.path().join("daemon.lock"))
+            .unwrap();
+        lock.try_lock_exclusive().unwrap();
+        assert!(migrate_account_uuids(&path, &mapping, true).is_err());
+        FileExt::unlock(&lock).unwrap();
+        migrate_account_uuids(&path, &mapping, true).unwrap();
+        let migrated = Registry::load(&path).unwrap();
+        assert_eq!(migrated.host.owner_uuid, target);
+        assert_eq!(migrated.host.host_token, original.host.host_token);
+        assert_eq!(
+            migrated.connections[&conn.id].personal_accounts[target]
+                .bearer_token
+                .as_deref(),
+            Some("local-provider-secret")
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("journal.json")).unwrap(),
+            journal
+        );
+        let migrated_bytes = std::fs::read(&path).unwrap();
+        assert_eq!(
+            migrate_account_uuids(&path, &mapping, true).unwrap()["new_mappings"],
+            0
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), migrated_bytes);
+        let conflict =
+            crate::uuid_mapping::parse(&format!("old_uuid,new_uuid,kind\nOwn,{target},silicon\n"))
+                .unwrap();
+        assert!(migrate_account_uuids(&path, &conflict, true).is_err());
+        let mut collision = original.clone();
+        collision
+            .connections
+            .get_mut(&conn.id)
+            .unwrap()
+            .personal_accounts
+            .insert(target.into(), LocalAccount::default());
+        assert!(collision.migrate_account_uuids(&mapping).is_err());
     }
 
     #[test]
@@ -634,19 +838,11 @@ mod tests {
         assert_eq!(before, serde_json::to_value(&registry).unwrap());
         for altered in [
             Scope {
-                environment: "production".into(),
-                ..scope.clone()
-            },
-            Scope {
-                org_id: "org-two".into(),
-                ..scope.clone()
-            },
-            Scope {
                 backend_url: "http://localhost:4380".into(),
                 ..scope.clone()
             },
             Scope {
-                principal_id: "si:other".into(),
+                account_uuid: "Oth".into(),
                 ..scope.clone()
             },
         ] {
@@ -675,7 +871,7 @@ mod tests {
         )
         .unwrap();
         let invited = Scope {
-            principal_id: "si:invited".into(),
+            account_uuid: "Inv".into(),
             ..owner.clone()
         };
         assert_eq!(
@@ -699,7 +895,7 @@ mod tests {
             true
         );
         assert_eq!(
-            registry.connections[&connection.id].personal_accounts["si:invited"]
+            registry.connections[&connection.id].personal_accounts["Inv"]
                 .bearer_token
                 .as_deref(),
             Some("invited-token")
@@ -716,26 +912,27 @@ mod tests {
         let owner = scope();
         register_connection(&mut registry, &connection, &owner, BTreeMap::new()).unwrap();
         let invited = Scope {
-            principal_id: "si:invited".into(),
+            account_uuid: "Inv".into(),
             ..owner.clone()
         };
+        let seen_by_invitee = invited_view("shared");
         assert!(
             connect_account(
                 &mut registry,
-                &connection,
+                &seen_by_invitee,
                 &invited,
                 json!({"secret":"invited-token"})
             )
             .is_err()
         );
-        assert!(disconnect_account(&mut registry, &connection, &invited).is_err());
+        assert!(disconnect_account(&mut registry, &seen_by_invitee, &invited).is_err());
         assert_eq!(
-            account_status(&registry, &connection, &invited).unwrap()["uses_host_account"],
+            account_status(&registry, &seen_by_invitee, &invited).unwrap()["uses_host_account"],
             true
         );
         disconnect_account(&mut registry, &connection, &owner).unwrap();
         assert_eq!(
-            account_status(&registry, &connection, &invited).unwrap()["uses_host_account"],
+            account_status(&registry, &seen_by_invitee, &invited).unwrap()["uses_host_account"],
             false
         );
         connect_account(&mut registry, &connection, &owner, json!({"kind":"host"})).unwrap();
@@ -919,5 +1116,121 @@ mod tests {
         let link = directory.path().join("host-link");
         symlink(&real, &link).unwrap();
         assert!(lock_registry(&link.join("registry.json")).is_err());
+    }
+
+    fn legacy_registry() -> Registry {
+        let mut host = registry().host;
+        host.owner_uuid = String::new();
+        host.environment = "production".into();
+        host.org_id = "tos".into();
+        host.owner_id = "c:owner".into();
+        let mut legacy = Registry::new(host);
+        legacy.version = 1;
+        let mut shared = connection("shared");
+        shared.id = "shared-one".into();
+        let mut per_user = connection("per-user");
+        per_user.id = "per-user-one".into();
+        legacy
+            .register(
+                "shared-one",
+                Endpoint::http("http://127.0.0.1:4392/mcp"),
+                "shared",
+            )
+            .unwrap();
+        legacy
+            .register(
+                "per-user-one",
+                Endpoint::http("http://127.0.0.1:4393/mcp"),
+                "per-user",
+            )
+            .unwrap();
+        legacy
+            .connections
+            .get_mut("shared-one")
+            .unwrap()
+            .shared_account_disconnected = true;
+        let accounts = &mut legacy
+            .connections
+            .get_mut("per-user-one")
+            .unwrap()
+            .personal_accounts;
+        for (key, secret) in [
+            ("c:owner", "owner-secret"),
+            ("si:researcher", "researcher-secret"),
+            ("si:researcher-alias", "alias-secret"),
+            ("si:gone", "gone-secret"),
+        ] {
+            accounts.insert(
+                key.into(),
+                LocalAccount {
+                    bearer_token: Some(secret.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        legacy
+    }
+
+    #[test]
+    fn unmigrated_registries_refuse_account_changes_but_allow_removal() {
+        let mut legacy = legacy_registry();
+        let scope = scope();
+        let mut per_user = connection("per-user");
+        per_user.id = "per-user-one".into();
+        let error =
+            connect_account(&mut legacy, &per_user, &scope, json!({"secret":"x"})).unwrap_err();
+        assert!(matches!(error, Error::LegacyRegistry { .. }));
+        assert!(error.to_string().contains("mcport host migrate host-one"));
+        assert!(account_status(&legacy, &per_user, &scope).is_err());
+        assert!(register_connection(&mut legacy, &per_user, &scope, BTreeMap::new()).is_err());
+        // A deleted connection must stop running even on an unmigrated host.
+        assert!(unregister_connection(&mut legacy, &per_user, &scope).unwrap());
+        assert!(!legacy.connections.contains_key("per-user-one"));
+    }
+
+    #[test]
+    fn migration_rekeys_personal_accounts_by_uuid_and_reports_the_rest() {
+        let legacy = legacy_registry();
+        assert_eq!(
+            account_keys(&legacy),
+            ["c:owner", "si:gone", "si:researcher", "si:researcher-alias"]
+        );
+        let mapping = BTreeMap::from([
+            ("c:owner".to_owned(), "Own".to_owned()),
+            ("si:researcher".to_owned(), "Res".to_owned()),
+            ("si:researcher-alias".to_owned(), "Res".to_owned()),
+        ]);
+        let (migrated, report) = migrate_registry(&legacy, "Own", &mapping).unwrap();
+        assert_eq!(migrated.version, REGISTRY_VERSION);
+        assert_eq!(migrated.host.owner_uuid, "Own");
+        assert!(migrated.host.org_id.is_empty() && migrated.host.owner_id.is_empty());
+        assert_eq!(migrated.host.host_token, legacy.host.host_token);
+        let accounts = &migrated.connections["per-user-one"].personal_accounts;
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(
+            accounts["Own"].bearer_token.as_deref(),
+            Some("owner-secret")
+        );
+        assert_eq!(
+            accounts["Res"].bearer_token.as_deref(),
+            Some("researcher-secret")
+        );
+        assert!(migrated.connections["shared-one"].shared_account_disconnected);
+        assert_eq!(report.unmapped, ["si:gone"]);
+        assert_eq!(report.duplicates, ["si:researcher-alias"]);
+        assert_eq!(report.moved.len(), 2);
+        // The result is a valid version 2 registry the current daemon accepts.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("registry.json");
+        migrated.save(&path).unwrap();
+        assert!(!Registry::load(&path).unwrap().is_legacy());
+        // A migrated registry is not migrated twice.
+        assert!(migrate_registry(&migrated, "Own", &mapping).is_err());
+        // And now the owner's personal account is found by uuid.
+        let mut per_user = connection("per-user");
+        per_user.id = "per-user-one".into();
+        let status = account_status(&migrated, &per_user, &scope()).unwrap();
+        assert_eq!(status["connected"], true);
+        assert_eq!(status["account"], "Own");
     }
 }

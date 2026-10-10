@@ -1,0 +1,13 @@
+# Silicon Apps manifest for ONE target of the mcport CLI.
+# scripts/package-apps.sh renders it into every package: it replaces
+# @VERSION@ (the workspace version), @TARGET@ (one Silicon Apps target) and
+# @BINARY@ (bin/mcport, or bin/mcport.exe on Windows), and drops these comment
+# lines. Each archive lists only its own target, so it validates on that
+# target's runner. See scripts/README.md.
+schema_version: 1
+app_id: mcport
+version: @VERSION@
+command: mcport
+targets:
+  @TARGET@:
+    binary: @BINARY@

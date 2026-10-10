@@ -3,51 +3,93 @@
 ## Local work
 
 ```sh
+cargo fmt --all --check
 cargo test --locked --workspace
 cargo clippy --locked --workspace --all-targets -- -D warnings
-npm ci --prefix web
-npm run build --prefix web
-npm exec --prefix web -- vitest run
-python3 tests/e2e/run.py
+python3 -m unittest discover -s scripts/tests -p 'test_*.py'    # packaging, backend bundle and catalog scripts
+python3 tests/e2e/run.py                                       # the real binaries end to end (fake Silicon Accounts)
+python3 scripts/check.py                                       # all of the above, the discovery commands and the web
 ```
 
-The real-binary integration harness creates independent backend/IAM/provider services, homes and databases. See its README for port and cleanup behavior. Manual evidence is separate from automated assertions. Never call fixture tests proof of live IAM or production provider consent.
+The Rust tests need no database or network: the service uses temporary SQLite stores and in-process fixtures (a local
+Ed25519 JWKS for Silicon Accounts tokens, MCP providers, Postmark), the CLI tests run the real `mcport` binary against a
+stub Silicon Accounts and backend, and the client tests cover the device flow, short-lived token exchange, refresh
+rotation and the stored sign-in. `mcport-mcp` transport tests need Python 3 (`MCPORT_TEST_PYTHON=/abs/python3`).
+The end-to-end journey runs the real CLI, host daemon and service against a loopback fake Silicon Accounts and MCP
+fixtures; [tests/e2e/README.md](../tests/e2e/README.md) describes it and the scenarios against a real local stack.
 
-`cargo run -p mcport-server` serves the API at `127.0.0.1:4380`. `npm run dev --prefix web` serves port 4381 and proxies `/api`. A production frontend build at `web/dist` is served by the backend with browser history fallback. Run the server from the repository/deployment root or provide that directory layout.
+To run the whole thing on this machine, start a local Silicon Accounts stack (the silicon-accounts testkit) that has
+an `mcport` app with `device_flow` and `public_client` on, then:
 
-## Backend configuration
+```sh
+MCPORT_TEST_STACK=/path/to/test-stack.json scripts/dev-accounts.sh --build   # service 127.0.0.1:4241, MCP fixtures 4242
+export MCPORT_URL=http://127.0.0.1:4241 ACCOUNTS_URL=http://localhost:9590
+cargo run -p mcport-cli -- login
+scripts/dev-accounts-stop.sh
+```
 
-Copy `deploy/environment.example` into a protected service environment file and supply secrets through your deployment's secret store. Important settings:
+`dev-accounts.sh` is idempotent: it points mcport's webhook at the service with the app's credentials, keeps the
+signing secret in `.local/dev-accounts/webhook-secret` (0600, never committed) and proves a signed test delivery
+before it reports ready. `python3 scripts/dev_accounts.py --help` lists its settings (another stack file, port block,
+state directory, binary). It talks only to a Silicon Accounts on this machine. Against any other deployment, start
+`mcport-server` with the variables below.
+
+When the public Silicon Accounts URL (the token issuer) and the address the service should call differ, set
+`ACCOUNTS_API_URL` as well. The service no longer serves a website; the website is deployed on its own and calls the
+same API.
+
+## Service configuration
+
+Copy `deploy/environment.example` into a protected service environment file and supply secrets from your deployment's
+secret store.
 
 | Variable | Purpose |
 |---|---|
-| `MCPORT_APP_ID`, `MCPORT_APP_SECRET` | Registered Honeycomb application and backend-only IAM credential |
-| `MCPORT_IAM_URL`, `MCPORT_IAM_WEB_URL` | IAM API and login website |
-| `MCPORT_PUBLIC_URL`, `MCPORT_WEB_URL` | Exact external backend/frontend origins and callbacks |
-| `MCPORT_BIND`, `MCPORT_DATA_DIR` | Listener and protected persistent storage |
-| `MCPORT_MASTER_KEY` | Optional 32-byte key as 64 hex characters; otherwise generated once in the data directory |
-| `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION` | Separate IAM signing secret and version |
-| `MCPORT_LIFECYCLE_SECRET` | Dedicated Honeycomb participant service token, at least 32 characters |
-| `MCPORT_TEST_APP_SECRETS` | Protected JSON map from test UUID to that environment's imported app secret; loaded at startup and may be supplied after import |
-| `MCPORT_ALLOWED_UPSTREAM_ORIGINS` | Explicit operator-only exceptions for controlled private HTTP origins |
-| `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Bug-report delivery configuration |
-| `MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL` | Space Station production table key and service |
-| `MCPORT_TEST_TELEMETRY_KEYS` | JSON map of separate test environment table keys |
+| `ACCOUNTS_URL` | Silicon Accounts' public URL; access tokens must carry it as `iss`. HTTPS, or HTTP on this machine. |
+| `ACCOUNTS_API_URL` | Optional: where the service calls Silicon Accounts, when that differs from `ACCOUNTS_URL`. |
+| `MCPORT_APP_ID`, `MCPORT_APP_SECRET` | The app at Silicon Accounts (`mcport`) and its secret (service only; required). |
+| `MCPORT_ACCOUNTS_WEBHOOK_SECRET` | The `whsec_` secret of mcport's Silicon Accounts webhook; without it the webhook answers 503. |
+| `MCPORT_PUBLIC_URL`, `MCPORT_WEB_URL` | External service and website origins (provider OAuth callbacks, download links). |
+| `MCPORT_BIND`, `MCPORT_DATA_DIR` | Listener and protected persistent storage. |
+| `MCPORT_MASTER_KEY` | Optional 32-byte key as 64 hex characters; otherwise generated once in the data directory. |
+| `MCPORT_ALLOWED_UPSTREAM_ORIGINS` | Explicit operator-only exceptions for controlled private HTTP origins. |
+| `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Bug-report delivery. |
+| `MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL` | Space Station telemetry. |
 
-Use HTTPS at the reverse proxy, preserve multiple Set-Cookie headers, and pass only trusted forwarding metadata. Restrict the control-plane service token to Honeycomb. Health responds at `/health`; health does not verify IAM/provider workflows.
+Variables of releases before 0.3.0 are ignored with a warning naming each. Put HTTPS in front of the listener and pass
+only trusted forwarding metadata. `/health` reports liveness and the contract version; it does not check Silicon
+Accounts or providers.
 
-Do not reuse a master key across unrelated deployments or lose it during an upgrade. Database and encryption-key backup/restore must be tested together. The current backend is a single-instance service; a multi-instance deployment requires transactional distributed session/lease coordination.
+Never reuse a master key across deployments or lose it during an upgrade: database and key are backed up and restored
+together. The service is a single instance; several replicas would need shared leases and refresh coordination.
+[deploy/README.md](../deploy/README.md) covers installation and [deploy/testing.md](../deploy/testing.md) a separate test
+deployment.
 
-A configured test secret overrides the same environment's stored secret, which permits explicit credential rotation. Without an entry, only that environment's stored secret is eligible; production credentials are never a fallback. The map cannot provision or reactivate an environment, change its generation, or bypass IAM's live test-context verification. Invalid maps fail startup without printing values. Leave the variable unset or use `{}` when unused. Keep entries current after reimport or credential rotation; restarting loads changes, and a rejected configured credential does not fall back to an older one. See [isolated acceptance setup](../deploy/testing.md) for the prepared-world and app-owned attachment sequence.
+## Silicon Accounts setup
 
-## Honeycomb and releases
+The `mcport` app's sign-in setup at Silicon Accounts needs `device_flow` (the CLI's `mcport login`), `public_client`
+(the CLI exchanges Silicons' short-lived tokens and refreshes with `client_id` alone), the website's
+`/auth/callback` in `redirect_uris`, and only the profile. Its webhook points at
+`https://api.mcport.teamofsilicons.com/webhooks/accounts`. MCPort accepts no proofs from other apps yet; the scopes
+`mcport.connections.read` and `mcport.tools.call` are reserved. The [cutover runbook](migration/cutover.md) has the
+exact calls.
 
-Follow the [official ready-application guide](https://docs.honeycomb.teamofsilicons.com/guides/team-of-silicons-ready-applications/). Register `mcport` under its owning organization; request only identity/membership fields required by the real login and resource policy. Register typed website login callbacks, `/webhooks/iam`, and the authenticated testing participant path documented in API.md. Production registration is owned by Honeycomb.
+## Releases
 
-The application currently exposes no OBO or ATA receiver endpoints. Do not publish catalog declarations that imply delegated capabilities without implementing their verification and resource policy. An IAM application identity key does not become user authority.
+The CLI ships through Silicon Apps (`silicon-apps install mcport`); the Silicon Apps daemon updates installed apps, and
+MCPort has no updater of its own. A release is one `.tar.gz` per target with an `apps.yaml` that lists only that target,
+built by `scripts/package-apps.sh <version> <target> <binary>`: it checks the binary, runs `mcport --help`, `mcport
+accounts --json` and `mcport login status --json` signed out in an empty home whenever the machine can run it, then
+`silicon-apps validate` and `silicon-apps pack`. Linux packages are static musl builds (linked with Zig), so one binary
+runs on every distribution. The release workflow (`.github/workflows/release.yml`, on a `v<version>` tag) builds and
+checks every target and uploads the archives as the artifact `mcport-silicon-apps-release`; uploading them to Silicon
+Apps is an operator step. Only the four Linux validation workers are live today, so the macOS and Windows archives are
+kept for later. Development releases install as `mcport>dev`. [scripts/README.md](../scripts/README.md) has the
+commands.
 
-`honeycomb.yaml` describes all six native CLI targets. The release workflow builds on native runners, packages deterministic inputs, and uploads a candidate artifact. Validate its actual archive using the installed Honeycomb CLI before upload. The CLI includes its daemon in the same executable.
+Publish the crates in dependency order: `mcport-core`, `mcport-mcp`, `mcport-api`, `mcport-daemon`, `mcport-client`,
+then `mcport-cli`. 0.3.0 changes the identity types and removes the old sign-in calls, so it is a breaking release for
+every crate.
 
-Publish dependency crates in order: `mcport-core`, `mcport-mcp` and `mcport-api`, then `mcport-daemon`, `mcport-client`, and `mcport-cli` only if distributing the CLI through crates.io. The client defaults to the HTTP API; enable its `local` feature for the host/configuration facade. Use versioned registry dependencies in release packages. A successful macOS build does not validate Linux/Windows installation or ABI compatibility. Run a fresh install, real IAM login, tool discovery and a useful call for representative native platforms before public release.
-
-The checkout's repository/docs/package URLs are intended distribution metadata. Confirm the actual repositories, hosting and registry entries exist before publication. Publishing and approval completion require separate observed evidence; an uploaded candidate is not automatically public.
+Before a public release, install it fresh on representative targets, sign in as a Carbon (device flow) and a Silicon
+(short-lived token), and make a useful call through a cloud and a local MCP.

@@ -1,28 +1,48 @@
 use crate::{
-    auth::{self, Auth},
-    connections as con,
+    accounts::{self, AccountRow},
+    auth::{self, Auth, Live},
+    connections::{self as con, ConnectionRecord},
     error::{Error, Result},
     state::{App, hash, id, now},
+    store::ENV,
 };
 use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
 };
-use mcport_core::{ApiError, Connection, HostJobResult, Invocation, RpcInput, RpcOutput};
+use mcport_core::{ApiError, HostJobResult, Invocation, RpcInput, RpcOutput};
 use mcport_mcp::{Endpoint, ExecutionOptions, McpSession, NetworkPolicy};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::{collections::BTreeMap, time::Duration};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Stored invocation. `other` keeps fields of earlier releases verbatim.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct InvocationData {
+    pub id: String,
+    pub connection_id: String,
+    pub connection_name: String,
+    pub method: String,
+    pub tool_name: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+    pub completed_at: Option<i64>,
+    pub result: Option<Value>,
+    pub error: Option<ApiError>,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct CallRecord {
-    pub invocation: Invocation,
-    pub environment: String,
-    pub org_id: String,
-    pub family: String,
-    pub generation: i64,
+    pub invocation: InvocationData,
+    /// The account that made the call (empty for records not yet re-keyed).
+    #[serde(default)]
+    pub caller_uuid: String,
+    /// Whose provider account runs it; `None` without provider authentication.
+    #[serde(default)]
+    pub execution_account_uuid: Option<String>,
     pub host_id: Option<String>,
     pub params: Value,
     pub timeout_ms: u64,
@@ -32,19 +52,42 @@ pub struct CallRecord {
     pub progress: Option<Value>,
     #[serde(default)]
     pub telemetry_enabled: bool,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
 impl CallRecord {
     pub fn pending(&self) -> bool {
         matches!(self.invocation.status.as_str(), "queued" | "running")
+    }
+    /// The public view: identities are shown by their current ids.
+    pub fn view(&self, app: &App) -> Invocation {
+        let i = &self.invocation;
+        Invocation {
+            id: i.id.clone(),
+            connection_id: i.connection_id.clone(),
+            connection_name: i.connection_name.clone(),
+            caller: accounts::reference(app, &self.caller_uuid),
+            execution_account: self
+                .execution_account_uuid
+                .as_deref()
+                .map(|uuid| accounts::reference(app, uuid)),
+            method: i.method.clone(),
+            tool_name: i.tool_name.clone(),
+            status: i.status.clone(),
+            created_at: i.created_at,
+            completed_at: i.completed_at,
+            result: i.result.clone(),
+            error: i.error.clone(),
+        }
     }
 }
 pub fn save(app: &App, r: &CallRecord) -> Result<()> {
     app.store.put(
         "call",
         &r.invocation.id,
-        &r.environment,
-        &r.org_id,
-        &r.invocation.actor_id,
+        ENV,
+        &r.caller_uuid,
+        &r.caller_uuid,
         None,
         r,
         None,
@@ -66,8 +109,20 @@ pub fn invalidated_error(unknown: bool) -> ApiError {
     ApiError{code:"access_changed".into(),message:"Access, account configuration or connection state changed while this request was pending.".into(),recovery:Some("Refresh access and inspect activity before repeating an action.".into()),outcome_unknown:unknown}
 }
 pub fn invalidate_connection(app: &App, cid: &str) -> Result<()> {
+    cancel_pending(
+        app,
+        |r| r.invocation.connection_id == cid,
+        invalidated_error,
+    )
+}
+/// Cancel every pending call `select` picks. Running work gets an unknown outcome.
+pub fn cancel_pending(
+    app: &App,
+    select: impl Fn(&CallRecord) -> bool,
+    error: impl Fn(bool) -> ApiError,
+) -> Result<()> {
     for r in app.store.list::<CallRecord>("call", None)? {
-        if r.invocation.connection_id == cid && r.pending() {
+        if select(&r) && r.pending() {
             if let Some(cancel) = app
                 .active
                 .lock()
@@ -81,8 +136,7 @@ pub fn invalidate_connection(app: &App, cid: &str) -> Result<()> {
                     if !current.pending() {
                         return false;
                     }
-                    current.invocation.error =
-                        Some(invalidated_error(current.invocation.status == "running"));
+                    current.invocation.error = Some(error(current.invocation.status == "running"));
                     current.invocation.status = "cancelled".into();
                     current.invocation.completed_at = Some(now());
                     true
@@ -92,13 +146,26 @@ pub fn invalidate_connection(app: &App, cid: &str) -> Result<()> {
     app.jobs.notify_waiters();
     Ok(())
 }
-pub async fn revalidate(app: &App, r: &CallRecord) -> Result<(Auth, Connection)> {
-    app.assert_generation(&r.environment, r.generation)?;
-    let a = auth::authorize_family(app, &r.family, &r.environment).await?;
-    if a.actor().org_id != r.org_id || a.actor().principal_id != r.invocation.actor_id {
-        return Err(Error::denied());
-    }
-    let c = con::resolve(app, &a, &r.invocation.connection_id, false)?;
+/// End the pending work of an account that signed out, lost access or was deleted.
+pub fn cancel_account_work(app: &App, uuid: &str) -> Result<()> {
+    cancel_pending(
+        app,
+        |r| r.caller_uuid == uuid,
+        |unknown| {
+            ApiError {
+            code: "access_changed".into(),
+            message: "The account that made this request signed out or lost access to MCPort while it was pending.".into(),
+            recovery: Some("Sign in again and inspect activity before repeating an action.".into()),
+            outcome_unknown: unknown,
+        }
+        },
+    )
+}
+/// Re-check stored work against current account state, connection access, tool
+/// policy and provider account, as the caller that started it.
+pub async fn revalidate(app: &App, r: &CallRecord) -> Result<(Auth, ConnectionRecord)> {
+    let a = auth::for_account(app, &r.caller_uuid, r.invocation.created_at)?;
+    let (c, _) = con::resolve(app, &a.account, &r.invocation.connection_id, false).await?;
     if c.version != r.connection_version {
         return Err(Error::new(
             409,
@@ -108,11 +175,11 @@ pub async fn revalidate(app: &App, r: &CallRecord) -> Result<(Auth, Connection)>
         ));
     }
     if let Some(tool) = &r.invocation.tool_name
-        && !con::allowed_tool(app, &c, &a, tool)?
+        && !con::allowed_tool(app, &c, a.uuid(), tool)?
     {
         return Err(Error::denied());
     }
-    if !con::account_status(app, &c, &a)?.connected {
+    if !con::account_status(app, &c, &a.account)?.connected {
         return Err(Error::new(
             401,
             "provider_authentication_required",
@@ -210,7 +277,7 @@ async fn remote(app: &App, r: &CallRecord, cancellation: CancellationToken) -> R
             .request(&r.invocation.method, r.params.clone(), options)
             .await?;
         if r.invocation.method == "tools/list" {
-            decorate_tools(app, &current_connection, &current_actor, &mut result)?;
+            decorate_tools(app, &current_connection, current_actor.uuid(), &mut result)?;
         }
         Ok(result)
     }
@@ -219,13 +286,18 @@ async fn remote(app: &App, r: &CallRecord, cancellation: CancellationToken) -> R
     progress_task.abort();
     outcome
 }
-pub fn decorate_tools(app: &App, c: &Connection, a: &Auth, result: &mut Value) -> Result<()> {
+pub fn decorate_tools(
+    app: &App,
+    c: &ConnectionRecord,
+    who: &str,
+    result: &mut Value,
+) -> Result<()> {
     if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
         for tool in tools {
             let enabled = con::allowed_tool(
                 app,
                 c,
-                a,
+                who,
                 tool.get("name").and_then(Value::as_str).unwrap_or(""),
             )?;
             if let Some(map) = tool.as_object_mut() {
@@ -238,13 +310,24 @@ pub fn decorate_tools(app: &App, c: &Connection, a: &Auth, result: &mut Value) -
 
 pub async fn execute(
     State(app): State<App>,
+    Live(a): Live,
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(input): Json<RpcInput>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let a = auth::authenticate(&app, &headers).await?;
-    let c = con::resolve(&app, &a, &name, false)?;
+    let (c, _) = con::resolve(&app, &a.account, &name, false).await?;
+    if app
+        .store
+        .account(&c.owner_uuid)?
+        .is_some_and(|owner| !owner.active())
+    {
+        return Err(Error::new(
+            403,
+            "connection_owner_inactive",
+            "The connection's owner ended MCPort access, so this connection cannot run.",
+            "The owner must sign in again before anyone can use its tools.",
+        ));
+    }
     if !matches!(
         input.method.as_str(),
         "tools/list"
@@ -281,7 +364,7 @@ pub async fn execute(
         None
     };
     if let Some(t) = &tool
-        && !con::allowed_tool(&app, &c, &a, t)?
+        && !con::allowed_tool(&app, &c, a.uuid(), t)?
     {
         return Err(Error::new(
             403,
@@ -290,7 +373,7 @@ pub async fn execute(
             "Ask the connection owner to change its tool permissions.",
         ));
     }
-    if !con::account_status(&app, &c, &a)?.connected {
+    if !con::account_status(&app, &c, &a.account)?.connected {
         return Err(Error::new(
             401,
             "provider_authentication_required",
@@ -320,35 +403,28 @@ pub async fn execute(
             return Err(Error::bad("Idempotency key must contain 1–255 characters."));
         }
         Some(hash(
-            &json!([a.env(), a.actor().org_id, a.actor().principal_id, c.id, k]).to_string(),
+            &json!([app.store.replay_account_uuid(a.uuid())?, c.id, k]).to_string(),
         ))
     } else {
         None
     };
     let lock = app.lock(&format!("call:{}", replay_key.clone().unwrap_or_else(id)));
     let guard = lock.lock().await;
-    let environment_guard = auth::mutation_guard(&app, &a).await?;
-    let current_connection = con::resolve(&app, &a, &c.id, false)?;
+    let (current_connection, _) = con::resolve(&app, &a.account, &c.id, false).await?;
     if current_connection.version != c.version
-        || !con::account_status(&app, &current_connection, &a)?.connected
+        || !con::account_status(&app, &current_connection, &a.account)?.connected
         || tool.as_deref().is_some_and(|name| {
-            !con::allowed_tool(&app, &current_connection, &a, name).unwrap_or(false)
+            !con::allowed_tool(&app, &current_connection, a.uuid(), name).unwrap_or(false)
         })
     {
         return Err(Error::denied());
     }
     let timeout = input.timeout_ms.unwrap_or(120000).clamp(100, 600000);
     let mut r = CallRecord {
-        invocation: Invocation {
+        invocation: InvocationData {
             id: String::new(),
             connection_id: c.id.clone(),
             connection_name: c.name.clone(),
-            actor_id: a.actor().principal_id.clone(),
-            execution_account_id: if c.auth_mode == "shared" {
-                c.owner_id.clone()
-            } else {
-                a.actor().principal_id.clone()
-            },
             method: input.method,
             tool_name: tool,
             status: if c.host_id.is_some() {
@@ -361,11 +437,11 @@ pub async fn execute(
             completed_at: None,
             result: None,
             error: None,
+            other: Map::new(),
         },
-        environment: a.env().into(),
-        org_id: a.actor().org_id.clone(),
-        family: a.session.family.clone(),
-        generation: a.session.generation,
+        caller_uuid: a.uuid().into(),
+        execution_account_uuid: (c.auth_mode != "none")
+            .then(|| con::execution_account(&c, a.uuid()).to_owned()),
         host_id: c.host_id.clone(),
         params,
         timeout_ms: timeout,
@@ -377,12 +453,13 @@ pub async fn execute(
             .get("x-mcport-telemetry")
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| matches!(v, "false" | "off" | "0")),
+        other: Map::new(),
     };
     let (r, created) = app.store.create_public(
         "call",
-        a.env(),
-        &a.actor().org_id,
-        &a.actor().principal_id,
+        ENV,
+        a.uuid(),
+        a.uuid(),
         None,
         replay_key.as_deref(),
         |id| {
@@ -403,7 +480,6 @@ pub async fn execute(
     }
     let call_id = r.invocation.id.clone();
     record_execution(&app, &r, "backend", "dispatch", "pending");
-    drop(environment_guard);
     drop(guard);
     if c.host_id.is_none() {
         let cancel = CancellationToken::new();
@@ -539,24 +615,13 @@ pub async fn finish(app: &App, id: &str, result: HostJobResult) -> Result<()> {
     Ok(())
 }
 fn record_execution(app: &App, r: &CallRecord, source: &str, step: &str, outcome: &str) {
-    if !r.telemetry_enabled || app.assert_generation(&r.environment, r.generation).is_err() {
+    if !r.telemetry_enabled || r.caller_uuid.is_empty() {
         return;
     }
-    let Ok(sessions) = app
-        .store
-        .list::<auth::StoredSession>("session", Some(&r.environment))
-    else {
+    let Ok(Some(caller)) = app.store.account(&r.caller_uuid) else {
         return;
     };
-    let Some(session) = sessions.into_iter().find(|s| {
-        s.family == r.family
-            && s.actor.org_id == r.org_id
-            && s.actor.principal_id == r.invocation.actor_id
-    }) else {
-        return;
-    };
-    let auth = Auth { session };
-    if auth::check_current(app, &auth).is_err() {
+    if !caller.active() {
         return;
     }
     let operation = match r.invocation.method.as_str() {
@@ -570,7 +635,7 @@ fn record_execution(app: &App, r: &CallRecord, source: &str, step: &str, outcome
     };
     let _ = crate::operations::record(
         app,
-        &auth,
+        &caller,
         &HeaderMap::new(),
         &crate::operations::TelemetryInput {
             source: source.into(),
@@ -590,23 +655,33 @@ fn record_execution(app: &App, r: &CallRecord, source: &str, step: &str, outcome
 pub struct CallQuery {
     connection_id: Option<String>,
 }
+/// Accounts whose activity `who` may see: itself and the Silicons it looks after.
+async fn activity_accounts(app: &App, who: &AccountRow) -> Result<Vec<String>> {
+    let mut visible = vec![who.uuid.clone()];
+    for silicon in app.store.silicons_of(&who.uuid)? {
+        if accounts::looks_after(app, who, &silicon).await {
+            visible.push(silicon.uuid);
+        }
+    }
+    Ok(visible)
+}
 pub async fn list(
     State(app): State<App>,
-    headers: HeaderMap,
+    a: Auth,
     Query(query): Query<CallQuery>,
 ) -> Result<Json<Value>> {
-    let a = auth::authenticate(&app, &headers).await?;
-    let cid = query
-        .connection_id
-        .map(|n| con::resolve(&app, &a, &n, false).map(|c| c.id))
-        .transpose()?;
+    let cid = match query.connection_id {
+        Some(n) => Some(con::resolve(&app, &a.account, &n, false).await?.0.id),
+        None => None,
+    };
+    let visible = activity_accounts(&app, &a.account).await?;
     let out = app
         .store
-        .list::<CallRecord>("call", Some(a.env()))?
+        .list::<CallRecord>("call", None)?
         .into_iter()
         .filter(|r| {
-            r.invocation.actor_id == a.actor().principal_id
-                && r.org_id == a.actor().org_id
+            !r.caller_uuid.is_empty()
+                && visible.contains(&r.caller_uuid)
                 && cid
                     .as_ref()
                     .is_none_or(|id| id == &r.invocation.connection_id)
@@ -614,53 +689,59 @@ pub async fn list(
         .take(200)
         .map(|mut r| {
             r.invocation.result = None;
-            r.invocation
+            r.view(&app)
         })
         .collect::<Vec<_>>();
     Ok(Json(json!({"data":out})))
 }
-pub fn owned(app: &App, a: &Auth, id: &str) -> Result<CallRecord> {
+/// A call `who` made, or one made by a Silicon `who` looks after. Others answer 404.
+pub async fn owned(app: &App, who: &AccountRow, id: &str) -> Result<CallRecord> {
     let r = app
         .store
         .get::<CallRecord>("call", id)?
         .ok_or_else(Error::missing)?;
-    if r.environment != a.env()
-        || r.org_id != a.actor().org_id
-        || r.invocation.actor_id != a.actor().principal_id
-    {
+    if r.caller_uuid.is_empty() {
         return Err(Error::missing());
     }
-    Ok(r)
+    if r.caller_uuid == who.uuid {
+        return Ok(r);
+    }
+    match app.store.account(&r.caller_uuid)? {
+        Some(caller) if accounts::looks_after(app, who, &caller).await => Ok(r),
+        _ => Err(Error::missing()),
+    }
 }
-pub async fn get(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<Value>> {
-    let a = auth::authenticate(&app, &headers).await?;
-    let r = owned(&app, &a, &id)?;
-    app.assert_generation(&r.environment, r.generation)?;
-    let connection = con::resolve(&app, &a, &r.invocation.connection_id, false)?;
+/// The caller of `r` must still be able to use its connection and tool: revoked
+/// access also hides old results (from the caller and its custodian alike).
+pub async fn readable(app: &App, r: &CallRecord) -> Result<()> {
+    let caller = app
+        .store
+        .account(&r.caller_uuid)?
+        .filter(|caller| caller.active())
+        .ok_or_else(Error::missing)?;
+    let (connection, _) = con::resolve(app, &caller, &r.invocation.connection_id, false).await?;
     if let Some(tool) = &r.invocation.tool_name
-        && !con::allowed_tool(&app, &connection, &a, tool)?
+        && !con::allowed_tool(app, &connection, &caller.uuid, tool)?
     {
         return Err(Error::denied());
     }
-    let mut value = serde_json::to_value(r.invocation)?;
+    Ok(())
+}
+pub async fn get(State(app): State<App>, a: Auth, Path(id): Path<String>) -> Result<Json<Value>> {
+    let r = owned(&app, &a.account, &id).await?;
+    readable(&app, &r).await?;
+    let mut value = serde_json::to_value(r.view(&app))?;
     value["progress"] = r.progress.unwrap_or(Value::Null);
     Ok(Json(json!({"data":value})))
 }
 pub async fn cancel(
     State(app): State<App>,
-    headers: HeaderMap,
+    a: Auth,
     Path(id): Path<String>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let a = auth::authenticate(&app, &headers).await?;
     let lock = app.lock(&format!("call:{id}"));
     let _guard = lock.lock().await;
-    let _environment_guard = auth::mutation_guard(&app, &a).await?;
-    owned(&app, &a, &id)?;
+    owned(&app, &a.account, &id).await?;
     if let Some(c) = app
         .active
         .lock()
@@ -688,7 +769,7 @@ pub async fn cancel(
         })?
         .ok_or_else(Error::missing)?;
     app.jobs.notify_waiters();
-    let mut invocation = r.invocation;
+    let mut invocation = r.view(&app);
     invocation.result = None;
     Ok(Json(json!({"data":invocation})))
 }

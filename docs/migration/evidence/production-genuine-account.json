@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-10-10",
+  "authentication": "Genuine Carbon Silicon Accounts SLT exchanged by released CLI; canonical UUID",
+  "provider": "https://mcp.deepwiki.com/mcp",
+  "provider_reference": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+  "provider_authentication": "none; public read-only documentation service",
+  "connection_visibility": "invited; owner only",
+  "tool": "read_wiki_structure",
+  "input": {
+    "repoName": "modelcontextprotocol/typescript-sdk"
+  },
+  "call_id": "w52",
+  "content_blocks": 1,
+  "structured_content": true,
+  "result_sha256": "f6b62d50ded5b949bc2eff89817f6671b3848edae54f774dd67d60eaa2c12294",
+  "legacy_iam_adoption": false
+}

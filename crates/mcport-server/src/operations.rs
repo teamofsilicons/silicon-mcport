@@ -1,14 +1,15 @@
 //! User settings, bounded diagnostic events and durable production bug-mail delivery.
 use crate::{
-    auth::{self, Auth},
+    accounts::AccountRow,
+    auth::Auth,
     error::{Error, Result},
     state::{App, hash, now},
+    store::ENV,
 };
 use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::{
-    collections::HashMap,
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -27,19 +28,18 @@ impl Default for Settings {
     }
 }
 
-fn settings_key(auth: &Auth) -> String {
-    hash(&json!([auth.env(), auth.actor().org_id, auth.actor().principal_id]).to_string())
+pub fn settings_key(uuid: &str) -> String {
+    hash(&json!([uuid]).to_string())
 }
-fn settings(app: &App, auth: &Auth) -> Result<Settings> {
+fn settings(app: &App, uuid: &str) -> Result<Settings> {
     Ok(app
         .store
-        .get("settings", &settings_key(auth))?
+        .get("settings", &settings_key(uuid))?
         .unwrap_or_default())
 }
 
-pub async fn get_settings(State(app): State<App>, headers: HeaderMap) -> Result<Json<Value>> {
-    let auth = auth::authenticate(&app, &headers).await?;
-    Ok(Json(json!({"data":settings(&app, &auth)?})))
+pub async fn get_settings(State(app): State<App>, auth: Auth) -> Result<Json<Value>> {
+    Ok(Json(json!({"data":settings(&app, auth.uuid())?})))
 }
 
 #[derive(Deserialize)]
@@ -49,21 +49,18 @@ pub struct SettingsInput {
 }
 pub async fn update_settings(
     State(app): State<App>,
-    headers: HeaderMap,
+    auth: Auth,
     Json(input): Json<SettingsInput>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let auth = auth::authenticate(&app, &headers).await?;
-    let _environment_guard = auth::mutation_guard(&app, &auth).await?;
     let value = Settings {
         telemetry: input.telemetry,
     };
     app.store.put(
         "settings",
-        &settings_key(&auth),
-        auth.env(),
-        &auth.actor().org_id,
-        &auth.actor().principal_id,
+        &settings_key(auth.uuid()),
+        ENV,
+        auth.uuid(),
+        auth.uuid(),
         None,
         &value,
         None,
@@ -71,12 +68,16 @@ pub async fn update_settings(
     Ok(Json(json!({"data":value})))
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Stored bug report. `other` keeps fields of earlier releases verbatim.
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Report {
     pub id: String,
-    pub environment: String,
-    pub org_id: String,
-    pub owner_id: String,
+    /// The reporter's uuid (empty for reports not yet re-keyed).
+    #[serde(default)]
+    pub owner_uuid: String,
+    /// The reporter's id when the report was sent.
+    #[serde(default)]
+    pub reporter_id: String,
     pub message: String,
     pub pr: Option<String>,
     pub status: String,
@@ -84,6 +85,29 @@ pub struct Report {
     pub attempts: u32,
     pub next_attempt_at: i64,
     pub created_at: i64,
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+impl Report {
+    /// The reporter for the email: the uuid-era identity, or the IAM-era one
+    /// kept from before 0.3.0.
+    fn reporter(&self) -> String {
+        if !self.owner_uuid.is_empty() {
+            return format!("{} ({})", self.reporter_id, self.owner_uuid);
+        }
+        self.other
+            .get("owner_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned()
+    }
+    /// Reports from removed testing environments are never mailed.
+    fn deliverable(&self) -> bool {
+        self.other
+            .get("environment")
+            .and_then(Value::as_str)
+            .is_none_or(|environment| environment == ENV)
+    }
 }
 
 #[derive(Deserialize)]
@@ -95,7 +119,7 @@ pub struct ReportInput {
 
 fn report_payload(report: &Report, from: &str) -> Value {
     json!({"From":from,"To":RECIPIENTS,"Subject":format!("MCPort bug report {}",report.id),
-        "TextBody":format!("Report: {}\nOrganization: {}\nReporter: {}\n\n{}\n\nProposed fix: {}",report.id,report.org_id,report.owner_id,report.message,report.pr.as_deref().unwrap_or("none")),
+        "TextBody":format!("Report: {}\nReporter: {}\n\n{}\n\nProposed fix: {}",report.id,report.reporter(),report.message,report.pr.as_deref().unwrap_or("none")),
         "MessageStream":"outbound","TrackOpens":false,"TrackLinks":"None",
         "Headers":[{"Name":"Message-ID","Value":format!("<{}@mcport.teamofsilicons.com>",report.id)}]})
 }
@@ -108,7 +132,8 @@ fn validate_report(input: &ReportInput) -> Result<()> {
     }
     // A report includes only explicit user text; never append sessions, provider input or local logs.
     if [
-        "Bearer ", "mpa_", "mpr_", "oat_", "ort_", "oac_", "ask_", "slt_",
+        "Bearer ", "Proof ", "mpa_", "mpr_", "mph_", "oat_", "ort_", "oac_", "ask_", "slt_",
+        "sar_", "sap_", "sapr_", "whsec_", "stk-", "sa_app_", "eyJ",
     ]
     .iter()
     .any(|prefix| input.message.contains(prefix))
@@ -138,40 +163,28 @@ fn validate_report(input: &ReportInput) -> Result<()> {
 
 pub async fn report(
     State(app): State<App>,
-    headers: HeaderMap,
+    auth: Auth,
     Json(input): Json<ReportInput>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let auth = auth::authenticate(&app, &headers).await?;
-    let _environment_guard = auth::mutation_guard(&app, &auth).await?;
     validate_report(&input)?;
     let configured = app
         .config
         .postmark_token
         .as_ref()
         .is_some_and(|token| !token.is_empty());
-    let testing = auth.env() != "production";
     let mut report = Report {
         id: String::new(),
-        environment: auth.env().into(),
-        org_id: auth.actor().org_id.clone(),
-        owner_id: auth.actor().principal_id.clone(),
+        owner_uuid: auth.uuid().into(),
+        reporter_id: auth.account.label().into(),
         message: input.message,
         pr: input.pr,
-        status: if testing {
-            "test_recorded"
-        } else if configured {
+        status: if configured {
             "delivery_pending"
         } else {
             "delivery_failed"
         }
         .into(),
-        failure_reason: if testing {
-            Some(
-                "Testing reports are recorded in the isolated environment; no email is sent."
-                    .into(),
-            )
-        } else if !configured {
+        failure_reason: if !configured {
             Some("POSTMARK_SERVER_TOKEN is not configured. The report is saved and delivery can resume after server configuration.".into())
         } else {
             None
@@ -179,19 +192,14 @@ pub async fn report(
         attempts: 0,
         next_attempt_at: now(),
         created_at: now(),
+        other: Map::new(),
     };
-    let (report, _) = app.store.create_public(
-        "report",
-        auth.env(),
-        &auth.actor().org_id,
-        &auth.actor().principal_id,
-        None,
-        None,
-        |id| {
-            report.id = id;
-            report
-        },
-    )?;
+    let (report, _) =
+        app.store
+            .create_public("report", ENV, auth.uuid(), auth.uuid(), None, None, |id| {
+                report.id = id;
+                report
+            })?;
     Ok(Json(
         json!({"data":{"id":report.id,"status":report.status,"delivery_detail":report.failure_reason,"repository_url":REPOSITORY}}),
     ))
@@ -233,8 +241,8 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
     else {
         return Ok(());
     };
-    // Never query or send reports from a Honeycomb testing plane through production Postmark.
-    for candidate in app.store.list::<Report>("report", Some("production"))? {
+    // Rows of removed testing environments keep their own environment and are never sent.
+    for candidate in app.store.list::<Report>("report", Some(ENV))? {
         if !matches!(
             candidate.status.as_str(),
             "delivery_pending" | "delivery_sending" | "delivery_failed"
@@ -248,7 +256,7 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
         let Some(mut report) = app.store.get::<Report>("report", &candidate.id)? else {
             continue;
         };
-        if report.environment != "production"
+        if !report.deliverable()
             || report.next_attempt_at > now()
             || !matches!(
                 report.status.as_str(),
@@ -261,16 +269,10 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
         report.status = "delivery_sending".into();
         report.attempts += 1;
         report.next_attempt_at = now() + 60;
-        app.store.put(
-            "report",
-            &report.id,
-            &report.environment,
-            &report.org_id,
-            &report.owner_id,
-            None,
-            &report,
-            None,
-        )?;
+        app.store.update::<Report>("report", &report.id, |stored| {
+            *stored = report.clone();
+            true
+        })?;
         let response = http
             .post(endpoint)
             .header("X-Postmark-Server-Token", token)
@@ -296,16 +298,10 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
         if report.attempts >= 8 && report.status != "delivery_accepted" {
             report.status = "delivery_failed".into();
         }
-        app.store.put(
-            "report",
-            &report.id,
-            &report.environment,
-            &report.org_id,
-            &report.owner_id,
-            None,
-            &report,
-            None,
-        )?;
+        app.store.update::<Report>("report", &report.id, |stored| {
+            *stored = report.clone();
+            true
+        })?;
     }
     Ok(())
 }
@@ -400,29 +396,46 @@ fn validate_event(event: &TelemetryInput) -> Result<()> {
     Ok(())
 }
 
-static TELEMETRY: OnceLock<HashMap<String, Arc<space_station::SpaceClient>>> = OnceLock::new();
+static TELEMETRY: OnceLock<Option<Arc<space_station::SpaceClient>>> = OnceLock::new();
 
-/// Explicit operator configuration; missing table keys do not change the user's default-on preference.
-/// Test environments require their own key and never fall back to the production table.
+/// Explicit operator configuration; a missing table key does not change the
+/// account's default-on preference. The spool path is unchanged from earlier
+/// releases (`telemetry/<sha256("production")>`), so queued events survive.
 pub fn init_telemetry(app: &App) {
     TELEMETRY.get_or_init(|| {
-        let mut keys = HashMap::<String, String>::new();
-        if let Ok(key) = std::env::var("MCPORT_TELEMETRY_KEY") { keys.insert("production".into(), key); }
-        if let Ok(test_keys) = std::env::var("MCPORT_TEST_TELEMETRY_KEYS")
-            && let Ok(test_keys) = serde_json::from_str::<HashMap<String, String>>(&test_keys) {
-            keys.extend(test_keys.into_iter().filter(|(environment, _)| environment != "production"));
+        let key = std::env::var("MCPORT_TELEMETRY_KEY")
+            .ok()
+            .filter(|key| !key.is_empty())?;
+        let url = std::env::var("MCPORT_TELEMETRY_URL")
+            .unwrap_or_else(|_| space_station::DEFAULT_URL.into());
+        match space_station::SpaceClient::builder(&key)
+            .home(app.config.data_dir.join("telemetry").join(hash(ENV)))
+            .url(&url)
+            .flush_timeout(Duration::from_millis(100))
+            .on_error(|_| {
+                tracing::warn!(
+                    "Space Station telemetry delivery unavailable; diagnostic content is not logged"
+                )
+            })
+            .build()
+        {
+            Ok(client) => Some(Arc::new(client)),
+            Err(_) => {
+                tracing::warn!("MCPort telemetry table key is not configured correctly");
+                None
+            }
         }
-        let url = std::env::var("MCPORT_TELEMETRY_URL").unwrap_or_else(|_| space_station::DEFAULT_URL.into());
-        keys.into_iter().filter_map(|(environment, key)| {
-            let client = space_station::SpaceClient::builder(&key).home(app.config.data_dir.join("telemetry").join(hash(&environment))).url(&url).flush_timeout(Duration::from_millis(100)).on_error(|_| tracing::warn!("Space Station telemetry delivery unavailable; diagnostic content is not logged")).build();
-            match client { Ok(client) => Some((environment, Arc::new(client))), Err(_) => { tracing::warn!("MCPort telemetry table key is not configured correctly"); None } }
-        }).collect()
     });
 }
 
-pub fn record(app: &App, auth: &Auth, headers: &HeaderMap, event: &TelemetryInput) -> Result<bool> {
+pub fn record(
+    app: &App,
+    account: &AccountRow,
+    headers: &HeaderMap,
+    event: &TelemetryInput,
+) -> Result<bool> {
     validate_event(event)?;
-    if !settings(app, auth)?.telemetry
+    if !settings(app, &account.uuid)?.telemetry
         || headers
             .get("X-MCPort-Telemetry")
             .and_then(|value| value.to_str().ok())
@@ -431,21 +444,20 @@ pub fn record(app: &App, auth: &Auth, headers: &HeaderMap, event: &TelemetryInpu
         return Ok(false);
     }
     init_telemetry(app);
-    let Some(client) = TELEMETRY.get().and_then(|clients| clients.get(auth.env())) else {
+    let Some(client) = TELEMETRY.get().and_then(Option::as_ref) else {
         return Ok(false);
     };
-    client.record(json!({"application":"mcport","version":env!("CARGO_PKG_VERSION"),"environment":auth.env(),"org_id":auth.actor().org_id,"actor_id":auth.actor().principal_id,"source":event.source,"operation":event.operation,"step":event.step,"outcome":event.outcome,"progress":event.progress,"correlation_id":event.correlation_id,"duration_ms":event.duration_ms}));
+    client.record(json!({"application":"mcport","version":env!("CARGO_PKG_VERSION"),"account_uuid":account.uuid,"account_kind":account.kind,"source":event.source,"operation":event.operation,"step":event.step,"outcome":event.outcome,"progress":event.progress,"correlation_id":event.correlation_id,"duration_ms":event.duration_ms}));
     Ok(true)
 }
 
 pub async fn telemetry(
     State(app): State<App>,
+    auth: Auth,
     headers: HeaderMap,
     Json(input): Json<TelemetryInput>,
 ) -> Result<Json<Value>> {
-    auth::csrf(&app, &headers)?;
-    let auth = auth::authenticate(&app, &headers).await?;
-    let recorded = record(&app, &auth, &headers, &input)?;
+    let recorded = record(&app, &auth.account, &headers, &input)?;
     Ok(Json(json!({"data":{"recorded":recorded}})))
 }
 
@@ -456,19 +468,41 @@ mod tests {
     fn reports_use_exact_recipients_and_do_not_attach_context_or_html() {
         let report = Report {
             id: "id".into(),
-            environment: "production".into(),
-            org_id: "tos".into(),
-            owner_id: "c:owner".into(),
+            owner_uuid: "zQo".into(),
+            reporter_id: "c:owner".into(),
             message: "<html> remains text".into(),
             pr: None,
             status: "delivery_pending".into(),
-            failure_reason: None,
-            attempts: 0,
-            next_attempt_at: 0,
-            created_at: 0,
+            ..Default::default()
         };
         let payload = report_payload(&report, "mcport@teamofsilicons.com");
         assert_eq!(payload["To"], "saketdev12@gmail.com,shubhastro2@gmail.com");
+        let body = payload["TextBody"].as_str().unwrap();
+        assert!(body.contains("Reporter: c:owner (zQo)"), "{body}");
+        assert!(!body.contains("Organization"));
+        // Reports written before 0.3.0 still name their reporter.
+        let legacy: Report = serde_json::from_value(json!({"id":"old","environment":"production","org_id":"tos","owner_id":"c:legacy","message":"m","pr":null,"status":"delivery_pending","failure_reason":null,"attempts":0,"next_attempt_at":0,"created_at":0})).unwrap();
+        assert!(
+            report_payload(&legacy, "x")["TextBody"]
+                .as_str()
+                .unwrap()
+                .contains("Reporter: c:legacy")
+        );
+        for credential in [
+            "sar_refresh",
+            "sap_proof",
+            "whsec_secret",
+            "stk-0123",
+            "eyJhbGciOi",
+        ] {
+            assert!(
+                validate_report(&ReportInput {
+                    message: format!("token {credential}"),
+                    pr: None
+                })
+                .is_err()
+            );
+        }
         assert!(payload.get("HtmlBody").is_none());
         assert!(payload.get("Attachments").is_none());
         assert_eq!(payload["TrackOpens"], false);
@@ -530,8 +564,7 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
         let directory = tempfile::tempdir().unwrap();
-        let mut config = crate::state::Config::from_env();
-        config.data_dir = directory.path().into();
+        let mut config = crate::state::Config::local(directory.path(), "http://127.0.0.1:1");
         config.postmark_token = Some("fixture-mail-token".into());
         let app = App::new(config.clone()).unwrap();
         for (id, environment, status) in [
@@ -540,26 +573,29 @@ mod tests {
             ("legacy-delivered-report", "production", "delivered"),
             ("already-accepted-report", "production", "delivery_accepted"),
         ] {
-            let report = Report {
+            // Rows of a removed testing environment keep their environment.
+            let mut report = Report {
                 id: id.into(),
-                environment: environment.into(),
-                org_id: "tos".into(),
-                owner_id: "c:owner".into(),
+                owner_uuid: "zQo".into(),
+                reporter_id: "c:owner".into(),
                 message: "Private fixture bug reproduction".into(),
                 pr: None,
                 status: status.into(),
-                failure_reason: None,
-                attempts: 0,
-                next_attempt_at: 0,
                 created_at: now(),
+                ..Default::default()
             };
+            if environment != "production" {
+                report
+                    .other
+                    .insert("environment".into(), json!(environment));
+            }
             app.store
                 .put(
                     "report",
                     id,
                     environment,
-                    "tos",
-                    "c:owner",
+                    "zQo",
+                    "zQo",
                     None,
                     &report,
                     Some(0),
@@ -590,8 +626,8 @@ mod tests {
                 "report",
                 &failed.id,
                 "production",
-                "tos",
-                "c:owner",
+                "zQo",
+                "zQo",
                 None,
                 &failed,
                 None,

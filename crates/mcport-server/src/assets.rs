@@ -1,21 +1,22 @@
-//! Capability-free result downloads: an index selects bytes already present in
-//! an encrypted, caller-owned result. A URL or filesystem path is never accepted.
+//! Result downloads: an index selects bytes already present in an encrypted
+//! result the caller (or its custodian) may read. A URL or filesystem path is
+//! never accepted. One-time tickets let a browser download without a token.
 use crate::{
-    auth::{self, Auth},
-    connections,
+    accounts::AccountRow,
+    auth::Auth,
     error::{Error, Result},
     execution::{self, CallRecord},
-    state::App,
+    state::{App, hash, now, secret},
 };
 use axum::{
     Json,
     body::Body,
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, header},
+    http::{HeaderValue, header},
     response::Response,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use mcport_core::ResultAsset;
+use mcport_core::{DownloadTicket, ResultAsset};
 use serde_json::{Value, json};
 
 const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
@@ -166,17 +167,12 @@ fn embedded(result: &Value) -> Vec<EmbeddedAsset> {
     }
     assets
 }
-/// Uses today's IAM authorization and tool policies, not a saved session snapshot.
-/// A fresh session for the same actor can download; revoked access cannot.
-fn authorized(app: &App, actor: &Auth, id: &str) -> Result<CallRecord> {
-    let record = execution::owned(app, actor, id)?;
-    app.assert_generation(&record.environment, record.generation)?;
-    let connection = connections::resolve(app, actor, &record.invocation.connection_id, false)?;
-    if let Some(tool) = &record.invocation.tool_name
-        && !connections::allowed_tool(app, &connection, actor, tool)?
-    {
-        return Err(Error::denied());
-    }
+/// Current authorization, not a snapshot: the viewer is the caller or the
+/// caller's custodian, and the caller must still be able to use the connection
+/// and tool. Revoked access hides old results.
+async fn authorized(app: &App, viewer: &AccountRow, id: &str) -> Result<CallRecord> {
+    let record = execution::owned(app, viewer, id).await?;
+    execution::readable(app, &record).await?;
     if record.invocation.result.is_none() {
         return Err(Error::new(
             404,
@@ -188,13 +184,19 @@ fn authorized(app: &App, actor: &Auth, id: &str) -> Result<CallRecord> {
     Ok(record)
 }
 
-pub async fn list(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Result<Json<Value>> {
-    let actor = auth::authenticate(&app, &headers).await?;
-    let record = authorized(&app, &actor, &id)?;
+/// A one-time download link for one asset; redeeming it re-checks authorization.
+#[derive(Clone)]
+pub struct Ticket {
+    call_id: String,
+    index: u32,
+    viewer_uuid: String,
+    issued_at: i64,
+    expires_at: i64,
+}
+const TICKET_SECONDS: i64 = 60;
+
+pub async fn list(State(app): State<App>, a: Auth, Path(id): Path<String>) -> Result<Json<Value>> {
+    let record = authorized(&app, &a.account, &id).await?;
     let assets = embedded(record.invocation.result.as_ref().expect("checked result"));
     let items: Vec<ResultAsset> = assets
         .into_iter()
@@ -248,14 +250,84 @@ fn attachment(asset: EmbeddedAsset) -> Result<Response> {
 }
 pub async fn download(
     State(app): State<App>,
-    headers: HeaderMap,
+    a: Auth,
     Path((id, index)): Path<(String, u32)>,
 ) -> Result<Response> {
-    let actor = auth::authenticate(&app, &headers).await?;
-    let record = authorized(&app, &actor, &id)?;
+    let record = authorized(&app, &a.account, &id).await?;
     let asset = embedded(record.invocation.result.as_ref().expect("checked result"))
         .into_iter()
         .nth(index as usize)
+        .ok_or_else(Error::missing)?;
+    attachment(asset)
+}
+/// `POST /api/v1/calls/{call}/assets/{index}/ticket`: a link that downloads this
+/// asset once within 60 seconds without a token (for browsers behind the website).
+pub async fn ticket(
+    State(app): State<App>,
+    a: Auth,
+    Path((id, index)): Path<(String, u32)>,
+) -> Result<Json<Value>> {
+    let record = authorized(&app, &a.account, &id).await?;
+    if embedded(record.invocation.result.as_ref().expect("checked result")).len() <= index as usize
+    {
+        return Err(Error::missing());
+    }
+    let value = secret("mpd_");
+    let expires_at = now() + TICKET_SECONDS;
+    {
+        let mut tickets = app.tickets.lock().unwrap_or_else(|e| e.into_inner());
+        tickets.retain(|_, ticket| ticket.expires_at > now());
+        if tickets.len() >= 10_000 {
+            return Err(Error::new(
+                503,
+                "too_many_downloads",
+                "Too many download links are waiting to be used.",
+                "Retry in a minute.",
+            ));
+        }
+        tickets.insert(
+            hash(&value),
+            Ticket {
+                call_id: record.invocation.id.clone(),
+                index,
+                viewer_uuid: a.uuid().into(),
+                issued_at: now(),
+                expires_at,
+            },
+        );
+    }
+    Ok(Json(json!({"data":DownloadTicket{
+        url: format!("{}/api/v1/downloads/{value}", app.config.public_url.trim_end_matches('/')),
+        expires_at,
+    }})))
+}
+/// `GET /api/v1/downloads/{ticket}`: redeem a ticket (once).
+pub async fn redeem(State(app): State<App>, Path(value): Path<String>) -> Result<Response> {
+    let ticket = app
+        .tickets
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&hash(&value))
+        .filter(|ticket| ticket.expires_at > now())
+        .ok_or_else(|| {
+            Error::new(
+                404,
+                "download_expired",
+                "This download link was already used or has expired.",
+                "Ask for a new download link.",
+            )
+        })?;
+    // A sign-out after the ticket was issued ends it too; one in the same second
+    // (times are whole seconds) counts as after.
+    let viewer = app
+        .store
+        .account(&ticket.viewer_uuid)?
+        .filter(|viewer| viewer.active() && viewer.revoked_before < ticket.issued_at)
+        .ok_or_else(Error::missing)?;
+    let record = authorized(&app, &viewer, &ticket.call_id).await?;
+    let asset = embedded(record.invocation.result.as_ref().expect("checked result"))
+        .into_iter()
+        .nth(ticket.index as usize)
         .ok_or_else(Error::missing)?;
     attachment(asset)
 }
@@ -321,173 +393,220 @@ mod tests {
         );
         assert!(!name.contains(['\r', '\n', '"', '/']));
     }
-    #[test]
-    fn downloads_recheck_caller_org_environment_grants_and_tool_policy() {
-        use crate::{
-            auth::StoredSession,
-            connections::{Grant, Policy},
-            state::{Config, now},
-        };
-        use mcport_core::{AccessGrant, Actor, Connection, Invocation, ToolPolicy};
-        let directory = tempfile::tempdir().unwrap();
-        let mut config = Config::from_env();
-        config.data_dir = directory.path().into();
-        let app = App::new(config).unwrap();
-        let actor = Auth {
-            session: StoredSession {
-                key: "new-session".into(),
-                family: "new-family".into(),
-                actor: Actor {
-                    principal_id: "si:runner".into(),
-                    identity_kind: "silicon".into(),
-                    org_id: "org".into(),
-                    display_name: "Runner".into(),
-                },
-                environment: "production".into(),
-                generation: 0,
-                control_revision: 0,
-                iam_access: "fixture".into(),
-                iam_refresh: "fixture".into(),
-                iam_expires: now() + 60,
-                expires_at: now() + 60,
-                refresh_key: None,
-            },
-        };
-        let connection = Connection {
-            id: "conn".into(),
-            name: "assets".into(),
-            description: "".into(),
-            org_id: "org".into(),
-            owner_id: "c:owner".into(),
-            environment: "production".into(),
-            transport: "http".into(),
-            url: Some("https://example.com/mcp".into()),
-            host_id: None,
-            command: None,
-            args: vec![],
-            auth_mode: "none".into(),
-            visibility: "invited".into(),
-            status: "ready".into(),
-            can_manage: false,
-            account: None,
-            created_at: now(),
-            updated_at: now(),
-            version: 1,
-        };
-        app.store
-            .put(
-                "connection",
-                "conn",
-                "production",
-                "org",
-                "c:owner",
-                Some("assets"),
-                &connection,
-                None,
-            )
-            .unwrap();
-        let grant = Grant {
-            connection_id: "conn".into(),
-            grant: AccessGrant {
-                principal_id: "si:runner".into(),
-                created_at: now(),
-            },
-        };
-        let grant_key = connections::grant_key("conn", "si:runner");
-        app.store
-            .put(
-                "grant",
-                &grant_key,
-                "production",
-                "org",
-                "c:owner",
-                None,
-                &grant,
-                None,
-            )
-            .unwrap();
+    /// A completed call by `caller` on `connection`, stored directly.
+    fn completed(app: &App, id: &str, caller: &str, connection: &str) {
         let record = CallRecord {
-            invocation: Invocation {
-                id: "call".into(),
-                connection_id: "conn".into(),
+            invocation: crate::execution::InvocationData {
+                id: id.into(),
+                connection_id: connection.into(),
                 connection_name: "assets".into(),
-                actor_id: "si:runner".into(),
-                execution_account_id: "si:runner".into(),
                 method: "tools/call".into(),
                 tool_name: Some("design".into()),
                 status: "completed".into(),
-                created_at: now(),
-                completed_at: Some(now()),
+                created_at: crate::state::now(),
+                completed_at: Some(crate::state::now()),
                 result: Some(json!({"content":[{"type":"text","text":"private asset"}]})),
-                error: None,
+                ..Default::default()
             },
-            environment: "production".into(),
-            org_id: "org".into(),
-            family: "old-family".into(),
-            generation: 0,
-            host_id: None,
+            caller_uuid: caller.into(),
             params: json!({}),
             timeout_ms: 1000,
-            expires_at: now() + 1,
+            expires_at: crate::state::now() + 1,
             connection_version: 1,
-            fingerprint: "fixture".into(),
-            progress: None,
-            telemetry_enabled: false,
+            fingerprint: id.into(),
+            ..Default::default()
         };
-        execution::save(&app, &record).unwrap();
-        assert!(
-            authorized(&app, &actor, "call").is_ok(),
-            "fresh session for same current actor remains usable"
-        );
-        let mut stranger = actor.clone();
-        stranger.session.actor.principal_id = "si:stranger".into();
-        assert!(authorized(&app, &stranger, "call").is_err());
-        let mut other_org = actor.clone();
-        other_org.session.actor.org_id = "other".into();
-        assert!(authorized(&app, &other_org, "call").is_err());
-        let mut other_env = actor.clone();
-        other_env.session.environment = "other".into();
-        assert!(authorized(&app, &other_env, "call").is_err());
-        app.store.delete("grant", &grant_key).unwrap();
-        assert!(
-            authorized(&app, &actor, "call").is_err(),
-            "revoked invitation blocks old result downloads"
-        );
-        app.store
-            .put(
-                "grant",
-                &grant_key,
-                "production",
-                "org",
-                "c:owner",
-                None,
-                &grant,
-                None,
+        execution::save(app, &record).unwrap();
+    }
+    #[tokio::test]
+    async fn downloads_recheck_the_callers_access_grants_and_tool_policy() {
+        use crate::test_support::{connection, fixture};
+        use axum::http::StatusCode;
+        let f = fixture().await;
+        f.carbon("Owner", "c:owner");
+        f.carbon("Ada", "c:ada");
+        f.silicon("Runner", "si:runner", "Ada");
+        f.carbon("Stranger", "c:stranger");
+        let (_, body) = f
+            .as_(
+                "Owner",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("assets", "none", "")),
             )
-            .unwrap();
-        let policy = Policy {
-            connection_id: "conn".into(),
-            policy: ToolPolicy {
-                tool: "design".into(),
-                principal_id: None,
-                enabled: false,
-            },
-        };
-        app.store
-            .put(
-                "policy",
-                &connections::policy_key("conn", "design", None),
-                "production",
-                "org",
-                "c:owner",
-                None,
-                &policy,
-                None,
+            .await;
+        let cid = body["data"]["id"].as_str().unwrap().to_owned();
+        f.as_(
+            "Ada",
+            "POST",
+            "/api/v1/allow",
+            Some(json!({"account":"c:owner","silicon":"si:runner"})),
+        )
+        .await;
+        let (status, body) = f
+            .as_(
+                "Owner",
+                "POST",
+                &format!("/api/v1/connections/{cid}/access"),
+                Some(json!({"account":"si:runner"})),
             )
-            .unwrap();
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        f.auth("Runner").await;
+        completed(&f.app, "cAl", "Runner", &cid);
+        let assets = "/api/v1/calls/cAl/assets";
+        // The caller and the caller's custodian may read; the connection owner
+        // and strangers may not (results belong to the caller).
+        for (who, expected) in [
+            ("Runner", StatusCode::OK),
+            ("Ada", StatusCode::OK),
+            ("Owner", StatusCode::NOT_FOUND),
+            ("Stranger", StatusCode::NOT_FOUND),
+        ] {
+            assert_eq!(f.as_(who, "GET", assets, None).await.0, expected, "{who}");
+        }
+        let (status, body) = f.as_("Ada", "GET", "/api/v1/calls/cAl", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["caller"]["id"], "si:runner");
+        let (_, body) = f.as_("Ada", "GET", "/api/v1/calls", None).await;
+        assert_eq!(
+            body["data"].as_array().unwrap().len(),
+            1,
+            "custodians see their Silicons' activity"
+        );
+        assert_eq!(
+            f.as_("Owner", "GET", "/api/v1/calls", None).await.1["data"],
+            json!([])
+        );
+        // Removing the caller's access hides old results from everyone.
+        f.as_(
+            "Owner",
+            "DELETE",
+            &format!("/api/v1/connections/{cid}/access/si:runner"),
+            None,
+        )
+        .await;
+        for who in ["Runner", "Ada"] {
+            assert_eq!(
+                f.as_(who, "GET", assets, None).await.0,
+                StatusCode::NOT_FOUND,
+                "{who}"
+            );
+        }
+        f.as_(
+            "Owner",
+            "POST",
+            &format!("/api/v1/connections/{cid}/access"),
+            Some(json!({"account":"si:runner"})),
+        )
+        .await;
+        assert_eq!(f.as_("Runner", "GET", assets, None).await.0, StatusCode::OK);
+        // So does disabling the tool for the caller.
+        f.as_(
+            "Owner",
+            "PUT",
+            &format!("/api/v1/connections/{cid}/policies"),
+            Some(json!({"tool":"design","account":"si:runner","enabled":false})),
+        )
+        .await;
+        assert_eq!(
+            f.as_("Runner", "GET", assets, None).await.0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    #[tokio::test]
+    async fn download_tickets_work_once_within_a_minute_and_recheck_access() {
+        use crate::test_support::{connection, fixture};
+        use axum::http::StatusCode;
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.carbon("Cy", "c:cy");
+        let (_, body) = f
+            .as_(
+                "Ada",
+                "POST",
+                "/api/v1/connections",
+                Some(connection("assets", "none", "")),
+            )
+            .await;
+        let cid = body["data"]["id"].as_str().unwrap().to_owned();
+        completed(&f.app, "cAl", "Ada", &cid);
+        let (status, body) = f
+            .as_("Cy", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        let (status, body) = f
+            .as_("Ada", "POST", "/api/v1/calls/cAl/assets/9/ticket", None)
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+        let (status, body) = f
+            .as_("Ada", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let url = body["data"]["url"].as_str().unwrap();
         assert!(
-            authorized(&app, &actor, "call").is_err(),
-            "current tool policy guards old results"
+            url.starts_with("http://127.0.0.1:4241/api/v1/downloads/mpd_"),
+            "{url}"
+        );
+        assert!(body["data"]["expires_at"].as_i64().unwrap() <= crate::state::now() + 60);
+        let path = url.trim_start_matches("http://127.0.0.1:4241");
+        use tower::ServiceExt;
+        let response = crate::router(f.app.clone())
+            .oneshot(axum::http::Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "text/plain");
+        assert!(
+            response.headers()[header::CONTENT_DISPOSITION]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment;")
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(&bytes[..], b"private asset");
+        let (status, body) = f.call("GET", path, None, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"]["code"], "download_expired");
+        // A ticket issued before its holder signed out everywhere does not outlive
+        // that, even when both happen within the same second.
+        let (_, body) = f
+            .as_("Ada", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
+            .await;
+        let path = body["data"]["url"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches("http://127.0.0.1:4241")
+            .to_owned();
+        crate::accounts_webhook::revoke(&f.app, "Ada", crate::state::now() * 1000, None).unwrap();
+        assert_eq!(
+            f.call("GET", &path, None, None).await.0,
+            StatusCode::NOT_FOUND
+        );
+        f.app
+            .store
+            .update_account("Ada", |row| {
+                let mut row = row.unwrap();
+                row.revoked_before = 0;
+                Some(row)
+            })
+            .unwrap();
+        // A ticket issued before access ended does not outlive it.
+        let (_, body) = f
+            .as_("Ada", "POST", "/api/v1/calls/cAl/assets/0/ticket", None)
+            .await;
+        let path = body["data"]["url"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches("http://127.0.0.1:4241")
+            .to_owned();
+        f.as_("Ada", "DELETE", &format!("/api/v1/connections/{cid}"), None)
+            .await;
+        assert_eq!(
+            f.call("GET", &path, None, None).await.0,
+            StatusCode::NOT_FOUND
         );
     }
 }

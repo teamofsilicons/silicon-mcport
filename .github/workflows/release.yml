@@ -1,4 +1,8 @@
-name: Native release candidates
+name: Silicon Apps release candidates
+# Builds the mcport CLI for every Silicon Apps target, checks each binary on a runner
+# that can execute it, and packs one archive per target. It publishes nothing:
+# uploading to Silicon Apps, crates.io and GitHub releases are separate, reviewed steps
+# (scripts/README.md).
 on:
   workflow_dispatch:
   push:
@@ -6,65 +10,118 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: native-candidate-${{ github.ref }}
+  group: apps-release-${{ github.ref }}
   cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
 jobs:
+  version:
+    name: Read the CLI version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - id: read
+        name: Require a tag that equals the CLI version
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | python3 -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "mcport-cli"))')"
+          if [[ "$RELEASE_REF" == refs/tags/* && "$RELEASE_TAG" != "v$version" ]]; then
+            echo "::error::Tag $RELEASE_TAG does not match the mcport CLI version $version. Tag v$version, or bump the workspace version first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
   native:
-    name: Test and build ${{ matrix.honeycomb }}
+    name: Build and check ${{ matrix.target }}
+    needs: version
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, honeycomb: linux-x86_64, suffix: '' }
-          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, honeycomb: linux-aarch64, suffix: '' }
-          - { runner: macos-15-intel, target: x86_64-apple-darwin, honeycomb: macos-x86_64, suffix: '' }
-          - { runner: macos-15, target: aarch64-apple-darwin, honeycomb: macos-aarch64, suffix: '' }
-          - { runner: windows-2025, target: x86_64-pc-windows-msvc, honeycomb: windows-x86_64, suffix: '.exe' }
-          - { runner: windows-11-arm, target: aarch64-pc-windows-msvc, honeycomb: windows-aarch64, suffix: '.exe' }
+          # Linux: static musl binaries linked by Zig, so one file runs on every distribution
+          # (the Silicon fleet included). The four Linux targets have live Silicon Apps workers.
+          - { target: linux-x86_64, runner: ubuntu-24.04, rust_target: x86_64-unknown-linux-musl, zig: true, test_target: x86_64-unknown-linux-gnu, binary: mcport, emulator: '' }
+          - { target: linux-i686, runner: ubuntu-24.04, rust_target: i686-unknown-linux-musl, zig: true, test_target: '', binary: mcport, emulator: '' }
+          - { target: linux-aarch64, runner: ubuntu-24.04-arm, rust_target: aarch64-unknown-linux-musl, zig: true, test_target: aarch64-unknown-linux-gnu, binary: mcport, emulator: '' }
+          - { target: linux-armv7hf, runner: ubuntu-24.04, rust_target: armv7-unknown-linux-musleabihf, zig: true, test_target: '', binary: mcport, emulator: qemu-arm }
+          # macOS and Windows: built and kept until their Silicon Apps workers are live.
+          - { target: macos-x86_64, runner: macos-15-intel, rust_target: x86_64-apple-darwin, zig: false, test_target: x86_64-apple-darwin, binary: mcport, emulator: '' }
+          - { target: macos-aarch64, runner: macos-15, rust_target: aarch64-apple-darwin, zig: false, test_target: aarch64-apple-darwin, binary: mcport, emulator: '' }
+          - { target: windows-x86_64, runner: windows-2025, rust_target: x86_64-pc-windows-msvc, zig: false, test_target: x86_64-pc-windows-msvc, binary: mcport.exe, emulator: '' }
+          - { target: windows-aarch64, runner: windows-11-arm, rust_target: aarch64-pc-windows-msvc, zig: false, test_target: aarch64-pc-windows-msvc, binary: mcport.exe, emulator: '' }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
       run:
         shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      APPS_TARGET: ${{ matrix.target }}
+      RUST_TARGET: ${{ matrix.rust_target }}
+      TEST_TARGET: ${{ matrix.test_target }}
+      BINARY: ${{ matrix.binary }}
+      USE_ZIG: ${{ matrix.zig }}
+      PYTHON: python
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust_target }}
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
-      - name: Configure native Python fixture and packaging dependencies
+      - name: Point the stdio transport tests at this Python
+        run: python -c 'import os, sys; open(os.environ["GITHUB_ENV"], "a").write("MCPORT_TEST_PYTHON=" + sys.executable + "\n")'
+      - name: Test the CLI, client, transports and daemon on this runner
+        if: matrix.test_target != ''
+        run: cargo test --locked -p mcport-cli -p mcport-client -p mcport-api -p mcport-mcp -p mcport-daemon --target "$TEST_TARGET"
+      - name: Install cargo-zigbuild and Zig
+        if: matrix.zig
         run: |
-          python -m pip install --disable-pip-version-check -r scripts/requirements.txt
-          python -c 'import os,sys; open(os.environ["GITHUB_ENV"], "a").write("MCPORT_TEST_PYTHON=" + sys.executable + "\n")'
-      - name: Verify release tag matches workspace
+          python -m pip install --disable-pip-version-check 'cargo-zigbuild==0.23.4' 'ziglang==0.15.2'
+          python -c 'from pathlib import Path; import ziglang; print("CARGO_ZIGBUILD_ZIG_PATH=" + str(Path(ziglang.__file__).with_name("zig")))' >> "$GITHUB_ENV"
+          cargo-zigbuild --version
+          python -m ziglang version
+      - name: Install the ARMv7 emulator for the checks
+        if: matrix.emulator != ''
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Build the release CLI with its embedded daemon
+        run: |
+          if [ "$USE_ZIG" = true ]; then
+            cargo zigbuild --locked --release -p mcport-cli --target "$RUST_TARGET"
+          else
+            cargo build --locked --release -p mcport-cli --target "$RUST_TARGET"
+          fi
+      - name: Check the binary answers the Silicon Apps commands in an empty home
         env:
-          RELEASE_REF: ${{ github.ref }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_APPS_EMULATOR: ${{ matrix.emulator }}
         run: |
-          python -c 'import os,tomllib; version=tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"]; assert not os.environ["RELEASE_REF"].startswith("refs/tags/") or os.environ["RELEASE_TAG"]=="v"+version, "Tag must match the Cargo version"'
-      - name: Test native CLI, SDK, transports and daemon
-        run: cargo test --locked -p mcport-cli -p mcport-client -p mcport-api -p mcport-mcp -p mcport-daemon --target ${{ matrix.target }}
-      - name: Test package rejection rules
-        run: python -m unittest discover -s scripts/tests -p 'test_*.py'
-      - name: Build release CLI with embedded daemon
-        run: cargo build --locked --release -p mcport-cli --target ${{ matrix.target }}
-      - name: Native smoke and archive validation
-        run: python scripts/package.py stage --target ${{ matrix.honeycomb }} --binary target/${{ matrix.target }}/release/mcport${{ matrix.suffix }} --output stage/mcport-${{ matrix.honeycomb }}.zip
+          mkdir -p "native/$APPS_TARGET"
+          cp "target/$RUST_TARGET/release/$BINARY" "native/$APPS_TARGET/$BINARY"
+          bash scripts/package-apps.sh --check-only --record "native/$APPS_TARGET/mcport-$APPS_TARGET.json" \
+            "$VERSION" "$APPS_TARGET" "native/$APPS_TARGET/$BINARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: mcport-native-${{ matrix.honeycomb }}
-          path: stage/*
+          name: mcport-native-${{ matrix.target }}
+          path: native/${{ matrix.target }}/
           if-no-files-found: error
           retention-days: 14
-  assemble:
-    name: Complete six-target Honeycomb candidate
-    needs: native
+  package:
+    name: Pack one Silicon Apps archive per target
+    needs: [version, native]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -72,24 +129,40 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
-      - run: python -m pip install --disable-pip-version-check -r scripts/requirements.txt
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Install the official Silicon Apps packer
+        run: cargo install --locked silicon-apps-cli --version 0.2.0
+      - name: Install emulators for the ARM Linux checks
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Test the packaging rules with the real packer
+        run: python -m unittest discover -s scripts/tests -p 'test_package_apps.py'
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           pattern: mcport-native-*
-          merge-multiple: true
           path: native
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      - name: Install the official package validator
-        run: cargo install --locked silicon-honeycomb-cli --version 0.6.1
-      - name: Require every target, validate bytes and emit checksums
-        run: python scripts/package.py assemble --input native --output candidate/mcport-honeycomb.tar.gz
-      - name: Validate the final archive with official Honeycomb
-        run: honeycomb validate candidate/mcport-honeycomb.tar.gz --json
+      - name: Pack, validate and re-check every archive
+        run: |
+          set -euo pipefail
+          for target in linux-x86_64 linux-i686 linux-aarch64 linux-armv7hf macos-x86_64 macos-aarch64 windows-x86_64 windows-aarch64; do
+            dir="native/mcport-native-$target"
+            binary="$dir/mcport"
+            case "$target" in windows-*) binary="$dir/mcport.exe" ;; esac
+            case "$target" in
+              linux-aarch64) emulator=qemu-aarch64 ;;
+              linux-armv7hf) emulator=qemu-arm ;;
+              *) emulator='' ;;
+            esac
+            # Linux archives are checked again here (natively or through qemu); macOS and
+            # Windows ones carry the record their native runner wrote for the same bytes.
+            PACKAGE_APPS_EMULATOR="$emulator" bash scripts/package-apps.sh --require-discovery \
+              --checked-record "$dir/mcport-$target.json" "$VERSION" "$target" "$binary"
+          done
+          mkdir -p dist/apps/checks
+          cp native/mcport-native-*/mcport-*.json dist/apps/checks/
+          (cd dist/apps && sha256sum mcport-*.tar.gz > SHA256SUMS && cat SHA256SUMS)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: mcport-honeycomb-candidate
-          path: candidate/*
+          name: mcport-silicon-apps-release
+          path: dist/apps/
           if-no-files-found: error
           retention-days: 30
-# This workflow only creates reviewable candidates. Publishing to GitHub,
-# crates.io or Honeycomb and production deployment are separate authorized steps.

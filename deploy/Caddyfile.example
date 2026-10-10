@@ -1,8 +1,8 @@
 # Replace with the selected public origin after DNS and infrastructure are ready.
 mcport.example.com {
 	encode zstd gzip
-	# The backend serves the built website and API. Caddy preserves cookies and
-	# forwards request headers, including IAM testing headers, by default.
+	# The backend serves the API, provider OAuth pages, download tickets and the
+	# Silicon Accounts webhook. The website is a separate Next.js deployment.
 	reverse_proxy 127.0.0.1:4380
 	header {
 		X-Content-Type-Options nosniff

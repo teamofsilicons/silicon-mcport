@@ -3,23 +3,25 @@
 The `Native backend candidate` workflow builds and tests the Rust server natively
 on ARM64 inside a pinned Amazon Linux 2023 image. It checks required glibc symbols
 against 2.34 and starts/stops the real executable using a disposable data directory.
-The web job separately tests and builds the website. Assembly requires the same
-source revision and server checksum and emits an immutable `.tar.gz` plus SHA-256.
-The server embeds its full source revision and exposes it in `/health`; both
-native smoke and target installation require that exact revision and version.
-The bundle includes the server, website, systemd unit, proxy example, installer,
-license, build provenance and a checksum for every file. It contains no runtime
-credentials, database, encryption key or deployment settings.
+Assembly requires the same source revision and server checksum and emits an
+immutable `.tar.gz` plus SHA-256. The server embeds its full source revision and
+exposes it in `/health`; both native smoke and target installation require that
+exact revision and version. The bundle includes the server, systemd unit, proxy
+example, installer, license, build provenance and a checksum for every file. It
+contains no runtime credentials, database, encryption key or deployment settings,
+and no website: the website is a separate Next.js deployment on Vercel
+([vercel.md](vercel.md)), and the installer refuses a bundle that still carries one.
 
-This server bundle is separate from the six-platform Honeycomb CLI package.
-No host, DNS name, runtime credentials, production upload or deployment has been
-selected or performed by this workflow. `/health` proves process/version readiness;
-it does not prove IAM, provider calls, mail delivery or telemetry ingestion.
+This server bundle is separate from the `mcport` CLI packages distributed through
+Silicon Apps. No host, DNS name, runtime credentials, production upload or
+deployment has been selected or performed by this workflow. `/health` proves
+process/version readiness; it does not prove Silicon Accounts sign-in, provider
+calls, mail delivery or telemetry ingestion.
 
 ## Prepare and inspect
 
 Dispatch `.github/workflows/backend.yml` at the exact committed revision, wait for
-all three jobs and download `mcport-backend-candidate`. Confirm the run's head SHA
+both jobs and download `mcport-backend-candidate`. Confirm the run's head SHA
 and the downloaded archive's sidecar digest. Use this installer from the reviewed
 source revision; do not execute code from an unverified archive.
 
@@ -42,28 +44,41 @@ Provision the host and runtime configuration separately after target selection.
 Prepare `/var/lib/mcport` owned by `mcport`, mode0700; `/etc/mcport/runtime.env`
 owned by root, mode0600; and the `mcport` user/group. Populate the environment from
 the deployment secret store, using `environment.example` in the source checkout
-as the field reference. Set the exact external HTTPS origin, live IAM app secret,
-webhook/lifecycle settings and environment-specific delivery/telemetry keys.
+as the field reference. Set the exact external HTTPS origin, `ACCOUNTS_URL`, the
+`mcport` app secret from Silicon Accounts (`MCPORT_APP_SECRET`), the webhook secret
+(`MCPORT_ACCOUNTS_WEBHOOK_SECRET`) and environment-specific delivery/telemetry keys.
+The service refuses to start, with a message naming the variable, when the app
+secret is missing or an Accounts URL is not https.
 The installer requires explicit `MCPORT_DATA_DIR=/var/lib/mcport` and
 `MCPORT_BIND=127.0.0.1:4380` so its backup covers the service's actual state.
 Never use fixture values or copy another application's credentials. Preserve the
 master key with its database across every upgrade. A fresh deployment must begin
 with an empty data directory.
 
-For isolated acceptance, follow [testing setup](testing.md). Honeycomb may return
-MCPort's test credential after participant import completes. Install it in the
-protected `MCPORT_TEST_APP_SECRETS` map and restart; no repeated import or root-key
-rotation is required. The explicit map takes precedence over a stored test secret,
-so update it when rotating credentials. It cannot enable an inactive environment;
-IAM verifies the selected credential before login. Production never supplies a
-fallback credential for testing.
+For acceptance, run a separate MCPort backend wired to a test Silicon Accounts
+deployment; see [testing setup](testing.md). One backend has no testing
+environments, and production never supplies a credential for testing.
 
-The service binds `127.0.0.1:4380`, serves both the API and `web/dist` from the
-active release, and retains state under `/var/lib/mcport`. Adapt
-`Caddyfile.example` to the selected hostname, validate it with `caddy validate`,
-then configure DNS/HTTPS and the loopback proxy before the health-gated cutover.
-Caddy's normal proxy forwarding preserves multiple response cookies and IAM
-testing headers. Do not add an unrelated public listener for port4380.
+## Silicon Accounts setup
+
+In Silicon Accounts, the `mcport` app needs: `device_flow` and `public_client` on
+(the CLI signs Carbons in with the device flow and exchanges Silicons' short-lived
+tokens without a secret); the website's `/auth/callback` in `redirect_uris` and its
+origin in `allowed_origins`; no email or phone fields. Point the app webhook at
+`https://backend.mcport.teamofsilicons.com/webhooks/accounts` (every update) and
+put its `whsec_` secret in `MCPORT_ACCOUNTS_WEBHOOK_SECRET`; `POST
+/v1/apps/mcport/webhook/test` must then show a delivered `ping`. Provider OAuth uses
+the backend's own `/oauth/callback`; never register it in Silicon Accounts.
+
+Moving a backend that ran a release before 0.3.0 to Silicon Accounts is a one-time
+cutover with `mcport-server link-identities`; follow
+[the cutover runbook](../docs/migration/cutover.md).
+
+The service binds `127.0.0.1:4380`, serves the API (the website is a separate
+deployment) and retains state under `/var/lib/mcport`. Adapt `Caddyfile.example`
+to the selected hostname, validate it with `caddy validate`, then configure
+DNS/HTTPS and the loopback proxy before the health-gated cutover. Do not add an
+unrelated public listener for port4380.
 
 ## Install a reviewed candidate
 
@@ -86,9 +101,9 @@ are refused because they can override the validated data location or executable.
 Retain its backup receipt.
 Run one gateway instance per database; this release has no distributed leases.
 
-After installing, separately prove real Carbon and Silicon login, a useful shared
-and local-host provider call, permission revocation, authorized downloads, testing
-lifecycle, and mail/telemetry delivery where enabled. Check `journalctl -u
+After installing, separately prove real Carbon and Silicon sign-in, a useful shared
+and local-host provider call, permission revocation, authorized downloads, a
+delivered Silicon Accounts webhook, and mail/telemetry delivery where enabled. Check `journalctl -u
 mcport.service` without copying secrets or provider payloads into public logs.
 
 ## Backup, failed cutover and recovery

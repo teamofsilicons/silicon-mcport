@@ -28,31 +28,35 @@ verification or rewrite local hosts to bypass that gate.
 
 ## Runtime secret
 
-Actual production IAM login requires a registered/accepted `mcport` application,
-its backend-only `MCPORT_APP_SECRET`, the correct IAM URLs and exact application
-origins. Register frontend `/auth/callback` for Carbon/Silicon browser login.
-Provider OAuth uses backend `/oauth/callback` and `/oauth/client-metadata.json`.
-Application secrets never belong in Vercel or a `VITE_*` setting.
+Sign-in needs the `mcport` app in Silicon Accounts (production), its backend-only
+`MCPORT_APP_SECRET`, and the app's sign-in setup and webhook described in
+[the deploy README](../README.md#silicon-accounts-setup). Provider OAuth uses
+backend `/oauth/callback` and `/oauth/client-metadata.json`. Application secrets
+never belong in Vercel's browser-visible settings.
 
 Store a JSON object in Secrets Manager secret `silicon-mcport/production-runtime`
-using its AWS-managed encryption key. Its only mandatory entry for IAM login is
-`MCPORT_APP_SECRET`, with the real issued secret as a string. The helper fixes the
-nonsecret app/bind/data/IAM/origin values; omit unused optional entries:
+using its AWS-managed encryption key. Its only mandatory entry is
+`MCPORT_APP_SECRET`, with the real secret as a string. The helper fixes the
+nonsecret `ACCOUNTS_URL`, app id, bind, data and origin values; omit unused
+optional entries:
 
 | Optional key | When needed |
 |---|---|
-| `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION` | Matching IAM/Honeycomb webhook registration at backend `/webhooks/iam`; use its independent signing secret, version defaults to1 |
-| `MCPORT_LIFECYCLE_SECRET` | Dedicated ≥32-character service token matching Honeycomb testing participant registration |
-| `MCPORT_TEST_APP_SECRETS` | JSON string mapping imported test UUIDs to their own test application secrets; may be installed after app-owned attachment completes. Restart to load changes; explicit entries override stored test secrets. See [testing setup](../testing.md). |
-| `MCPORT_TELEMETRY_KEY`, `MCPORT_TEST_TELEMETRY_KEYS` | Production Space Station table key and JSON string of separate testing keys |
+| `MCPORT_ACCOUNTS_WEBHOOK_SECRET` | The `whsec_` secret of the app webhook at backend `/webhooks/accounts` (sign-outs, removed access, id and custodian changes) |
+| `ACCOUNTS_API_URL` | Only when MCPort must call Silicon Accounts at another https URL than `ACCOUNTS_URL` |
+| `MCPORT_TELEMETRY_KEY` | Production Space Station table key |
 | `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Live report delivery and verified sender; sender defaults to `mcport@teamofsilicons.com` |
 | `MCPORT_MASTER_KEY` | Optional 64 hex characters, preserved for this deployment's lifetime |
 
 Without an explicit master key the first app startup generates a protected
 `master.key` in `/var/lib/mcport`. Keep that directory empty before the first
-installer run. Webhooks/testing/mail/telemetry are not process-start or production
-login prerequisites, but their configured flows must be proved before claiming
-full readiness. Blank optional values should be omitted, not copied from examples.
+installer run. The webhook, mail and telemetry are not process-start
+prerequisites, but their configured flows must be proved before claiming full
+readiness. Blank optional values should be omitted, not copied from examples.
+Variables of releases before 0.3.0 (`MCPORT_IAM_URL`, `MCPORT_IAM_WEB_URL`,
+`MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION`, `MCPORT_LIFECYCLE_SECRET`,
+`MCPORT_TEST_APP_SECRETS`, `MCPORT_TEST_TELEMETRY_KEYS`) are ignored with a
+warning; remove them when updating an existing runtime (see the cutover runbook).
 
 Create the secret from a protected local JSON file without putting its contents
 in shell arguments or SSM documents. Capture registration outputs privately.
@@ -71,7 +75,7 @@ do not create an unrelated credential. `runtime_from_secret.py` is for the first
 configuration only. It captures AWS stdout/stderr, validates the object, and
 atomically creates `/etc/mcport/runtime.env` as root0600 without printing values.
 It refuses existing files, including symlinks. For later rotation, back up the
-matching runtime/database/key first, coordinate service restart and validate IAM.
+matching runtime/database/key first, coordinate service restart and validate sign-in.
 
 ## Stage reviewed files through SSM
 

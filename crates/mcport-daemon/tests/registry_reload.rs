@@ -108,10 +108,13 @@ fn job() -> HostJob {
             .as_secs() as i64
             + 30,
         actor: Actor {
-            principal_id: "si:caller".into(),
-            identity_kind: "silicon".into(),
-            org_id: "tos".into(),
+            uuid: "Cal".into(),
+            id: "si:caller".into(),
+            kind: "silicon".into(),
             display_name: "caller".into(),
+            principal_id: "Cal".into(),
+            identity_kind: "silicon".into(),
+            org_id: String::new(),
         },
     }
 }
@@ -142,15 +145,13 @@ impl Harness {
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("host/registry.json");
-        let mut registry = Registry::new(HostConfig {
-            backend_url: format!("http://{address}"),
-            host_id: "host".into(),
-            host_token: "token".into(),
-            environment: "production".into(),
-            org_id: "tos".into(),
-            owner_id: "c:alice".into(),
-            isi: None,
-        });
+        let mut registry = Registry::new(HostConfig::new(
+            format!("http://{address}"),
+            "host",
+            "token",
+            "Ali",
+            None,
+        ));
         let endpoint = Endpoint::http(format!("http://{address}/mcp"));
         if registered {
             registry

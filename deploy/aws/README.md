@@ -31,7 +31,7 @@ aws ssm start-session --target INSTANCE_ID
 
 No SSH key or inbound port22 is configured. Only TCP80/443 is exposed; the future
 gateway remains on `127.0.0.1:4380`. Normal outbound access supports SSM, package
-repositories, IAM and provider MCP endpoints. IMDSv2 is required with hop limit1.
+repositories, Silicon Accounts and provider MCP endpoints. IMDSv2 is required with hop limit1.
 The initial temporary public address is replaced by the stack's Elastic IP.
 
 CloudFormation completion does not prove cloud-init succeeded. Through SSM,

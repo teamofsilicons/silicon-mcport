@@ -1,34 +1,25 @@
 name: Native backend candidate
 on:
   workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Optional successful CLI release run to verify on native catalog runners
+        required: false
+        default: ''
+      source_revision:
+        description: Exact CLI candidate source commit
+        required: false
+        default: ''
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: backend-candidate-${{ github.ref }}
   cancel-in-progress: false
+# The bundle is the service alone; the website is a separate Next.js deployment.
 jobs:
-  web:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci --prefix web
-      - run: npm test --prefix web
-      - run: npm run build --prefix web
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: backend-website
-          path: web/dist/
-          if-no-files-found: error
-          retention-days: 14
   server:
+    if: inputs.candidate_run == ''
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 70
     env:
@@ -67,7 +58,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   assemble:
-    needs: [web, server]
+    if: inputs.candidate_run == ''
+    needs: [server]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -77,10 +69,6 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: backend-website
-          path: backend-web
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: backend-server
@@ -94,7 +82,7 @@ jobs:
           SOURCE_REVISION: ${{ github.sha }}
         run: |
           python scripts/package_backend.py --binary backend-build/mcport-server \
-            --web backend-web --provenance backend-build/provenance.json \
+            --provenance backend-build/provenance.json \
             --revision "$SOURCE_REVISION" \
             --output "candidate/mcport-backend-$SOURCE_REVISION-linux-aarch64.tar.gz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -104,3 +92,55 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 # Candidate only: no production credentials, upload, installation or deployment.
+  catalog-proof:
+    if: inputs.candidate_run != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, target: linux-x86_64 }
+          - { runner: ubuntu-24.04-arm, target: linux-aarch64 }
+          - { runner: macos-15-intel, target: macos-x86_64 }
+          - { runner: macos-15, target: macos-aarch64 }
+          - { runner: windows-2025, target: windows-x86_64 }
+          - { runner: windows-11-arm, target: windows-aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify candidate provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" > candidate.json
+          python - <<'PYPROOF'
+          import json, os
+          r=json.load(open('candidate.json'))
+          assert r['head_sha']==os.environ['SOURCE_REVISION'] and r['conclusion']=='success'
+          assert r['path']=='.github/workflows/release.yml'
+          PYPROOF
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcport-silicon-apps-release
+          path: candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.candidate_run }}
+      - name: Execute exact packaged bytes
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          archive=$(find candidate -name "mcport-*-$TARGET.tar.gz")
+          python scripts/native_catalog_proof.py --app mcport --archive "$archive" --target "$TARGET" --source-revision "$SOURCE_REVISION" --candidate-run "$CANDIDATE_RUN" --output "proof/mcport-$TARGET.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcport-catalog-proof-${{ matrix.target }}
+          path: proof/
+          if-no-files-found: error

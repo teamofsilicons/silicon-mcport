@@ -1,6 +1,60 @@
 # MCPort development
 
-The CLI uses `mcport-client` for all MCPort operations. The package re-exports the stateless gateway API and exposes local registration, account validation and explicit host run/start/stop/status helpers through its `local` feature. The CLI owns arguments, prompts, output, home selection and session persistence. Callers of the Rust package supply identity, environment, paths and executables explicitly. The daemon uses the underlying `mcport-api` transport for host polling, progress and durable result acknowledgements, avoiding a dependency cycle; local MCP traffic belongs to the protocol runtime.
+## How the pieces fit
+
+- `mcport-core`: wire types shared by the service and its clients.
+- `mcport-api`: the stateless HTTP client for `/api/v1`. Every request carries an explicit Silicon Accounts access
+  token for the `mcport` app (`Authorization: Bearer`); nothing is retried, refreshed or read from disk implicitly.
+- `mcport-client`: the package Rust applications use. It re-exports `mcport-api` and adds, behind features, sign-in with
+  Silicon Accounts (`accounts`, default), one stored sign-in with single-flight refresh (`session`) and explicit local
+  host registries plus the embedded host daemon (`local`).
+- `mcport-daemon`: the outbound host connector embedded in the CLI (`mcport daemon run`). It long-polls the service with
+  its host token, runs only connections registered in its local registry and journals every job.
+- `mcport-mcp`: MCP sessions over streamable HTTP and stdio.
+- `mcport-cli`: the `mcport` command. It owns arguments, prompts, output and the files under the home; everything else
+  goes through `mcport-client`, so the CLI has no capability the package lacks.
+- `mcport-server`: the service (not published).
+
+## Signing in
+
+MCPort is a public client at Silicon Accounts: the CLI holds no secret.
+
+- Carbons: `POST {ACCOUNTS_URL}/v1/device/authorize` with `client_id=mcport`, then poll `POST /v1/oauth/token` with
+  `grant_type=urn:ietf:params:oauth:grant-type:device_code`, waiting `interval` seconds and 5 more after each
+  `slow_down`, until approved, `access_denied` or `expired_token` (10 minutes).
+- Silicons: `POST /v1/oauth/token` with `grant_type=urn:silicon:params:oauth:grant-type:slt`, the short-lived token and
+  `client_id=mcport`. `invalid_grant` refusals are classified (already used, expired, wrong app, unknown, the minting
+  sign-in ended) and never echo the token.
+- Refresh: `grant_type=refresh_token` with `client_id` alone. Refresh tokens rotate and a used one ends the whole
+  sign-in, so the CLI refreshes under an exclusive lock on `<sign-in>.lock`, re-reads the file after taking it, and
+  writes the new pair (temporary file, fsync, rename) before using it. It refreshes when less than 60 seconds are left,
+  and repeats a command once when the service answers 401 `token_expired` or `signed_out` (a 401 means nothing ran).
+  If Silicon Accounts is briefly unreachable, a token with time left is still used.
+- Sign-out: `POST /v1/oauth/revoke` with `token`, `token_type_hint=refresh_token` and `client_id`. Signing in again in
+  the same home revokes the sign-in it replaces.
+- Before spending a code or token, `mcport login` reads the backend's `GET /api/v1/discovery` and refuses when the
+  backend trusts another Silicon Accounts or app id (`accounts_mismatch`, `app_id_mismatch`).
+
+The service verifies access tokens locally against the Accounts JWKS (`aud` = `mcport`, `iss` = `ACCOUNTS_URL`),
+introspects them on sensitive routes and applies Silicon Accounts webhooks (sign-outs, removed access, id and custodian
+changes). The [API contract](../../../docs/API.md) has the details.
+
+## Files
+
+Under `${SILICON_HOME:-$HOME}/.mcport/dir` (directories 0700, files 0600, symbolic links refused):
+
+- `settings.json`: telemetry, backend and Silicon Accounts URLs.
+- `accounts/<key>.json` (+ `.lock`): the sign-in for one backend (`<key>` = SHA-256 of `["<backend>",null]`): the
+  account (uuid, id, kind, display name, custodian), the access and refresh tokens, their expiry, the Silicon Accounts
+  URL and app id that issued them.
+- `contexts/<key>/hosts/<SHA-256 of ["<host id>",null]>/registry.json`: a host's registry (host token, registered
+  endpoints, local provider credentials) with its daemon's lock, status, journal and log. Version 2 keys the owner and
+  personal provider accounts by Silicon Accounts uuid; version 1 (mcport 0.2 and earlier) keyed them by old ids and
+  keeps running until `mcport host migrate` rewrites it (`registry.v1.json` keeps the original).
+- `sessions/` holds sign-ins from mcport 0.2 and earlier. They are no longer used; `mcport logout` removes the file.
+
+`mcport accounts --json`, `mcport --help`, `mcport docs` and, signed out, `mcport login status --json` start no async
+runtime, need no network or existing home, and write nothing, so they pass in the Silicon Apps validation sandbox.
 
 ## Work from source
 
@@ -10,38 +64,43 @@ cd silicon-mcport
 cargo build --locked -p mcport-cli -p mcport-server
 cargo test --locked --workspace
 cargo clippy --locked --workspace --all-targets -- -D warnings
-npm ci --prefix web
-npm test --prefix web
-npm run build --prefix web
-python3 tests/e2e/run.py
 ```
 
-The repository/package URLs are distribution metadata; check their availability for the version you are using. `scripts/check.py` combines Rust, web, packaging and fixture gates after installing `scripts/requirements.txt` in a private Python environment. The real-binary regression starts isolated loopback IAM/MCP fixtures and fresh homes; it does not bypass application authorization or use live email credentials. Fixtures are not proof of live provider compatibility.
+The CLI's tests run the real binary against a stub Silicon Accounts and backend (`crates/mcport-cli/tests`); the client's
+tests cover the device flow, token exchange, refresh rotation and the session file (`crates/mcport-client/tests`).
 
-Run `cargo run -p mcport-server` from the repository root to serve port 4380. `npm run dev --prefix web` serves port 4381 and proxies `/api`. Production `web/dist` is served by the gateway. The server requires a registered IAM application credential; development without live credentials uses `python3 tests/e2e/serve.py`, whose printed tokens are fixture-only.
+To run everything locally, start a Silicon Accounts deployment of your own with an `mcport` app that has `device_flow`
+and `public_client` turned on, then the service:
 
-The CLI's fresh-profile default is `https://backend.mcport.teamofsilicons.com`. Point development commands at the local service explicitly, for example `MCPORT_URL=http://127.0.0.1:4380 mcport iam --json`. The automated fixture journey supplies its own backend override and temporary home.
+```sh
+ACCOUNTS_URL=http://localhost:9590 MCPORT_APP_SECRET=<the app's secret> \
+  MCPORT_ACCOUNTS_WEBHOOK_SECRET=<its whsec_ secret> cargo run -p mcport-server   # serves 127.0.0.1:4380
+export MCPORT_URL=http://127.0.0.1:4380 ACCOUNTS_URL=http://localhost:9590
+mcport login                     # or: silicon-accounts login --app mcport -q | mcport login --slt-stdin
+```
 
-## Configuration and isolation
-
-Use `deploy/environment.example` as the backend configuration reference. Keep the IAM application secret, separate webhook and lifecycle secrets, encryption key, Postmark token and Space Station keys outside repositories and client packages. The backend stores encrypted record bodies; database backups and their encryption key must be recovered together.
-
-Application login exchanges an IAM app-bound SLT. Provider OAuth or bearer credentials are a separate authority. User sessions are bound to principal, organization, backend and environment. Host tokens are bound to one registered host and environment. A remote caller never supplies a local command or endpoint in a gateway job.
-
-A validated `--test` context has separate identities, provider accounts, hosts, jobs and data. Honeycomb prepare/disable/restore/clean/delete lifecycle changes fence stale work by generation. Production credentials are never a fallback. Live provisioning requires the registered application and coordinated lifecycle receipts; a fixture pass does not create a live test environment.
+`deploy/environment.example` lists every service setting. Keep the app secret, webhook secret, encryption key, Postmark
+token and telemetry key out of repositories and client packages.
 
 ## Results and retries
 
-The SDK preserves complete MCP result JSON and distinguishes a tool's `isError` from gateway errors. A transport failure can leave the outcome unknown. The SDK never retries requests automatically. The daemon journals before dispatch, prevents duplicate provider execution and retries only acknowledgement of an already completed job. Cancellation is best effort and cannot undo a completed upstream effect.
+The client keeps complete MCP result JSON and tells a tool's `isError` apart from service errors. A transport failure
+during a change reports `outcome_unknown`: inspect activity before trying again. The daemon journals before dispatch,
+never runs a provider action twice after an unknown outcome, and retries only the upload of a finished result.
+Downloads re-check access and tool policies; the CLI writes new owner-only files and never overwrites one.
 
-Downloads recheck current connection/tool permissions, and the CLI creates new private files without overwriting existing files. Local materialized links remain bounded by the runtime's origin/path rules. Unsupported interactive provider capabilities return explicit errors; do not treat them as implicit permission to execute a different action.
+## Releases
 
-## Release work
+MCPort ships through Silicon Apps: `silicon-apps install mcport`, and the Silicon Apps daemon keeps installed apps
+current. Each release is one archive per target with `apps.yaml` at its root; development releases install as
+`mcport>dev`. The CLI has no updater of its own and installs no system service; the host daemon is started by `mcport
+host new` and `mcport daemon start`.
 
-The native workflow builds and tests Linux, macOS and Windows for x86-64 and ARM64. Stage ZIPs preserve executable modes; the final Honeycomb archive is `.tar.gz` with a root manifest and six target payloads. Package validation and checksums do not prove all native platforms ran: inspect each native job and test fresh installations.
+The crates are published in dependency order: `mcport-core`, `mcport-mcp`, `mcport-api`, `mcport-daemon`,
+`mcport-client`, then `mcport-cli`. 0.3.0 changes the identity types and removes the old sign-in calls, so it is a
+breaking release.
 
-Production registration, secrets, HTTPS hosting, current Honeycomb authority, publication reviews and crates.io distribution are operator steps. The source workflow creates candidate artifacts only. Organization/access-key/API-key runtime contexts are not implied by Carbon/Silicon login support; use only credential modes documented for the deployed backend.
+The service is a single instance; several replicas would need shared leases and refresh coordination.
 
-The current gateway is a single-instance service. Horizontal replicas require distributed transaction, refresh and lease coordination. The native systemd unit expects `/opt/mcport/current` and protected `/var/lib/mcport` data. Linux GNU artifacts use Ubuntu 24.04 as their tested runtime baseline; older distributions and Windows permission behavior require native verification.
-
-Read current usage with `mcport docs usage`, command syntax with `mcport <service> --help`, and the online development/API documentation linked by `mcport --help`.
+Read usage with `mcport docs usage`, command syntax with `mcport <command> --help`, and the repository's `docs/` for the
+architecture and the API.

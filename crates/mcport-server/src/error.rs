@@ -41,15 +41,15 @@ impl Error {
             404,
             "not_found",
             "This resource does not exist or is not available to you.",
-            "List the resources available in your current account and organization.",
+            "List the resources your account can use, or ask their owner to share them with you.",
         )
     }
     pub fn expired() -> Self {
         Self::new(
             401,
             "authentication_required",
-            "The session is missing, expired or revoked.",
-            "Refresh the session or log in with a new app-bound SLT.",
+            "This request needs a Silicon Accounts access token for MCPort (Authorization: Bearer <token>).",
+            crate::accounts::SIGN_IN_AGAIN,
         )
     }
     pub fn internal() -> Self {
@@ -93,19 +93,10 @@ impl From<std::io::Error> for Error {
         Self::internal()
     }
 }
-impl From<silicon_iam_client::Error> for Error {
-    fn from(e: silicon_iam_client::Error) -> Self {
-        let status = if matches!(e, silicon_iam_client::Error::Api(_)) {
-            401
-        } else {
-            503
-        };
-        Self::new(
-            status,
-            "iam_unavailable_or_rejected",
-            "IAM could not validate this session or operation.",
-            "Check IAM availability and the current app configuration. Re-authenticate only if the credential was rejected.",
-        )
+impl From<silicon_accounts_client::Error> for Error {
+    fn from(e: silicon_accounts_client::Error) -> Self {
+        tracing::warn!(code = %e.code(), "Silicon Accounts request failed");
+        crate::accounts::unavailable("MCPort could not complete a Silicon Accounts request.")
     }
 }
 impl From<mcport_mcp::McpError> for Error {
