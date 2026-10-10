@@ -879,8 +879,20 @@ async fn looked_up(app: &App, mapping: &Mapping) -> anyhow::Result<Known> {
     }
     Ok(known)
 }
+fn require_existing_store(config: &Config) -> anyhow::Result<()> {
+    for name in ["mcport.sqlite", "master.key"] {
+        anyhow::ensure!(
+            config.data_dir.join(name).is_file(),
+            "MCPORT_DATA_DIR must name an existing MCPort store with {name}: {}. Nothing was created.",
+            config.data_dir.display()
+        );
+    }
+    Ok(())
+}
+
 /// `mcport-server link-identities`.
 pub async fn run(config: Config, file: &Path, dry_run: bool, offline: bool) -> anyhow::Result<()> {
+    require_existing_store(&config)?;
     let text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("Could not read the mapping file {}: {e}", file.display()))?;
     let mapping = parse_mapping(&text).map_err(|message| anyhow::anyhow!(message))?;
@@ -945,6 +957,7 @@ pub fn principals(store: &Store) -> Result<Value> {
 }
 /// `mcport-server legacy-principals`.
 pub fn print_principals(config: Config) -> anyhow::Result<()> {
+    require_existing_store(&config)?;
     let app = App::new(config).map_err(|e| anyhow::anyhow!(e.1.message))?;
     let value = principals(&app.store).map_err(|e| anyhow::anyhow!(e.1.message))?;
     println!("{}", serde_json::to_string_pretty(&value)?);

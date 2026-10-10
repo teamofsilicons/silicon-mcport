@@ -160,6 +160,7 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
             }
             // A token issued after access was removed means the account signed in again.
             row.status = "active".into();
+            row.signed_in_at = row.signed_in_at.max(iat);
             row.kind = kind.into();
             if let Some(id) = claims.id.as_deref().filter(|id| !id.is_empty())
                 && iat.saturating_mul(1000) >= row.synced_at_ms
@@ -480,6 +481,11 @@ mod tests {
             f.app.store.account("Ca1").unwrap().unwrap().status,
             "active"
         );
+        // Delivery retries may arrive after that new sign-in. The older removal
+        // still rejects old tokens but cannot freeze work owned by the account.
+        crate::accounts_webhook::revoke(&f.app, "Ca1", (now() - 60) * 1000, Some("access_removed"))
+            .unwrap();
+        assert!(f.app.store.account("Ca1").unwrap().unwrap().active());
         // Deleted accounts never authenticate again.
         crate::accounts_webhook::revoke(&f.app, "Ca1", now() * 1000, Some("deleted")).unwrap();
         let fresh = f.token_with("Ca1", |c| c["iat"] = json!(now() + 5));

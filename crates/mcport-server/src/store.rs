@@ -15,7 +15,7 @@ use std::{path::Path, sync::Mutex};
 /// their own value and are never read again (they are not deleted).
 pub const ENV: &str = "production";
 /// Schema version written to `PRAGMA user_version` by this release.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// All record bodies, including provider grants, jobs and results, are encrypted.
 /// AAD binds ciphertext to its record and owner; indexes never contain secrets.
@@ -115,6 +115,7 @@ impl Store {
              ALTER TABLE records ADD COLUMN legacy_org_id TEXT;
              ALTER TABLE records ADD COLUMN legacy_owner_id TEXT;
              CREATE INDEX IF NOT EXISTS owner_records ON records(owner_id,kind);",
+            "ALTER TABLE accounts ADD COLUMN signed_in_at INTEGER NOT NULL DEFAULT 0;",
         ];
         for (index, step) in STEPS.iter().enumerate() {
             let version = index as i64 + 1;

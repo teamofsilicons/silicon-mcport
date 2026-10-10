@@ -191,8 +191,14 @@ pub fn revoke(app: &App, uuid: &str, at_ms: i64, status: Option<&str>) -> Result
                 row.id.clear();
                 row.display_name.clear();
                 row.pfp_url = None;
+                row.custodian_uuid = None;
+                row.custodian_id = None;
             }
-            Some(status) if row.status != "deleted" => row.status = status.into(),
+            Some(status)
+                if row.status != "deleted" && row.signed_in_at.saturating_mul(1000) <= at_ms =>
+            {
+                row.status = status.into()
+            }
             _ => {}
         }
         Some(row)
@@ -597,7 +603,7 @@ mod tests {
         let removed = event(
             "evt_r",
             "membership.access_removed",
-            &at(-100),
+            &at(0),
             json!({"uuid":"Ada","membership_id":"mcport:Ada"}),
         );
         f.webhook(&removed).await;

@@ -222,6 +222,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     operations::init_telemetry(&app);
     let shutdown = tokio_util::sync::CancellationToken::new();
     let worker = tokio::spawn(operations::report_worker(app.clone(), shutdown.clone()));
+    let account_worker = tokio::spawn(accounts::account_worker(app.clone(), shutdown.clone()));
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!(address=%bind,accounts=%app.config.accounts_url,"Silicon MCPort listening");
     let shutdown_app = app.clone();
@@ -261,6 +262,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
         .await?;
     shutdown.cancel();
     let _ = worker.await;
+    let _ = account_worker.await;
     Ok(())
 }
 #[tokio::main]

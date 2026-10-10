@@ -9,7 +9,7 @@ use crate::{
 };
 use rusqlite::{OptionalExtension, Row, params};
 
-const ACCOUNT_COLUMNS: &str = "uuid,kind,id,display_name,pfp_url,status,custodian_uuid,custodian_id,version,revoked_before,synced_at_ms,looked_up_at,last_fid,updated_at";
+const ACCOUNT_COLUMNS: &str = "uuid,kind,id,display_name,pfp_url,status,custodian_uuid,custodian_id,version,revoked_before,synced_at_ms,looked_up_at,last_fid,updated_at,signed_in_at";
 
 fn account_row(row: &Row<'_>) -> rusqlite::Result<AccountRow> {
     Ok(AccountRow {
@@ -27,12 +27,13 @@ fn account_row(row: &Row<'_>) -> rusqlite::Result<AccountRow> {
         looked_up_at: row.get(11)?,
         last_fid: row.get(12)?,
         updated_at: row.get(13)?,
+        signed_in_at: row.get(14)?,
     })
 }
 pub(crate) fn write_account(db: &rusqlite::Connection, a: &AccountRow) -> Result<()> {
     db.execute(
         &format!(
-            "INSERT OR REPLACE INTO accounts({ACCOUNT_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT OR REPLACE INTO accounts({ACCOUNT_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         ),
         params![
             a.uuid,
@@ -48,7 +49,8 @@ pub(crate) fn write_account(db: &rusqlite::Connection, a: &AccountRow) -> Result
             a.synced_at_ms,
             a.looked_up_at,
             a.last_fid,
-            a.updated_at
+            a.updated_at,
+            a.signed_in_at
         ],
     )?;
     Ok(())
@@ -64,6 +66,14 @@ pub(crate) fn read_account(db: &rusqlite::Connection, uuid: &str) -> Result<Opti
 }
 
 impl Store {
+    pub fn due_accounts(&self, before: i64, limit: i64) -> Result<Vec<String>> {
+        let db = self.db.lock().map_err(|_| Error::internal())?;
+        let mut query=db.prepare("SELECT uuid FROM accounts WHERE status<>'deleted' AND looked_up_at<? ORDER BY looked_up_at, uuid LIMIT ?")?;
+        Ok(query
+            .query_map(params![before, limit], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?)
+    }
+
     pub fn account(&self, uuid: &str) -> Result<Option<AccountRow>> {
         let db = self.db.lock().map_err(|_| Error::internal())?;
         read_account(&db, uuid)

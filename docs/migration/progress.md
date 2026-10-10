@@ -550,3 +550,9 @@ Fixed the recovered review's late-profile replay: profile versions no longer ove
 Validation: `cargo test --locked -p mcport-server` (75 passed), `cargo clippy --locked -p mcport-server --all-targets -- -D warnings`, `cargo fmt --all` (2 Rust build jobs, debug and incremental off).
 
 Still outstanding: daily reconciliation of deletion when no webhook arrives, out-of-order access-removal handling, legacy production-version cutover documentation, additional regression coverage for freeze/deleted-sharer behavior, actual shared Accounts E2E rerun, and the complete Next.js frontend. This section records a checkpoint, not completion of the migration.
+
+## Account reconciliation review — 10 October 2026
+
+Account lookups now carry their start timestamp and cannot overwrite a newer webhook or a deletion tombstone. Custodian/circle checks fail closed when a Silicon cache exceeds its freshness bound and Accounts cannot confirm it. The background worker checks up to 50 retained accounts per minute when their last lookup exceeds one day; a confirmed deleted status purges owned data and grants, while an ambiguous not-found retains data. Accepted token issue times are persisted in additive SQLite schema version 2 so an old access-removal delivery cannot freeze an account that already signed in again. Deletion clears cached custodian fields. Operator inventory and linking require an existing store and master key before any initialization, avoiding silent empty stores from a mistyped path.
+
+Tests: server suite 78/78 passed before the final operator guard; added delayed-lookup, expired-custodian, deleted-account sweep and late-access-removal regressions. Final lint/testing follows.

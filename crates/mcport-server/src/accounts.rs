@@ -61,6 +61,8 @@ pub struct AccountRow {
     /// When MCPort last confirmed this row with Accounts (lookup or webhook).
     pub looked_up_at: i64,
     pub last_fid: Option<String>,
+    /// Newest accepted token issue time; delayed access-removal cannot undo a later sign-in.
+    pub signed_in_at: i64,
     pub updated_at: i64,
 }
 impl AccountRow {
@@ -107,6 +109,9 @@ impl AccountRow {
     }
     /// Apply an Accounts lookup observed at `at_ms`.
     pub fn apply_summary(&mut self, summary: &AccountSummary, at_ms: i64) {
+        if self.status == "deleted" || at_ms < self.synced_at_ms {
+            return;
+        }
         self.kind = summary.kind.as_str().into();
         if !summary.id.is_empty() {
             self.id.clone_from(&summary.id);
@@ -297,6 +302,12 @@ impl Accounts {
         }
         match tokio::time::timeout(LOOKUP_TIMEOUT, self.app().lookup(uuid)).await {
             Ok(Ok(summary)) => Ok(Some(summary)),
+            Ok(Err(error)) if error.code() == "account_deleted" => Err(Error::new(
+                404,
+                "account_deleted",
+                "Silicon Accounts reports this account deleted.",
+                "Its retained MCPort data will be removed.",
+            )),
             Ok(Err(error)) if error.is_not_found() => Err(unknown_account(uuid)),
             Ok(Err(error)) => {
                 tracing::warn!(code = %error.code(), "Silicon Accounts account lookup failed");
@@ -491,10 +502,23 @@ pub async fn refresh(app: &App, uuid: &str, required: bool) -> Result<Option<Acc
     {
         return Ok(Some(row));
     }
-    let Some(summary) = app.accounts.lookup(uuid, required).await? else {
+    let at_ms = now() * 1000;
+    let summary = match app.accounts.lookup(uuid, required).await {
+        Err(error) if error.1.code == "account_deleted" => {
+            crate::accounts_webhook::revoke(app, uuid, at_ms, Some("deleted"))?;
+            crate::accounts_webhook::delete_account_data(app, uuid)?;
+            return app.store.account(uuid);
+        }
+        other => other?,
+    };
+    let Some(summary) = summary else {
         return Ok(None);
     };
-    let at_ms = now() * 1000;
+    if summary.status == "deleted" {
+        crate::accounts_webhook::revoke(app, uuid, at_ms, Some("deleted"))?;
+        crate::accounts_webhook::delete_account_data(app, uuid)?;
+        return app.store.account(uuid);
+    }
     let row = app.store.update_account(uuid, |row| {
         let mut row = row.unwrap_or_else(|| AccountRow::new(uuid, summary.kind.as_str()));
         row.apply_summary(&summary, at_ms);
@@ -571,7 +595,9 @@ pub async fn looks_after(app: &App, caller: &AccountRow, owner: &AccountRow) -> 
         return false;
     }
     let owner = fresh(app, owner.clone(), CUSTODIAN_MAX_AGE).await;
-    owner.custodian_uuid.as_deref() == Some(caller.uuid.as_str())
+    owner.status != "deleted"
+        && now() - owner.looked_up_at <= CUSTODIAN_MAX_AGE
+        && owner.custodian_uuid.as_deref() == Some(caller.uuid.as_str())
 }
 /// Whether two accounts share a circle: a Carbon and the Silicons it looks after.
 pub async fn same_circle(app: &App, a: &AccountRow, b: &AccountRow) -> bool {
@@ -592,7 +618,12 @@ pub async fn same_circle(app: &App, a: &AccountRow, b: &AccountRow) -> bool {
     } else {
         b.clone()
     };
-    a.household().is_some() && a.household() == b.household()
+    a.status != "deleted"
+        && b.status != "deleted"
+        && (!a.is_silicon() || now() - a.looked_up_at <= CUSTODIAN_MAX_AGE)
+        && (!b.is_silicon() || now() - b.looked_up_at <= CUSTODIAN_MAX_AGE)
+        && a.household().is_some()
+        && a.household() == b.household()
 }
 /// The display reference for a stored uuid (uuid only when MCPort never saw it).
 pub fn reference(app: &App, uuid: &str) -> AccountRef {
@@ -602,5 +633,128 @@ pub fn reference(app: &App, uuid: &str) -> AccountRef {
             uuid: uuid.into(),
             ..Default::default()
         },
+    }
+}
+
+/// Reconcile deletions for accounts no longer subscribed to app webhooks.
+pub async fn sweep_accounts(app: &App) -> Result<usize> {
+    let due = app.store.due_accounts(now() - 86400, 50)?;
+    let mut checked = 0;
+    for uuid in due {
+        match refresh(app, &uuid, false).await {
+            Ok(Some(_)) => checked += 1,
+            Ok(None) => break,
+            Err(error) if error.1.code == "unknown_account" => {
+                app.store.update_account(&uuid, |row| {
+                    let mut row = row?;
+                    row.looked_up_at = now();
+                    Some(row)
+                })?;
+            }
+            Err(_) => break,
+        }
+    }
+    Ok(checked)
+}
+pub async fn account_worker(app: App, shutdown: tokio_util::sync::CancellationToken) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! { _ = shutdown.cancelled() => break, _ = interval.tick() => {} }
+        tokio::select! {
+            _ = shutdown.cancelled() => break,
+            result = sweep_accounts(&app) => if let Err(error) = result {
+                tracing::warn!(code=%error.1.code, "Account reconciliation will retry later");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod reconciliation_tests {
+    use super::*;
+    use crate::test_support::{connection, fixture};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn sweep_removes_deleted_data_but_not_an_unknown_account() {
+        let f = fixture().await;
+        for (uuid, id) in [("Gone", "c:gone"), ("Unknown", "c:unknown")] {
+            f.carbon(uuid, id);
+            assert_eq!(
+                f.as_(
+                    uuid,
+                    "POST",
+                    "/api/v1/connections",
+                    Some(connection(uuid, "none", "circle"))
+                )
+                .await
+                .0,
+                axum::http::StatusCode::OK
+            );
+            f.app
+                .store
+                .update_account(uuid, |row| {
+                    let mut row = row?;
+                    row.looked_up_at = 0;
+                    Some(row)
+                })
+                .unwrap();
+        }
+        f.stub.accounts.lock().unwrap().get_mut("Gone").unwrap()["status"] = json!("deleted");
+        f.stub.accounts.lock().unwrap().remove("Unknown");
+        sweep_accounts(&f.app).await.unwrap();
+        assert_eq!(
+            f.app.store.account("Gone").unwrap().unwrap().status,
+            "deleted"
+        );
+        assert!(
+            f.app
+                .store
+                .owned_by("Gone", &["connection"])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !f.app
+                .store
+                .owned_by("Unknown", &["connection"])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_custodian_cannot_authorize_during_lookup_failure() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.silicon("Agent", "si:agent", "Ada");
+        let caller = refresh(&f.app, "Ada", true).await.unwrap().unwrap();
+        let mut owner = refresh(&f.app, "Agent", true).await.unwrap().unwrap();
+        assert!(looks_after(&f.app, &caller, &owner).await);
+        owner.looked_up_at = 0;
+        f.app
+            .store
+            .update_account("Agent", |_| Some(owner.clone()))
+            .unwrap();
+        f.stub.accounts.lock().unwrap().remove("Agent");
+        assert!(!looks_after(&f.app, &caller, &owner).await);
+        assert!(!same_circle(&f.app, &caller, &owner).await);
+    }
+
+    #[tokio::test]
+    async fn delayed_lookup_cannot_reverse_newer_custodian_or_deletion() {
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        f.silicon("Agent", "si:agent", "Ada");
+        let summary = f.app.accounts.lookup("Agent", true).await.unwrap().unwrap();
+        let mut row = AccountRow::new("Agent", "silicon");
+        row.custodian_uuid = Some("Bob".into());
+        row.synced_at_ms = 2000;
+        row.apply_summary(&summary, 1000);
+        assert_eq!(row.custodian_uuid.as_deref(), Some("Bob"));
+        row.status = "deleted".into();
+        row.apply_summary(&summary, 3000);
+        assert_eq!(row.status, "deleted");
     }
 }
