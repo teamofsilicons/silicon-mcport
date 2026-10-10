@@ -284,7 +284,7 @@ pub enum DirectoryCommand {
     },
     /// Add a personal directory entry that you own.
     #[command(
-        after_help = "Example: mcport directory new --input @entry.json\nInput: {\"name\":\"Team docs\",\"description\":\"Search our documentation\",\"category\":\"Documentation\",\"source_url\":\"https://provider.example\",\"template\":{\"transport\":\"http\",\"url\":\"https://provider.example/mcp\",\"auth_mode\":\"per-user\"}}\nNever include tokens, headers or environment credentials. Share it with directory share.\nRelated: mcport directory show --help, mcport directory set --help, mcport directory share --help"
+        after_help = "Example: mcport directory new --input @entry.json\nInput: {\"name\":\"Project docs\",\"description\":\"Search our documentation\",\"category\":\"Documentation\",\"source_url\":\"https://provider.example\",\"template\":{\"transport\":\"http\",\"url\":\"https://provider.example/mcp\",\"auth_mode\":\"per-user\"}}\nNever include tokens, headers or environment credentials. Share it with directory share.\nRelated: mcport directory show --help, mcport directory set --help, mcport directory share --help"
     )]
     New {
         /// Complete entry object as inline JSON, @file, or - for stdin.

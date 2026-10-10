@@ -1513,6 +1513,52 @@ mod tests {
     }
 
     #[test]
+    fn bundled_docs_describe_silicon_accounts_and_silicon_apps_only() {
+        for topic in [DocsTopic::Usage, DocsTopic::Development] {
+            let text = topic.content();
+            let words: Vec<&str> = text
+                .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+                .collect();
+            for removed in [
+                "IAM",
+                "iam",
+                "Honeycomb",
+                "honeycomb",
+                "org",
+                "organization",
+                "organizations",
+                "principal",
+            ] {
+                assert!(
+                    !words.contains(&removed),
+                    "`mcport docs {}` mentions {removed}",
+                    topic.name()
+                );
+            }
+            for removed in ["--test", "app-bound", "session ls", "--principal"] {
+                assert!(
+                    !text.contains(removed),
+                    "`mcport docs {}` mentions {removed}",
+                    topic.name()
+                );
+            }
+        }
+        let usage = DocsTopic::Usage.content();
+        for needed in [
+            "mcport login",
+            "silicon-accounts login --app mcport -q | mcport login --slt-stdin",
+            "mcport login status --json",
+            "mcport logout",
+            "mcport accounts --json",
+            "silicon-apps install mcport",
+            "mcport host migrate",
+            "mcport allow add",
+        ] {
+            assert!(usage.contains(needed), "usage guide lacks {needed}");
+        }
+    }
+
+    #[test]
     fn json_arguments_require_object_and_support_file() {
         assert!(input_object("[]").is_err());
         assert!(input_object("invalid").is_err());
