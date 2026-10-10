@@ -98,5 +98,7 @@
     "public_id_missing": 6,
     "missing": 4,
     "matching_current_handle": 12
-  }
+  },
+  "native_candidate_build_profile": "unoptimized development profile; debug information disabled",
+  "task_owned_development_processes": "stopped after final state backup"
 }
