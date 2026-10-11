@@ -25,27 +25,17 @@ pub struct Store {
     pub directory: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
-    #[serde(default = "default_telemetry")]
-    pub telemetry: bool,
     pub backend_url: Option<String>,
     /// Silicon Accounts for this home (development and test deployments).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts_url: Option<String>,
-}
-
-fn default_telemetry() -> bool {
-    true
-}
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            telemetry: true,
-            backend_url: None,
-            accounts_url: None,
-        }
-    }
+    /// Keys earlier releases wrote, such as the `telemetry` preference of 0.3 and
+    /// earlier, kept verbatim: nothing reads them, and an older mcport reading this
+    /// file after a downgrade still finds its own setting.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -297,6 +287,28 @@ mod tests {
             store
                 .legacy_sessions_path("https://one.test")
                 .ends_with(format!("sessions/{}.json", context_key("https://one.test")))
+        );
+    }
+    #[test]
+    fn settings_of_earlier_releases_load_and_keep_their_keys() {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store::at(home.path().into()).unwrap();
+        fs::create_dir_all(&store.directory).unwrap();
+        write_protected(
+            &store.directory.join("settings.json"),
+            &json!({"telemetry":false,"backend_url":"https://api.example"}),
+        )
+        .unwrap();
+        let mut settings = store.settings().unwrap();
+        assert_eq!(settings.backend_url.as_deref(), Some("https://api.example"));
+        settings.accounts_url = Some("https://accounts.example".into());
+        store.save_settings(&settings).unwrap();
+        let saved: Value = read_optional(&store.directory.join("settings.json"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved,
+            json!({"telemetry":false,"backend_url":"https://api.example","accounts_url":"https://accounts.example"})
         );
     }
     #[test]

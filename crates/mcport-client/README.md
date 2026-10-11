@@ -11,7 +11,7 @@ The Rust package for Silicon MCPort. The `mcport` CLI is built on it, so everyth
 - `local`: explicit host registries and the embedded host daemon.
 
 ```toml
-mcport-client = { version = "0.3.0", features = ["session", "local"] }
+mcport-client = { version = "0.4.0", features = ["session", "local"] }
 ```
 
 ## Sign in and call a tool
@@ -87,7 +87,8 @@ ended it removes the file and returns `SignInError::SignInEnded` with the reason
 
 Connections, sharing (`grant_access` by `c:`/`si:` id, `allow` lists for Silicons), provider accounts (including a
 Silicon's, for its custodian), tool policies, tools, resources, prompts, completions, hosts, activity, cancellation,
-result assets and one-time download links, directory entries and their shares, settings, reports and telemetry.
+result assets and one-time download links, directory entries and their shares, and bug reports. MCPort records no
+telemetry: every request sends `X-MCPort-Telemetry: off`, and the deprecated `set_telemetry`/`telemetry` do nothing.
 `discovery()` needs no token; `me()` returns the signed-in account as MCPort sees it. Results keep complete JSON;
 `result.isError` is a tool failure even when HTTP succeeded. `tool` walks discovery pages; other paged methods return
 `nextCursor` unchanged.

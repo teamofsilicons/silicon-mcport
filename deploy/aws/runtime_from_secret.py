@@ -27,14 +27,18 @@ FIXED = {
     'MCPORT_WEB_URL': 'https://mcport.teamofsilicons.com',
 }
 OPTIONAL = {
-    'MCPORT_MASTER_KEY', 'MCPORT_ACCOUNTS_WEBHOOK_SECRET', 'MCPORT_TELEMETRY_KEY',
+    'MCPORT_MASTER_KEY', 'MCPORT_ACCOUNTS_WEBHOOK_SECRET',
     'POSTMARK_SERVER_TOKEN', 'MCPORT_REPORT_FROM', 'ACCOUNTS_API_URL',
 }
+# Keys of earlier releases that a secret may still hold: accepted, never written.
+# MCPort records no telemetry since 0.4.0.
+RETIRED = {'MCPORT_TELEMETRY_KEY', 'MCPORT_TELEMETRY_URL'}
 
 
 def render_runtime(payload):
-    if not isinstance(payload, dict) or set(payload) - (OPTIONAL | {'MCPORT_APP_SECRET'}):
+    if not isinstance(payload, dict) or set(payload) - (OPTIONAL | RETIRED | {'MCPORT_APP_SECRET'}):
         raise ValueError('unsupported runtime keys')
+    payload = {key: value for key, value in payload.items() if key not in RETIRED}
     if not payload.get('MCPORT_APP_SECRET'):
         raise ValueError('application secret required')
     for key, value in payload.items():

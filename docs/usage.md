@@ -177,5 +177,5 @@ For recoverable calls, supply `--idempotency-key <unique-operation-id>`: the sam
 a different one conflicts. A timeout, lost response or restart can leave an unknown outcome; inspect activity and the
 provider before acting again. Cancellation cannot undo completed changes.
 
-Telemetry is off with `mcport config set telemetry false`. Bug reports use `mcport report 'reproduction details' [--pr
+MCPort records no telemetry. Bug reports use `mcport report 'reproduction details' [--pr
 https://github.com/.../pull/1]`; never include credentials or private MCP content.

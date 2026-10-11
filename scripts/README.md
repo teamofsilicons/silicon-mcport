@@ -71,7 +71,7 @@ On a Mac with Apple silicon:
 
 ```sh
 cargo build --locked --release -p mcport-cli
-scripts/package-apps.sh 0.3.0 macos-aarch64 target/release/mcport
+scripts/package-apps.sh 0.4.0 macos-aarch64 target/release/mcport
 ```
 
 A Linux archive from any machine, built static with Zig (on a Mac the script cannot run
@@ -81,7 +81,7 @@ the Linux binary, says so and packs it; CI runs the checks on Linux):
 python3 -m pip install 'cargo-zigbuild==0.23.4' 'ziglang==0.15.2'
 rustup target add x86_64-unknown-linux-musl
 cargo zigbuild --locked --release -p mcport-cli --target x86_64-unknown-linux-musl
-scripts/package-apps.sh 0.3.0 linux-x86_64 target/x86_64-unknown-linux-musl/release/mcport
+scripts/package-apps.sh 0.4.0 linux-x86_64 target/x86_64-unknown-linux-musl/release/mcport
 ```
 
 ## Release workflow
@@ -118,13 +118,13 @@ Sign in to Silicon Apps as an author of `mcport`, then, from the downloaded arti
 
 ```sh
 sha256sum -c SHA256SUMS
-silicon-apps upload mcport --target linux-x86_64 mcport-0.3.0-linux-x86_64.tar.gz
-silicon-apps upload mcport --target linux-i686 mcport-0.3.0-linux-i686.tar.gz
-silicon-apps upload mcport --target linux-aarch64 mcport-0.3.0-linux-aarch64.tar.gz
-silicon-apps upload mcport --target linux-armv7hf mcport-0.3.0-linux-armv7hf.tar.gz
+silicon-apps upload mcport --target linux-x86_64 mcport-0.4.0-linux-x86_64.tar.gz
+silicon-apps upload mcport --target linux-i686 mcport-0.4.0-linux-i686.tar.gz
+silicon-apps upload mcport --target linux-aarch64 mcport-0.4.0-linux-aarch64.tar.gz
+silicon-apps upload mcport --target linux-armv7hf mcport-0.4.0-linux-armv7hf.tar.gz
 silicon-apps packages mcport
-silicon-apps release mcport --version 0.3.0 --package <id> --package <id> --package <id> --package <id>
-silicon-apps promote mcport <development-release-id> --version 0.3.0
+silicon-apps release mcport --version 0.4.0 --package <id> --package <id> --package <id> --package <id>
+silicon-apps promote mcport <development-release-id> --version 0.4.0
 ```
 
 Every upload is validated again on its target's worker. A development release installs
@@ -140,6 +140,6 @@ service-only bundle with `scripts/package_backend.py`; [the deploy guide](../dep
 installs it. The [systemd unit](../deploy/mcport.service) runs `mcport-server` from
 `/opt/mcport/current` as the `mcport` user, keeps state in `/var/lib/mcport` and reads
 `/etc/mcport/runtime.env` (Silicon Accounts URL, the `mcport` app secret, the webhook
-secret, Postmark and telemetry keys; fields in `deploy/environment.example`). HTTPS
+secret and Postmark keys; fields in `deploy/environment.example`). HTTPS
 proxying to loopback port 4380 sits in front. The website deploys separately to Vercel
 ([deploy/vercel.md](../deploy/vercel.md)).

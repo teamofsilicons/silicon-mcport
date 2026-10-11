@@ -17,7 +17,6 @@ mod state;
 mod store;
 #[cfg(test)]
 mod test_support;
-mod tls;
 mod uuid_backfill;
 use axum::{
     Json, Router,
@@ -182,7 +181,6 @@ fn router(app: App) -> Router {
     .route("/api/{*unknown}",get(not_found).post(not_found))
     .route("/api/v1/settings",get(operations::get_settings).patch(operations::update_settings))
     .route("/api/v1/reports",post(operations::report))
-    .route("/api/v1/telemetry",post(operations::telemetry))
     .route("/api/v1/allow",get(allowances::list).post(allowances::add))
     .route("/api/v1/allow/{account}",delete(allowances::remove))
     .route("/api/v1/directory",get(directory::list).post(directory::create))
@@ -228,7 +226,6 @@ async fn serve(config: Config) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!(e.1.message))?;
     directory::seed(&app).map_err(|e| anyhow::anyhow!(e.1.message))?;
     execution::recover(&app).map_err(|e| anyhow::anyhow!(e.1.message))?;
-    operations::init_telemetry(&app);
     let shutdown = tokio_util::sync::CancellationToken::new();
     let worker = tokio::spawn(operations::report_worker(app.clone(), shutdown.clone()));
     let account_worker = tokio::spawn(accounts::account_worker(app.clone(), shutdown.clone()));
@@ -276,7 +273,6 @@ async fn serve(config: Config) -> anyhow::Result<()> {
 }
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tls::initialize()?;
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

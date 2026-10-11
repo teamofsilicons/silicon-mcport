@@ -19,9 +19,9 @@ session = ["accounts", "dep:fs2"]
 local = ["dep:mcport-daemon", "dep:mcport-mcp", "dep:serde_json", "dep:thiserror", "dep:fs2", "dep:tokio", "dep:tokio-util"]
 
 [dependencies]
-mcport-api = { path = "../mcport-api", version = "0.3.0" }
-mcport-daemon = { path = "../mcport-daemon", version = "0.3.0", optional = true }
-mcport-mcp = { path = "../mcport-mcp", version = "0.3.0", optional = true }
+mcport-api = { path = "../mcport-api", version = "0.4.0" }
+mcport-daemon = { path = "../mcport-daemon", version = "0.4.0", optional = true }
+mcport-mcp = { path = "../mcport-mcp", version = "0.4.0", optional = true }
 silicon-accounts-client = { version = "0.4.0", optional = true }
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "form"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

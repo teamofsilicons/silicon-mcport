@@ -4,7 +4,7 @@
 Starts tests/e2e/accounts_fake.py, then the MCP fixtures and mcport-server through scripts/dev_accounts.py (the same
 code that runs MCPort against a real local Silicon Accounts stack), all on loopback ports: a free block of four by
 default (website, service, providers, Silicon Accounts), or --base. Homes and data are fresh, under the run
-directory. Never touches production Silicon Accounts, Postmark or Space Station, and prints only fixture data.
+directory. Never touches production Silicon Accounts or Postmark, and prints only fixture data.
 
     python3 tests/e2e/run.py [--no-build] [--run-dir NEW_DIR] [--base PORT]
 
@@ -35,7 +35,7 @@ import directory_journey  # noqa: E402
 OPENER = build_opener(ProxyHandler({}))
 # Variables that would point the development stack somewhere else than the fake.
 FOREIGN = ("ACCOUNTS_URL", "ACCOUNTS_API_URL", "MCPORT_APP_SECRET", "MCPORT_TEST_STACK", "MCPORT_DEV_DIR", "MCPORT_DEV_PIDS",
-           "MCPORT_DEV_BASE", "MCPORT_URL", "MCPORT_SERVER_BIN", "POSTMARK_SERVER_TOKEN", "MCPORT_TELEMETRY_KEY", "SPACE_STATION_API_KEY")
+           "MCPORT_DEV_BASE", "MCPORT_URL", "MCPORT_SERVER_BIN", "POSTMARK_SERVER_TOKEN")
 
 
 def free_block(size=4):
@@ -610,8 +610,11 @@ class Journey:
                    gone["error"]["code"] == "account_deleted" and grants == [])
 
     def operations(self):
-        self.cli("owner", "config", "set", "telemetry", "false")
-        self.check("Telemetry can be explicitly disabled", self.cli("owner", "config", "show")["telemetry"] is False)
+        removed = self.cli("owner", "config", "set", "telemetry", "false")
+        self.check("MCPort records no telemetry: the 0.3 setting is a no-op and the settings endpoint stores nothing",
+                   removed["telemetry"] == "removed" and "telemetry" not in self.cli("owner", "config", "show")
+                   and request(self.backend + "/api/v1/settings", method="PATCH", body={"telemetry": True},
+                               headers={"Authorization": "Bearer " + self.access_token("owner")[1]["access_token"]})["data"] == {})
         report = self.cli("owner", "report", "Fixture report with no mail configuration", expected=False)
         self.check("Missing Postmark configuration is not silent success", report["status"] == "delivery_failed" and bool(report["id"]))
         database = (self.directory / "dev" / "server" / "mcport.sqlite").as_uri() + "?mode=ro"

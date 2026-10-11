@@ -153,10 +153,10 @@ pub enum Command {
         after_help = "Example: mcport daemon status\nActs on the host registries of this home and backend.\nRelated: mcport host new --help, mcport daemon start --help, mcport host migrate --help"
     )]
     Daemon(DaemonCommand),
-    /// View local settings or change home, backend, Silicon Accounts URL and telemetry.
+    /// View local settings or change home, backend and Silicon Accounts URL.
     #[command(
         subcommand,
-        after_help = "Example: mcport config set backend https://your-mcport-backend.example\nSettings choose the backend, Silicon Accounts and telemetry; home chooses an existing storage base.\nRelated: mcport config show, mcport config set --help, mcport config home --help"
+        after_help = "Example: mcport config set backend https://your-mcport-backend.example\nSettings choose the backend and Silicon Accounts; home chooses an existing storage base.\nRelated: mcport config show, mcport config set --help, mcport config home --help"
     )]
     Config(ConfigCommand),
     /// Read the bundled usage or development guide, offline and without signing in.
@@ -809,14 +809,14 @@ pub enum ConfigCommand {
         after_help = "Example: mcport config show --json\nRelated: mcport config set --help, mcport config home --help, mcport accounts --json"
     )]
     Show,
-    /// Save the backend URL, the Silicon Accounts URL or the telemetry setting for this home.
+    /// Save the backend URL or the Silicon Accounts URL for this home.
     #[command(
-        after_help = "Example: mcport config set backend https://your-mcport-backend.example\nSilicon Accounts: mcport config set accounts https://accounts.example (sign in again afterwards)\nTelemetry: mcport config set telemetry false\nKeys: backend (also url, backend_url), accounts (also accounts_url), telemetry. --backend/MCPORT_URL and --accounts-url/ACCOUNTS_URL override the saved values.\nRelated: mcport config show, mcport config home --help, mcport accounts"
+        after_help = "Example: mcport config set backend https://your-mcport-backend.example\nSilicon Accounts: mcport config set accounts https://accounts.example (sign in again afterwards)\nKeys: backend (also url, backend_url), accounts (also accounts_url). --backend/MCPORT_URL and --accounts-url/ACCOUNTS_URL override the saved values.\nRelated: mcport config show, mcport config home --help, mcport accounts"
     )]
     Set {
-        /// Setting name: backend, accounts or telemetry.
+        /// Setting name: backend or accounts.
         key: String,
-        /// URL (https, or http on this machine), or true/false for telemetry.
+        /// URL (https, or http on this machine).
         value: String,
     },
 }

@@ -7,18 +7,6 @@ use sha2::{Digest, Sha256};
 const ALPHABET: &[u8; 62] = b"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 pub const INITIAL_CURSOR: &str = "aaa";
 
-/// Keep telemetry's UUID contract separate from public locator formatting.
-pub fn correlation_id(public_id: &str) -> uuid::Uuid {
-    if let Ok(legacy) = uuid::Uuid::parse_str(public_id) {
-        return legacy;
-    }
-    let mut hash = Sha256::new();
-    hash.update(b"mcport-invocation-telemetry-v1:");
-    hash.update(public_id.as_bytes());
-    let digest = hash.finalize();
-    uuid::Builder::from_custom_bytes(digest[..16].try_into().unwrap()).into_uuid()
-}
-
 pub struct Cursor(Vec<u8>);
 impl Cursor {
     pub fn parse(value: &str) -> Result<Self> {
@@ -141,15 +129,5 @@ mod tests {
             assert_eq!(cursor.encoded(), "a".repeat(width + 1));
             assert_eq!(cursor.public_id(&[8; 32]).len(), width + 1);
         }
-    }
-
-    #[test]
-    fn telemetry_keeps_legacy_uuids_and_stable_distinct_compact_correlations() {
-        let legacy = uuid::Uuid::new_v4();
-        assert_eq!(correlation_id(&legacy.to_string()), legacy);
-        assert_eq!(correlation_id("aB3"), correlation_id("aB3"));
-        assert_ne!(correlation_id("aB3"), correlation_id("aB4"));
-        assert_ne!(correlation_id("aB3"), correlation_id("aaB3"));
-        assert_eq!(correlation_id("aB3").get_version_num(), 8);
     }
 }

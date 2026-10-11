@@ -2,7 +2,7 @@
 # Package one target of the mcport CLI for Silicon Apps:
 #
 #   scripts/package-apps.sh [options] VERSION TARGET BINARY
-#   scripts/package-apps.sh 0.3.0 linux-x86_64 target/x86_64-unknown-linux-musl/release/mcport
+#   scripts/package-apps.sh 0.4.0 linux-x86_64 target/x86_64-unknown-linux-musl/release/mcport
 #
 # Writes dist/apps/mcport-VERSION-TARGET.tar.gz and its .sha256 after the binary
 # answered --help, accounts --json and login status --json in an empty home

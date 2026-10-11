@@ -584,12 +584,11 @@ class Run:
         removed = self.mc("c1", "host", "rm", host["host"]["id"])
         self.check("host rm deletes the host and stops its daemon", removed.get("deleted") is True, removed)
 
-        # Settings are per account; a bug report with no mail service configured is not a silent success.
+        # MCPort records no telemetry; a bug report with no mail service configured is not a silent success.
         setting = self.mc("c1", "config", "set", "telemetry", "false")
         mine = self.api("GET", "/api/v1/settings", self.session_access_token("c1"), expect=200)[1]["data"]
-        theirs = self.api("GET", "/api/v1/settings", self.session_access_token("s1"), expect=200)[1]["data"]
-        self.check("Telemetry switched off for the Carbon only (settings are per account)",
-                   setting["server_updated"] is True and mine["telemetry"] is False and theirs["telemetry"] is True, [mine, theirs])
+        self.check("The 0.3 telemetry setting is a no-op and the settings endpoint is empty",
+                   setting["telemetry"] == "removed" and mine == {}, [setting, mine])
         report = self.mc("c1", "report", f"End-to-end report {self.n}: nothing is wrong; this checks the report path.", ok=False)
         self.check("A report without a configured mail service is recorded and says delivery_failed",
                    report.get("status") == "delivery_failed" and bool(report.get("id")), report)

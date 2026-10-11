@@ -591,13 +591,20 @@ mod tests {
         let ada_connection = body["data"]["id"].as_str().unwrap().to_owned();
         f.as_("Ada", "POST", "/api/v1/hosts", Some(json!({"name":"mac"})))
             .await;
-        f.as_(
-            "Ada",
-            "PATCH",
-            "/api/v1/settings",
-            Some(json!({"telemetry":false})),
-        )
-        .await;
+        // A settings row as releases before 0.4.0 stored it.
+        f.app
+            .store
+            .put(
+                "settings",
+                &crate::operations::settings_key("Ada"),
+                crate::store::ENV,
+                "Ada",
+                "Ada",
+                None,
+                &json!({"telemetry":false}),
+                None,
+            )
+            .unwrap();
         f.as_(
             "Ada",
             "POST",

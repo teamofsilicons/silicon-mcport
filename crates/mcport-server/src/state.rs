@@ -34,7 +34,7 @@ pub fn id() -> String {
 
 pub const DEFAULT_ACCOUNTS_URL: &str = "https://accounts.teamofsilicons.com";
 /// Variables earlier releases read. They are ignored; boot warns when one is set.
-const REMOVED_VARIABLES: [&str; 8] = [
+const REMOVED_VARIABLES: [&str; 10] = [
     "MCPORT_IAM_URL",
     "MCPORT_IAM_WEB_URL",
     "MCPORT_WEBHOOK_SECRET",
@@ -43,6 +43,9 @@ const REMOVED_VARIABLES: [&str; 8] = [
     "MCPORT_TEST_APP_SECRETS",
     "MCPORT_TEST_TELEMETRY_KEYS",
     "ACCOUNTS_ISSUER",
+    // MCPort records no telemetry since 0.4.0.
+    "MCPORT_TELEMETRY_KEY",
+    "MCPORT_TELEMETRY_URL",
 ];
 
 /// Service configuration. `Debug` redacts the secrets it holds (app secret, webhook

@@ -116,6 +116,10 @@ impl CliError {
 
 type Result<T> = std::result::Result<T, CliError>;
 
+/// What `mcport config set telemetry <value>` prints: MCPort records no telemetry.
+const TELEMETRY_REMOVED: &str =
+    "Telemetry was removed from MCPort; there is nothing to turn on or off.";
+
 fn main() {
     let cli = Cli::parse();
     let machine = cli.json;
@@ -135,6 +139,17 @@ fn main() {
         }
         Command::Accounts | Command::Iam => {
             finish(Ok(signin::accounts_json(&cli)), machine);
+        }
+        // Accepted for scripts written for 0.3 and earlier. Reads no home, calls no service.
+        Command::Config(ConfigCommand::Set { key, .. }) if key == "telemetry" => {
+            if !machine {
+                println!("{TELEMETRY_REMOVED}");
+                return;
+            }
+            finish(
+                Ok(json!({"telemetry":"removed","note":TELEMETRY_REMOVED})),
+                machine,
+            );
         }
         Command::Login(LoginArgs {
             action: Some(LoginAction::Status { offline }),
@@ -214,11 +229,11 @@ fn value<T: Serialize>(item: T) -> Result<Value> {
     Ok(serde_json::to_value(item)?)
 }
 
-fn request_context(session: &StoredSignIn, telemetry: bool) -> RequestContext {
+fn request_context(session: &StoredSignIn) -> RequestContext {
     RequestContext {
         access_token: Some(session.access_token.expose().to_owned()),
         isi: std::env::var("ISI").ok().filter(|v| !v.is_empty()),
-        telemetry: Some(telemetry),
+        ..RequestContext::default()
     }
 }
 
@@ -255,32 +270,13 @@ async fn run(cli: Cli) -> Result<Value> {
             let signed_in = signin::stored(&store, &backend)
                 .map(|s| json!({"uuid":s.account.uuid,"id":s.account.id,"kind":s.account.kind}));
             Ok(
-                json!({"home":store.home,"directory":store.directory,"telemetry":settings.telemetry,"backend_url":backend,"accounts_url":target.accounts_url,"app_id":target.app_id,"signed_in":signed_in}),
+                json!({"home":store.home,"directory":store.directory,"backend_url":backend,"accounts_url":target.accounts_url,"app_id":target.app_id,"signed_in":signed_in}),
             )
         }
         Command::Config(ConfigCommand::Set {
             key,
             value: setting,
         }) => match key.as_str() {
-            "telemetry" => {
-                settings.telemetry = setting.parse::<bool>().map_err(|_| {
-                    CliError::Input(
-                        "Telemetry must be true or false: mcport config set telemetry false".into(),
-                    )
-                })?;
-                store.save_settings(&settings)?;
-                let signed_in = signin::stored(&store, &backend).is_some();
-                if signed_in {
-                    let session = signin::signed_in(&store, &backend, false).await?;
-                    client
-                        .set_telemetry(
-                            &request_context(&session, settings.telemetry),
-                            settings.telemetry,
-                        )
-                        .await?;
-                }
-                Ok(json!({"telemetry":settings.telemetry,"server_updated":signed_in}))
-            }
             "url" | "backend" | "backend_url" => {
                 let validated = Client::new(&setting)?;
                 settings.backend_url = Some(validated.backend_url());
@@ -298,7 +294,7 @@ async fn run(cli: Cli) -> Result<Value> {
                 )
             }
             _ => Err(CliError::Input(format!(
-                "Unknown setting {key}. Supported settings: backend, accounts, telemetry. Use mcport config home <location> to change the storage home."
+                "Unknown setting {key}. Supported settings: backend, accounts. Use mcport config home <location> to change the storage home."
             ))),
         },
         Command::MigrateAccountUuids { file, apply } => {
@@ -307,7 +303,7 @@ async fn run(cli: Cli) -> Result<Value> {
         Command::Daemon(command) => local::daemon_command(&store, &backend, command).await,
         command => {
             let session = signin::signed_in(&store, &backend, false).await?;
-            let context = request_context(&session, settings.telemetry);
+            let context = request_context(&session);
             let first = dispatch(&client, &context, &store, &session, command.clone()).await;
             match first {
                 // The service refused the token itself (expired early by clock skew, or a
@@ -319,7 +315,7 @@ async fn run(cli: Cli) -> Result<Value> {
                         && signin::RETRY_CODES.iter().any(|code| error.is_code(code)) =>
                 {
                     let session = signin::signed_in(&store, &backend, true).await?;
-                    let context = request_context(&session, settings.telemetry);
+                    let context = request_context(&session);
                     dispatch(&client, &context, &store, &session, command).await
                 }
                 other => other,
@@ -436,75 +432,7 @@ impl ConnectionDraft {
     }
 }
 
-fn operation(command: &Command) -> &'static str {
-    match command {
-        Command::Directory(DirectoryCommand::Ls { .. }) => "directory.list",
-        Command::Directory(DirectoryCommand::Show { .. } | DirectoryCommand::Access { .. }) => {
-            "directory.read"
-        }
-        Command::Directory(DirectoryCommand::New { .. }) => "directory.create",
-        Command::Directory(
-            DirectoryCommand::Set { .. }
-            | DirectoryCommand::Share { .. }
-            | DirectoryCommand::Unshare { .. },
-        ) => "directory.update",
-        Command::Directory(DirectoryCommand::Rm { .. }) => "directory.delete",
-        Command::Connection(ConnectionCommand::New { .. } | ConnectionCommand::Register { .. }) => {
-            "connection.create"
-        }
-        Command::Connection(ConnectionCommand::Ls) => "connection.list",
-        Command::Connection(ConnectionCommand::Show { .. }) => "connection.read",
-        Command::Connection(ConnectionCommand::Set { .. }) => "connection.update",
-        Command::Connection(ConnectionCommand::Rm { .. }) => "connection.delete",
-        Command::Tool(ToolCommand::Call { .. }) => "tool.call",
-        Command::Tool(ToolCommand::Set { .. }) => "tool.policy",
-        Command::Tool(_) => "tool.list",
-        Command::Account(AccountCommand::Disconnect { .. }) => "account.disconnect",
-        Command::Account(_) => "account.connect",
-        Command::Access(AccessCommand::Rm { .. }) | Command::Allow(AllowCommand::Rm { .. }) => {
-            "access.revoke"
-        }
-        Command::Access(_) | Command::Allow(_) => "access.grant",
-        Command::Host(_) => "host.register",
-        Command::Resource(ResourceCommand::Read { .. }) => "resource.read",
-        Command::Resource(_) => "resource.list",
-        Command::Prompt(PromptCommand::Get { .. }) => "prompt.get",
-        Command::Prompt(_) => "prompt.list",
-        Command::Completion(_) => "completion.complete",
-        Command::Activity(ActivityCommand::Cancel { .. }) => "activity.cancel",
-        Command::Activity(_) | Command::Asset(_) => "activity.read",
-        Command::Report { .. } => "report.submit",
-        _ => "navigation",
-    }
-}
-
 async fn dispatch(
-    client: &Client,
-    ctx: &RequestContext,
-    store: &Store,
-    session: &StoredSignIn,
-    command: Command,
-) -> Result<Value> {
-    let operation = operation(&command);
-    let started = std::time::Instant::now();
-    let result = dispatch_inner(client, ctx, store, session, command).await;
-    if ctx.telemetry != Some(false) {
-        let failed = result.is_err()
-            || result.as_ref().is_ok_and(|value| {
-                value.pointer("/result/isError").and_then(Value::as_bool) == Some(true)
-            });
-        let event = json!({"source":"cli","operation":operation,"step":"complete","outcome":if failed {"failure"} else {"success"},"progress":1.0,"duration_ms":started.elapsed().as_millis().min(86_400_000) as u64,"correlation_id":uuid::Uuid::new_v4().to_string()});
-        // Telemetry cannot alter the operation's result or delay a short-lived CLI indefinitely.
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_millis(300),
-            client.telemetry(ctx, &event),
-        )
-        .await;
-    }
-    result
-}
-
-async fn dispatch_inner(
     client: &Client,
     ctx: &RequestContext,
     store: &Store,
@@ -1313,7 +1241,7 @@ mod tests {
         let ctx = RequestContext::authenticated("fixture");
         let file = directory.path().join("entry.json");
         std::fs::write(&file, r#"{"name":"Edited","category":"Docs"}"#).unwrap();
-        dispatch_inner(
+        dispatch(
             &client,
             &ctx,
             &store,
@@ -1337,7 +1265,7 @@ mod tests {
             "--dry-run",
         ])
         .unwrap();
-        let output = dispatch_inner(&client, &ctx, &store, &session, preview.command)
+        let output = dispatch(&client, &ctx, &store, &session, preview.command)
             .await
             .unwrap();
         assert_eq!(output["dry_run"], true);

@@ -12,6 +12,5 @@ MCPORT_BIND=127.0.0.1:4380
 MCPORT_PUBLIC_URL=https://your-mcport-host.example
 MCPORT_WEB_URL=https://your-mcport-website.example
 MCPORT_DATA_DIR=/var/lib/mcport
-MCPORT_TELEMETRY_KEY=
 POSTMARK_SERVER_TOKEN=
 MCPORT_REPORT_FROM=mcport@teamofsilicons.com

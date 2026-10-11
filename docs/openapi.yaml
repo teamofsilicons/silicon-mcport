@@ -1,13 +1,13 @@
 openapi: 3.1.0
 info:
   title: Silicon MCPort API
-  version: 0.3.0
+  version: 0.4.0
   summary: Configure MCP servers once and use their tools from the CLI, the Rust package and the website.
   description: >
     Success responses are `{"data": …}`; errors are `{"error": ApiError}`. Accounts are Silicon Accounts
     accounts: MCPort stores the permanent `uuid` and shows the current `id` (`c:…` or `si:…`). Wherever a
     request names an account it accepts a `c:`/`si:` id or a uuid. See API.md for the rules
-    (ownership, custodians, circles, sharing, revocation).
+    (ownership, custodians, circles, sharing, revocation). MCPort records no telemetry.
   license:
     name: MIT
 servers:
@@ -378,23 +378,16 @@ components:
         result: {}
         error: {oneOf: [{$ref: '#/components/schemas/ApiError'}, {type: 'null'}]}
     Settings:
+      description: There are no per-account settings; the object is empty.
       type: object
       additionalProperties: false
-      required: [telemetry]
-      properties:
-        telemetry: {type: boolean}
-    TelemetryInput:
+    LegacySettingsInput:
+      description: >
+        The body clients released before 0.4.0 send. `telemetry` is accepted and ignored; nothing is stored.
       type: object
       additionalProperties: false
-      required: [source, operation, step, outcome]
       properties:
-        source: {type: string, enum: [web, cli, daemon, backend, rust-client]}
-        operation: {type: string}
-        step: {type: string, enum: [start, validate, authorize, dispatch, provider, complete, render]}
-        outcome: {type: string, enum: [pending, success, failure, cancelled]}
-        progress: {type: [number, 'null'], minimum: 0, maximum: 1}
-        correlation_id: {type: [string, 'null'], format: uuid}
-        duration_ms: {type: [integer, 'null'], maximum: 86400000}
+        telemetry: {type: boolean, deprecated: true}
     ReportInput:
       type: object
       additionalProperties: false
@@ -715,19 +708,16 @@ paths:
   /api/v1/settings:
     get:
       tags: [operations]
+      description: Kept for clients released before 0.4.0.
       responses:
         '200': {description: Settings, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Settings'}}}}}}
     patch:
       tags: [operations]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Settings'}}}}
+      deprecated: true
+      description: Kept for clients released before 0.4.0; a no-op that stores nothing.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/LegacySettingsInput'}}}}
       responses:
         '200': {description: Settings, content: {application/json: {schema: {type: object, properties: {data: {$ref: '#/components/schemas/Settings'}}}}}}
-  /api/v1/telemetry:
-    post:
-      tags: [operations]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TelemetryInput'}}}}
-      responses:
-        '200': {description: '`{recorded: boolean}`'}
   /api/v1/reports:
     post:
       tags: [operations]

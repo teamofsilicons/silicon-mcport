@@ -1,6 +1,6 @@
 # MCPort API contract
 
-API contract **0.3.0** (`GET /health` and `GET /api/v1/discovery` report it as `version`). Application endpoints use
+API contract **0.4.0** (`GET /health` and `GET /api/v1/discovery` report it as `version`). Application endpoints use
 `/api/v1`. Success is `{ "data": value }`; errors use an HTTP failure status and
 `{ "error": {"code", "message", "recovery": string|null, "outcome_unknown": boolean} }`. Raw asset downloads are the
 exception. Public DTOs live in `mcport-core`; timestamps are Unix seconds. Lists return arrays in `data`. Connection and
@@ -11,8 +11,8 @@ New connection, host, invocation/job, report and directory IDs use case-sensitiv
 starting at three characters. These resource types share one persistent namespace per database. After all 238,328
 three-character values have been used or reserved, IDs grow to four characters, then continue growing only after each
 complete width is exhausted. Deleted IDs are never reused. Treat IDs as opaque locators, not secrets: authorization is
-still required. Existing UUID and legacy invocation IDs remain valid. Account uuids, tokens, OAuth state and telemetry
-UUIDs keep their own formats.
+still required. Existing UUID and legacy invocation IDs remain valid. Account uuids, tokens and OAuth state keep their
+own formats.
 
 ## Accounts and authentication
 
@@ -38,8 +38,9 @@ Authentication errors (401): `authentication_required` (no bearer token), `token
 `wrong_issuer`, `unknown_signing_key`, `token_not_yet_valid`, `invalid_token`, `signed_out` (issued before a
 revocation), `account_deleted`, `sign_in_revoked` (live check failed). 503 `accounts_unavailable` means MCPort could
 not reach Silicon Accounts. Naming accounts costs lookups: each account may have 30 ids resolved per minute (429
-`too_many_lookups` beyond). `X-MCPort-ISI` supplies optional audit context. `X-MCPort-Telemetry: false` suppresses
-diagnostic events for that request. JSON writes require `Content-Type: application/json`.
+`too_many_lookups` beyond). `X-MCPort-ISI` supplies optional audit context. MCPort records no telemetry; clients send
+`X-MCPort-Telemetry: off` so services released before 0.4.0 record nothing either, and 0.4.0 ignores the header. JSON
+writes require `Content-Type: application/json`.
 
 | Method and path | Request and response |
 |---|---|
@@ -192,11 +193,11 @@ daemon still uses its old registry, `principal_id` is the caller's pre-0.3.0 id 
 otherwise `principal_id` is the uuid and `org_id` is empty. A daemon that keys personal accounts by uuid reports
 `capabilities.registry_version = 2`. The `X-MCPort-Test` header of older daemons is ignored.
 
-## Settings, telemetry and reports
+## Settings and reports
 
-- GET/PATCH `/settings` → `{telemetry:boolean}`; default true, per account.
-- POST `/telemetry` `{source,operation,step,outcome,progress?,correlation_id?,duration_ms?}` → `{recorded:boolean}`.
-  Fixed allowlists; no tool input, result, credential or free text. Events carry the account uuid and kind.
+- GET/PATCH `/settings` → `{}`. Kept for clients released before 0.4.0: there are no per-account settings, and PATCH
+  accepts their `{telemetry:boolean}` body, stores nothing and answers `{}`. `POST /telemetry` was removed in 0.4.0
+  (404 `not_found`).
 - POST `/reports` `{message,pr?:string}` → `{id,status,delivery_detail,repository_url}`. The maintainers' email names the
   reporter by current id and uuid. Text that looks like a credential (bearer tokens, `sar_`, `sap_`, `whsec_`, STKs,
   JWTs, older MCPort tokens) is refused.

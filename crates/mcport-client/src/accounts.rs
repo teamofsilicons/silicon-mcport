@@ -503,7 +503,7 @@ impl SignIn {
         let client = AccountsClient::builder()
             .base_url(base.as_str())
             .user_agent(agent)
-            // MCPort sends its own opt-out telemetry; nothing goes to Accounts' sink.
+            // MCPort records no telemetry, and the Accounts client's own stays off.
             .telemetry(false)
             .build()
             .map_err(|e| configuration(e.message()))?;

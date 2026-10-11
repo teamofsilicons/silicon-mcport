@@ -16,7 +16,7 @@ This server bundle is separate from the `mcport` CLI packages distributed throug
 Silicon Apps. No host, DNS name, runtime credentials, production upload or
 deployment has been selected or performed by this workflow. `/health` proves
 process/version readiness; it does not prove Silicon Accounts sign-in, provider
-calls, mail delivery or telemetry ingestion.
+calls or mail delivery. MCPort records no telemetry.
 
 ## Prepare and inspect
 
@@ -46,7 +46,7 @@ owned by root, mode0600; and the `mcport` user/group. Populate the environment f
 the deployment secret store, using `environment.example` in the source checkout
 as the field reference. Set the exact external HTTPS origin, `ACCOUNTS_URL`, the
 `mcport` app secret from Silicon Accounts (`MCPORT_APP_SECRET`), the webhook secret
-(`MCPORT_ACCOUNTS_WEBHOOK_SECRET`) and environment-specific delivery/telemetry keys.
+(`MCPORT_ACCOUNTS_WEBHOOK_SECRET`) and the environment's mail delivery keys.
 The service refuses to start, with a message naming the variable, when the app
 secret is missing or an Accounts URL is not https.
 The installer requires explicit `MCPORT_DATA_DIR=/var/lib/mcport` and
@@ -103,7 +103,7 @@ Run one gateway instance per database; this release has no distributed leases.
 
 After installing, separately prove real Carbon and Silicon sign-in, a useful shared
 and local-host provider call, permission revocation, authorized downloads, a
-delivered Silicon Accounts webhook, and mail/telemetry delivery where enabled. Check `journalctl -u
+delivered Silicon Accounts webhook, and mail delivery where enabled. Check `journalctl -u
 mcport.service` without copying secrets or provider payloads into public logs.
 
 ## Backup, failed cutover and recovery

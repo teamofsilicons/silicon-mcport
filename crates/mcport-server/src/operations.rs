@@ -1,71 +1,44 @@
-//! User settings, bounded diagnostic events and durable production bug-mail delivery.
+//! The retained settings endpoint and durable production bug-mail delivery.
+//! MCPort records no telemetry.
 use crate::{
-    accounts::AccountRow,
     auth::Auth,
     error::{Error, Result},
     state::{App, hash, now},
     store::ENV,
 };
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 const REPOSITORY: &str = "https://github.com/teamofsilicons/silicon-mcport";
 const RECIPIENTS: &str = "saketdev12@gmail.com,shubhastro2@gmail.com";
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Settings {
-    pub telemetry: bool,
-}
-impl Default for Settings {
-    fn default() -> Self {
-        Self { telemetry: true }
-    }
-}
-
+/// Key of an account's row in the `settings` kind. Releases before 0.4.0 stored a
+/// telemetry preference there; the rows stay (re-keying and account deletion still
+/// handle them) but nothing reads or writes them any more.
 pub fn settings_key(uuid: &str) -> String {
     hash(&json!([uuid]).to_string())
 }
-fn settings(app: &App, uuid: &str) -> Result<Settings> {
-    Ok(app
-        .store
-        .get("settings", &settings_key(uuid))?
-        .unwrap_or_default())
+
+/// `GET /api/v1/settings`, retained for clients released before 0.4.0. There are no
+/// per-account settings, so the object is empty.
+pub async fn get_settings(_auth: Auth) -> Json<Value> {
+    Json(json!({"data":{}}))
 }
 
-pub async fn get_settings(State(app): State<App>, auth: Auth) -> Result<Json<Value>> {
-    Ok(Json(json!({"data":settings(&app, auth.uuid())?})))
-}
-
+/// The body clients released before 0.4.0 sent. `telemetry` is accepted and ignored.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SettingsInput {
-    pub telemetry: bool,
+    #[serde(default, rename = "telemetry")]
+    _telemetry: Option<serde::de::IgnoredAny>,
 }
-pub async fn update_settings(
-    State(app): State<App>,
-    auth: Auth,
-    Json(input): Json<SettingsInput>,
-) -> Result<Json<Value>> {
-    let value = Settings {
-        telemetry: input.telemetry,
-    };
-    app.store.put(
-        "settings",
-        &settings_key(auth.uuid()),
-        ENV,
-        auth.uuid(),
-        auth.uuid(),
-        None,
-        &value,
-        None,
-    )?;
-    Ok(Json(json!({"data":value})))
+/// `PATCH /api/v1/settings`, retained for clients released before 0.4.0: a no-op
+/// that stores nothing.
+pub async fn update_settings(_auth: Auth, Json(_input): Json<SettingsInput>) -> Json<Value> {
+    Json(json!({"data":{}}))
 }
 
 /// Stored bug report. `other` keeps fields of earlier releases verbatim.
@@ -306,161 +279,6 @@ async fn deliver_pending(app: &App, http: &reqwest::Client, endpoint: &str) -> R
     Ok(())
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TelemetryInput {
-    pub source: String,
-    pub operation: String,
-    pub step: String,
-    pub outcome: String,
-    pub progress: Option<f64>,
-    pub correlation_id: Option<String>,
-    pub duration_ms: Option<u64>,
-}
-
-fn validate_event(event: &TelemetryInput) -> Result<()> {
-    if !matches!(
-        event.source.as_str(),
-        "web" | "cli" | "daemon" | "backend" | "rust-client"
-    ) {
-        return Err(Error::bad("Unknown telemetry source."));
-    }
-    if !matches!(
-        event.operation.as_str(),
-        "login"
-            | "logout"
-            | "connection.list"
-            | "directory.list"
-            | "directory.read"
-            | "directory.create"
-            | "directory.update"
-            | "directory.delete"
-            | "connection.create"
-            | "connection.read"
-            | "connection.update"
-            | "connection.delete"
-            | "tool.list"
-            | "tool.call"
-            | "tool.policy"
-            | "resource.list"
-            | "resource.read"
-            | "prompt.list"
-            | "prompt.get"
-            | "completion.complete"
-            | "account.connect"
-            | "account.disconnect"
-            | "access.grant"
-            | "access.revoke"
-            | "host.register"
-            | "host.poll"
-            | "host.execute"
-            | "activity.read"
-            | "activity.cancel"
-            | "settings.update"
-            | "report.submit"
-            | "navigation"
-    ) {
-        return Err(Error::bad(
-            "Unknown telemetry operation; send a fixed operation name, never tool input or provider data.",
-        ));
-    }
-    if !matches!(
-        event.step.as_str(),
-        "start" | "validate" | "authorize" | "dispatch" | "provider" | "complete" | "render"
-    ) || !matches!(
-        event.outcome.as_str(),
-        "pending" | "success" | "failure" | "cancelled"
-    ) {
-        return Err(Error::bad("Unknown telemetry step or outcome."));
-    }
-    if event
-        .progress
-        .is_some_and(|progress| !progress.is_finite() || !(0.0..=1.0).contains(&progress))
-        || event
-            .duration_ms
-            .is_some_and(|duration| duration > 86_400_000)
-    {
-        return Err(Error::bad(
-            "Telemetry progress must be 0–1 and duration must be bounded.",
-        ));
-    }
-    if event
-        .correlation_id
-        .as_ref()
-        .is_some_and(|id| uuid::Uuid::parse_str(id).is_err())
-    {
-        return Err(Error::bad(
-            "Telemetry correlation_id must be a UUID, not free text.",
-        ));
-    }
-    Ok(())
-}
-
-static TELEMETRY: OnceLock<Option<Arc<space_station::SpaceClient>>> = OnceLock::new();
-
-/// Explicit operator configuration; a missing table key does not change the
-/// account's default-on preference. The spool path is unchanged from earlier
-/// releases (`telemetry/<sha256("production")>`), so queued events survive.
-pub fn init_telemetry(app: &App) {
-    TELEMETRY.get_or_init(|| {
-        let key = std::env::var("MCPORT_TELEMETRY_KEY")
-            .ok()
-            .filter(|key| !key.is_empty())?;
-        let url = std::env::var("MCPORT_TELEMETRY_URL")
-            .unwrap_or_else(|_| space_station::DEFAULT_URL.into());
-        match space_station::SpaceClient::builder(&key)
-            .home(app.config.data_dir.join("telemetry").join(hash(ENV)))
-            .url(&url)
-            .flush_timeout(Duration::from_millis(100))
-            .on_error(|_| {
-                tracing::warn!(
-                    "Space Station telemetry delivery unavailable; diagnostic content is not logged"
-                )
-            })
-            .build()
-        {
-            Ok(client) => Some(Arc::new(client)),
-            Err(_) => {
-                tracing::warn!("MCPort telemetry table key is not configured correctly");
-                None
-            }
-        }
-    });
-}
-
-pub fn record(
-    app: &App,
-    account: &AccountRow,
-    headers: &HeaderMap,
-    event: &TelemetryInput,
-) -> Result<bool> {
-    validate_event(event)?;
-    if !settings(app, &account.uuid)?.telemetry
-        || headers
-            .get("X-MCPort-Telemetry")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| matches!(value, "false" | "off" | "0"))
-    {
-        return Ok(false);
-    }
-    init_telemetry(app);
-    let Some(client) = TELEMETRY.get().and_then(Option::as_ref) else {
-        return Ok(false);
-    };
-    client.record(json!({"application":"mcport","version":env!("CARGO_PKG_VERSION"),"account_uuid":account.uuid,"account_kind":account.kind,"source":event.source,"operation":event.operation,"step":event.step,"outcome":event.outcome,"progress":event.progress,"correlation_id":event.correlation_id,"duration_ms":event.duration_ms}));
-    Ok(true)
-}
-
-pub async fn telemetry(
-    State(app): State<App>,
-    auth: Auth,
-    headers: HeaderMap,
-    Json(input): Json<TelemetryInput>,
-) -> Result<Json<Value>> {
-    let recorded = record(&app, &auth.account, &headers, &input)?;
-    Ok(Json(json!({"data":{"recorded":recorded}})))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,27 +332,63 @@ mod tests {
             .is_err()
         );
     }
-    #[test]
-    fn telemetry_cannot_smuggle_freeform_payload_fields() {
-        assert!(serde_json::from_value::<TelemetryInput>(json!({"source":"web","operation":"tool.call","step":"complete","outcome":"success","input":{"secret":"private"}})).is_err());
-        let mut event = TelemetryInput {
-            source: "web".into(),
-            operation: "tool.call".into(),
-            step: "complete".into(),
-            outcome: "success".into(),
-            progress: Some(1.0),
-            correlation_id: None,
-            duration_ms: Some(42),
-        };
-        assert!(validate_event(&event).is_ok());
-        event.operation = "private provider response".into();
-        assert!(validate_event(&event).is_err());
+    #[tokio::test]
+    async fn settings_endpoint_is_a_retained_no_op_and_telemetry_route_is_gone() {
+        use crate::test_support::fixture;
+        use axum::http::StatusCode;
+        let f = fixture().await;
+        f.carbon("Ada", "c:ada");
+        let (status, body) = f.as_("Ada", "GET", "/api/v1/settings", None).await;
+        assert_eq!((status, body), (StatusCode::OK, json!({"data":{}})));
+        // Clients released before 0.4.0 still send their preference; it is ignored.
+        for body in [
+            json!({"telemetry":false}),
+            json!({"telemetry":true}),
+            json!({}),
+        ] {
+            let (status, response) = f.as_("Ada", "PATCH", "/api/v1/settings", Some(body)).await;
+            assert_eq!((status, response), (StatusCode::OK, json!({"data":{}})));
+        }
+        assert!(
+            f.app
+                .store
+                .get::<Value>("settings", &settings_key("Ada"))
+                .unwrap()
+                .is_none()
+        );
+        let (status, _) = f
+            .as_(
+                "Ada",
+                "PATCH",
+                "/api/v1/settings",
+                Some(json!({"theme":"dark"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let (status, _) = f
+            .as_(
+                "Ada",
+                "POST",
+                "/api/v1/telemetry",
+                Some(
+                    json!({"source":"cli","operation":"login","step":"start","outcome":"success"}),
+                ),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
     async fn report_outbox_survives_restart_and_never_sends_test_reports() {
-        use axum::{Router, http::StatusCode, routing::post};
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use axum::{
+            Router,
+            http::{HeaderMap, StatusCode},
+            routing::post,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
         let sent = Arc::new(AtomicUsize::new(0));
         let count = sent.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
