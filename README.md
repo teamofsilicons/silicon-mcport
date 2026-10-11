@@ -57,4 +57,5 @@ See [development](docs/development.md) for configuration, tests and releases.
 0.3.0 moves MCPort to Silicon Accounts and Silicon Apps: personal accounts with explicit sharing and custodians, the
 device flow and short-lived tokens for sign-in, and Silicon Apps packages. It is not released yet; the
 [cutover runbook](docs/migration/cutover.md) lists what the operator does to switch production over. Earlier releases
-(0.1.x) and their evidence are recorded under [docs/history](docs/history/README.md).
+(0.1.x) and their evidence are recorded under [docs/history](docs/history/README.md). 0.4.0 removes telemetry: MCPort
+records no telemetry.

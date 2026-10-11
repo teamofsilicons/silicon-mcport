@@ -54,10 +54,10 @@ secret store.
 | `MCPORT_MASTER_KEY` | Optional 32-byte key as 64 hex characters; otherwise generated once in the data directory. |
 | `MCPORT_ALLOWED_UPSTREAM_ORIGINS` | Explicit operator-only exceptions for controlled private HTTP origins. |
 | `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Bug-report delivery. |
-| `MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL` | Space Station telemetry. |
 
-Variables of releases before 0.3.0 are ignored with a warning naming each. Put HTTPS in front of the listener and pass
-only trusted forwarding metadata. `/health` reports liveness and the contract version; it does not check Silicon
+MCPort records no telemetry. Variables of releases before 0.3.0, and the telemetry variables of releases before 0.4.0
+(`MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL`), are ignored with a warning naming each. Put HTTPS in front of the
+listener and pass only trusted forwarding metadata. `/health` reports liveness and the contract version; it does not check Silicon
 Accounts or providers.
 
 Never reuse a master key across deployments or lose it during an upgrade: database and key are backed up and restored
@@ -89,7 +89,8 @@ commands.
 
 Publish the crates in dependency order: `mcport-core`, `mcport-mcp`, `mcport-api`, `mcport-daemon`, `mcport-client`,
 then `mcport-cli`. 0.3.0 changes the identity types and removes the old sign-in calls, so it is a breaking release for
-every crate.
+every crate. 0.4.0 removes telemetry (MCPort records none; `set_telemetry` and `telemetry` remain as deprecated no-ops),
+and every crate moves to it together.
 
 Before a public release, install it fresh on representative targets, sign in as a Carbon (device flow) and a Silicon
 (short-lived token), and make a useful call through a cloud and a local MCP.

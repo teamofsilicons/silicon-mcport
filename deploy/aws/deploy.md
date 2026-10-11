@@ -9,7 +9,8 @@ preserved runtime secrets, encryption keys and the telemetry spool. The precedin
 `66c6e0c` upgrade verified all three transports and acknowledged telemetry; the
 latest server-only update corrects report recipients and acceptance terminology.
 The new installer handled the existing telemetry socket automatically; no manual
-pre-stop or socket removal was needed.
+pre-stop or socket removal was needed. (Those are records of releases before 0.4.0;
+MCPort records no telemetry since 0.4.0.)
 
 Postmark is configured using the operator-approved sender
 `silicon@teamofsilicons.com`. Its credential remains in Secrets Manager and the
@@ -44,19 +45,21 @@ optional entries:
 |---|---|
 | `MCPORT_ACCOUNTS_WEBHOOK_SECRET` | The `whsec_` secret of the app webhook at backend `/webhooks/accounts` (sign-outs, removed access, id and custodian changes) |
 | `ACCOUNTS_API_URL` | Only when MCPort must call Silicon Accounts at another https URL than `ACCOUNTS_URL` |
-| `MCPORT_TELEMETRY_KEY` | Production Space Station table key |
 | `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM` | Live report delivery and verified sender; sender defaults to `mcport@teamofsilicons.com` |
 | `MCPORT_MASTER_KEY` | Optional 64 hex characters, preserved for this deployment's lifetime |
 
 Without an explicit master key the first app startup generates a protected
 `master.key` in `/var/lib/mcport`. Keep that directory empty before the first
-installer run. The webhook, mail and telemetry are not process-start
+installer run. The webhook and mail are not process-start
 prerequisites, but their configured flows must be proved before claiming full
 readiness. Blank optional values should be omitted, not copied from examples.
 Variables of releases before 0.3.0 (`MCPORT_IAM_URL`, `MCPORT_IAM_WEB_URL`,
 `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION`, `MCPORT_LIFECYCLE_SECRET`,
-`MCPORT_TEST_APP_SECRETS`, `MCPORT_TEST_TELEMETRY_KEYS`) are ignored with a
-warning; remove them when updating an existing runtime (see the cutover runbook).
+`MCPORT_TEST_APP_SECRETS`, `MCPORT_TEST_TELEMETRY_KEYS`) and the telemetry variables
+of releases before 0.4.0 (`MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL`) are ignored
+with a warning; remove them when updating an existing runtime (see the cutover
+runbook). `runtime_from_secret.py` accepts a secret that still holds the telemetry
+keys but never writes them; delete them from the secret when it is next updated.
 
 Create the secret from a protected local JSON file without putting its contents
 in shell arguments or SSM documents. Capture registration outputs privately.
@@ -124,14 +127,15 @@ Obtain a native backend candidate for the final reviewed implementation revision
 the earlier `1f334d9` candidate does not contain subsequent compact-ID changes.
 Set these nonsecret values to that verified candidate before running:
 
-If telemetry has run, its SDK can leave a Unix `daemon.sock` under
-`/var/lib/mcport/telemetry/<table-key-hash>/`. The installer recognizes only that
-exact path with a 64-character lowercase hexadecimal hash and service-user
-ownership. Under its install lock, it stops MCPort, verifies an inactive service
-with `MainPID=0`, and removes the ephemeral socket before backup. Spools, cursors,
-locks, database, key and runtime files are preserved. Symlinks, changed sockets
-and unexpected special files still stop the upgrade. No manual socket cleanup is
-needed; the SDK recreates its IPC socket after a new event.
+MCPort records no telemetry since 0.4.0. A release before it that had a telemetry
+key can leave a Unix `daemon.sock` under
+`/var/lib/mcport/telemetry/<table-key-hash>/`. The installer refuses every socket,
+symlink and special file in the state directory before it stops anything, so the
+first upgrade from such a release needs one manual step: stop `mcport.service`,
+confirm `MainPID=0`, remove only that `daemon.sock` (`find /var/lib/mcport/telemetry
+-type s -name daemon.sock -delete`), then run the installer. The rest of
+`/var/lib/mcport/telemetry/` (unsent events of the old release) is ordinary data:
+the installer keeps it and backs it up, and nothing reads it any more.
 
 ```sh
 caddy validate --config /etc/caddy/Caddyfile

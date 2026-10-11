@@ -23,7 +23,7 @@ a 0.2.0 host registry, and the packaging with real builds (see [progress.md](pro
   `accounts --json`, kept for one minor release), but the token must now be a Silicon Accounts short-lived token
   (`slt_…`, from `silicon-accounts login --app mcport -q`). An IAM-era `oac_…` code is refused before anything is sent.
   Until the runtime mints Accounts tokens, each Silicon signs in itself (see "CLI and host daemons").
-- **Ting.** None: MCPort sends nothing through Ting. Space Station telemetry is unchanged.
+- **Ting.** None: MCPort sends nothing through Ting. MCPort records no telemetry (since 0.4.0).
 
 ## Before the day
 
@@ -126,11 +126,11 @@ a rollback to 0.2.x needs (the installer's backup holds whatever the file contai
 - add `ACCOUNTS_URL="https://accounts.teamofsilicons.com"` and `MCPORT_ACCOUNTS_WEBHOOK_SECRET="whsec_…"`;
 - remove `MCPORT_IAM_URL`, `MCPORT_IAM_WEB_URL`, `MCPORT_WEBHOOK_SECRET`, `MCPORT_WEBHOOK_SECRET_VERSION`,
   `MCPORT_LIFECYCLE_SECRET`, `MCPORT_TEST_APP_SECRETS`, `MCPORT_TEST_TELEMETRY_KEYS` (0.3.0 ignores them with a
-  warning).
+  warning), and `MCPORT_TELEMETRY_KEY`, `MCPORT_TELEMETRY_URL` (ignored with a warning since 0.4.0).
 
 Update the Secrets Manager object `silicon-mcport/production-runtime` to match (only the keys
 `runtime_from_secret.py` accepts: `MCPORT_APP_SECRET`, `MCPORT_ACCOUNTS_WEBHOOK_SECRET`, `ACCOUNTS_API_URL`,
-`MCPORT_TELEMETRY_KEY`, `POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM`, `MCPORT_MASTER_KEY`). The same app secret goes
+`POSTMARK_SERVER_TOKEN`, `MCPORT_REPORT_FROM`, `MCPORT_MASTER_KEY`; drop `MCPORT_TELEMETRY_KEY`). The same app secret goes
 into Vercel as `APP_SECRET`; the session secret is new and lives only in Vercel.
 
 ## The cutover

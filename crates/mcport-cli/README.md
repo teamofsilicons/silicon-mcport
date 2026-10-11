@@ -159,8 +159,7 @@ config set backend <url>`, then `https://api.mcport.teamofsilicons.com`. Silicon
 `ACCOUNTS_URL`, then `mcport config set accounts <url>`, then `https://accounts.teamofsilicons.com`. Plain `http://`
 works only for this machine. `mcport config show` prints the settings and who is signed in.
 
-Telemetry is on by default and holds fixed operation and status fields, never inputs, outputs or tokens: `mcport config
-set telemetry false` turns it off. `mcport report 'what happened and how to reproduce it' [--pr <pull request URL>]`
+MCPort records no telemetry. `mcport report 'what happened and how to reproduce it' [--pr <pull request URL>]`
 files a bug report; never include credentials.
 
 `--json` prints compact JSON, errors included (`{"error":{"code","message","recovery"}}`); failures exit 1. Every

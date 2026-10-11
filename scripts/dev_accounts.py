@@ -46,9 +46,8 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_ID = "mcport"
 WEBHOOK_PATH = "/webhooks/accounts"
 LOOPBACK = {"localhost", "127.0.0.1", "::1"}
-# Never forward live mail or telemetry credentials into a development service.
-SCRUBBED = ("POSTMARK_SERVER_TOKEN", "SPACE_STATION_API_KEY", "SPACESTATION_API_KEY", "MCPORT_TELEMETRY_KEY",
-            "MCPORT_TELEMETRY_URL", "MCPORT_MASTER_KEY")
+# Never forward live mail credentials or a production key into a development service.
+SCRUBBED = ("POSTMARK_SERVER_TOKEN", "MCPORT_MASTER_KEY")
 OPENER = build_opener(ProxyHandler({}))
 
 

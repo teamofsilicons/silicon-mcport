@@ -9,7 +9,7 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
 };
 use mcport_core::{ApiError, HostJobResult, Invocation, RpcInput, RpcOutput};
 use mcport_mcp::{Endpoint, ExecutionOptions, McpSession, NetworkPolicy};
@@ -50,8 +50,6 @@ pub struct CallRecord {
     pub connection_version: i64,
     pub fingerprint: String,
     pub progress: Option<Value>,
-    #[serde(default)]
-    pub telemetry_enabled: bool,
     #[serde(flatten)]
     pub other: Map<String, Value>,
 }
@@ -311,7 +309,6 @@ pub fn decorate_tools(
 pub async fn execute(
     State(app): State<App>,
     Live(a): Live,
-    headers: HeaderMap,
     Path(name): Path<String>,
     Json(input): Json<RpcInput>,
 ) -> Result<Json<Value>> {
@@ -449,10 +446,6 @@ pub async fn execute(
         connection_version: c.version,
         fingerprint: fingerprint.clone(),
         progress: None,
-        telemetry_enabled: !headers
-            .get("x-mcport-telemetry")
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| matches!(v, "false" | "off" | "0")),
         other: Map::new(),
     };
     let (r, created) = app.store.create_public(
@@ -479,7 +472,6 @@ pub async fn execute(
         return result_response(&r);
     }
     let call_id = r.invocation.id.clone();
-    record_execution(&app, &r, "backend", "dispatch", "pending");
     drop(guard);
     if c.host_id.is_none() {
         let cancel = CancellationToken::new();
@@ -571,8 +563,7 @@ pub async fn finish(app: &App, id: &str, result: HostJobResult) -> Result<()> {
     if result.result.is_some() == result.error.is_some() {
         return Err(Error::bad("Return exactly one of result or error."));
     }
-    let mut changed = false;
-    let finished = app.store.update::<CallRecord>("call", id, |r| {
+    app.store.update::<CallRecord>("call", id, |r| {
         if !r.pending() {
             return false;
         }
@@ -590,66 +581,10 @@ pub async fn finish(app: &App, id: &str, result: HostJobResult) -> Result<()> {
         r.invocation.result = result.result;
         r.invocation.error = result.error;
         r.invocation.completed_at = Some(now());
-        changed = true;
         true
     })?;
-    if changed && let Some(record) = finished {
-        let outcome = if record.invocation.status == "completed" {
-            "success"
-        } else {
-            "failure"
-        };
-        record_execution(
-            app,
-            &record,
-            if record.host_id.is_some() {
-                "daemon"
-            } else {
-                "backend"
-            },
-            "complete",
-            outcome,
-        );
-    }
     app.jobs.notify_waiters();
     Ok(())
-}
-fn record_execution(app: &App, r: &CallRecord, source: &str, step: &str, outcome: &str) {
-    if !r.telemetry_enabled || r.caller_uuid.is_empty() {
-        return;
-    }
-    let Ok(Some(caller)) = app.store.account(&r.caller_uuid) else {
-        return;
-    };
-    if !caller.active() {
-        return;
-    }
-    let operation = match r.invocation.method.as_str() {
-        "tools/list" => "tool.list",
-        "tools/call" => "tool.call",
-        "resources/list" | "resources/templates/list" => "resource.list",
-        "resources/read" => "resource.read",
-        "prompts/list" => "prompt.list",
-        "prompts/get" => "prompt.get",
-        _ => "completion.complete",
-    };
-    let _ = crate::operations::record(
-        app,
-        &caller,
-        &HeaderMap::new(),
-        &crate::operations::TelemetryInput {
-            source: source.into(),
-            operation: operation.into(),
-            step: step.into(),
-            outcome: outcome.into(),
-            progress: None,
-            correlation_id: Some(crate::public_ids::correlation_id(&r.invocation.id).to_string()),
-            duration_ms: r
-                .invocation
-                .completed_at
-                .map(|end| ((end - r.invocation.created_at).max(0) as u64 * 1000).min(86_400_000)),
-        },
-    );
 }
 #[derive(Deserialize)]
 pub struct CallQuery {

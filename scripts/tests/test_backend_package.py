@@ -137,16 +137,20 @@ class BackendPackageTests(unittest.TestCase):
         self.simulate_cutover(failure="health", stop_fails=True)
 
     @unittest.skipIf(os.name == "nt", "Installer is a Unix systemd host operation")
-    def test_telemetry_socket_upgrade_preserves_durable_state_and_runtime(self):
+    def test_upgrade_preserves_durable_state_and_runtime(self):
         self.simulate_cutover()
 
     @unittest.skipIf(os.name == "nt", "Installer is a Unix systemd host operation")
-    def test_inactive_service_with_main_pid_refuses_socket_cleanup_and_switch(self):
+    def test_inactive_service_with_main_pid_refuses_switch(self):
         self.simulate_cutover(stopped_pid=321)
 
     @unittest.skipIf(os.name == "nt", "Installer is a Unix systemd host operation")
-    def test_backup_failure_after_socket_cleanup_restarts_previous_service(self):
+    def test_backup_failure_restarts_previous_service(self):
         self.simulate_cutover(failure="backup")
+
+    @unittest.skipIf(os.name == "nt", "Installer is a Unix systemd host operation")
+    def test_socket_left_by_an_earlier_release_stops_the_upgrade_before_the_service(self):
+        self.simulate_cutover(leftover_socket=True)
 
     def create_socket(self, path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,31 +163,15 @@ class BackendPackageTests(unittest.TestCase):
         finally:
             os.chdir(previous)
 
-    @unittest.skipIf(os.name == "nt", "Unix socket and ownership validation")
-    def test_only_exact_owned_telemetry_socket_is_allowed_during_preflight(self):
-        state = self.path / "state"
-        ipc = state / "telemetry" / ("a" * 64) / "daemon.sock"
-        self.create_socket(ipc)
-        original = ipc.lstat()
-        accepted = backend.installer.validate_state_tree(state, os.getuid())
-        self.assertEqual([entry[0] for entry in accepted], [ipc])
-        self.assertEqual(ipc.lstat().st_ino, original.st_ino)
-        for uid in (None, os.getuid() + 1):
-            with self.subTest(uid=uid), self.assertRaises(ValueError):
-                backend.installer.validate_state_tree(state, uid)
-        self.assertTrue(ipc.exists())
-
     @unittest.skipIf(os.name == "nt", "Unix special files and symlink validation")
-    def test_invalid_socket_locations_and_other_special_entries_are_rejected(self):
-        valid = "telemetry/" + "a" * 64 + "/daemon.sock"
+    def test_sockets_and_other_special_entries_are_rejected_untouched(self):
+        # MCPort records no telemetry since 0.4.0: a socket an earlier release left in
+        # its old place is refused like any other, and nothing is removed.
         cases = [
-            ("uppercase", "telemetry/" + "A" * 64 + "/daemon.sock", "socket"),
-            ("short", "telemetry/" + "a" * 63 + "/daemon.sock", "socket"),
-            ("nested", "telemetry/" + "a" * 64 + "/nested/daemon.sock", "socket"),
-            ("other_root", "other/" + "a" * 64 + "/daemon.sock", "socket"),
-            ("other_name", "telemetry/" + "a" * 64 + "/other.sock", "socket"),
-            ("fifo", valid, "fifo"),
-            ("symlink", valid, "symlink"),
+            ("earlier_release_socket", "telemetry/" + "a" * 64 + "/daemon.sock", "socket"),
+            ("other_socket", "other/daemon.sock", "socket"),
+            ("fifo", "fifo", "fifo"),
+            ("symlink", "link", "symlink"),
         ]
         for name, relative, kind in cases:
             with self.subTest(name=name):
@@ -196,43 +184,14 @@ class BackendPackageTests(unittest.TestCase):
                     os.mkfifo(entry)
                 else:
                     entry.symlink_to(self.evidence)
-                with self.assertRaises(ValueError):
-                    backend.installer.validate_state_tree(state, os.getuid())
-                self.assertTrue(entry.exists())
+                with self.assertRaisesRegex(ValueError, "special files"):
+                    backend.installer.validate_state_tree(state)
+                self.assertTrue(entry.exists() or entry.is_symlink())
         state = self.path / "directory_symlink"
         state.mkdir()
-        (state / "telemetry").symlink_to(self.path / "fifo/telemetry", target_is_directory=True)
+        (state / "nested").symlink_to(self.path / "fifo", target_is_directory=True)
         with self.assertRaises(ValueError):
-            backend.installer.validate_state_tree(state, os.getuid())
-
-    @unittest.skipIf(os.name == "nt", "Unix socket validation")
-    def test_unsafe_state_prevents_partial_socket_cleanup(self):
-        state = self.path / "state"
-        ipc = state / "telemetry" / ("a" * 64) / "daemon.sock"
-        self.create_socket(ipc)
-        os.mkfifo(state / "unexpected")
-        with mock.patch.object(backend.installer, "service_stopped", return_value=True):
-            with self.assertRaises(ValueError):
-                backend.installer.remove_stopped_telemetry_sockets(state, os.getuid())
-        self.assertTrue(ipc.exists())
-
-    @unittest.skipIf(os.name == "nt", "Unix socket validation")
-    def test_changed_socket_is_not_unlinked(self):
-        state = self.path / "state"
-        ipc = state / "telemetry" / ("a" * 64) / "daemon.sock"
-        self.create_socket(ipc)
-        validate = backend.installer.validate_state_tree
-        def replace_after_validation(path, uid):
-            entries = validate(path, uid)
-            ipc.unlink()
-            ipc.write_bytes(b"replacement-must-survive")
-            return entries
-        with mock.patch.object(backend.installer, "service_stopped", return_value=True), mock.patch.object(
-            backend.installer, "validate_state_tree", side_effect=replace_after_validation
-        ):
-            with self.assertRaisesRegex(RuntimeError, "changed"):
-                backend.installer.remove_stopped_telemetry_sockets(state, os.getuid())
-        self.assertEqual(ipc.read_bytes(), b"replacement-must-survive")
+            backend.installer.validate_state_tree(state)
 
     @unittest.skipIf(os.name == "nt", "Unix permission bits are required for this installer regression")
     def test_release_directories_are_traversable_under_private_umask(self):
@@ -295,8 +254,7 @@ class BackendPackageTests(unittest.TestCase):
         self.assertEqual(private.stat().st_mode & 0o777, 0o700)
         self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
 
-    def simulate_cutover(self, failure=None, stop_fails=False, stopped_pid=0):
-        import fcntl
+    def simulate_cutover(self, failure=None, stop_fails=False, stopped_pid=0, leftover_socket=False):
         output, result = self.package()
         metadata, members = backend.installer.validate_bundle(output, result["sha256"], REVISION)
         prefix, data, runtime, unit, backups = [self.path / name for name in ("opt", "data", "runtime.env", "mcport.service", "backups")]
@@ -305,13 +263,13 @@ class BackendPackageTests(unittest.TestCase):
         (prefix / "current").symlink_to(previous)
         data.mkdir(mode=0o700)
         ipc = data / "telemetry" / ("a" * 64) / "daemon.sock"
-        self.create_socket(ipc)
+        if leftover_socket:
+            self.create_socket(ipc)
         durable = {
             "data.sqlite": b"fixture-state-not-a-database",
             "master.key": b"fixture-master-key",
+            # Files a release before 0.4.0 left are ordinary data: kept and backed up.
             "telemetry/" + "a" * 64 + "/spool.jsonl": b'{"fixture":true}\n',
-            "telemetry/" + "a" * 64 + "/cursor": b"14\n",
-            # An ordinary file named daemon.sock is data, never ephemeral IPC.
             "telemetry/" + "b" * 64 + "/daemon.sock": b"ordinary-state-file",
         }
         for relative, contents in durable.items():
@@ -340,17 +298,6 @@ class BackendPackageTests(unittest.TestCase):
             if "--property=FragmentPath" in args:
                 stdout = str(unit).encode()
             return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr=b"")
-        real_unlink = Path.unlink
-        removals = []
-        def checked_unlink(path, *args, **kwargs):
-            if path == ipc:
-                self.assertEqual(service_state[0], "inactive")
-                self.assertEqual(stopped_pid, 0)
-                with (prefix / "install.lock").open("a") as probe:
-                    with self.assertRaises(BlockingIOError):
-                        fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                removals.append(path)
-            return real_unlink(path, *args, **kwargs)
         with ExitStack() as stack:
             for name, value in {"PREFIX": prefix, "DATA": data, "RUNTIME": runtime, "UNIT": unit, "BACKUPS": backups}.items():
                 stack.enter_context(mock.patch.object(backend.installer, name, value))
@@ -361,20 +308,28 @@ class BackendPackageTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(backend.installer, "regular_private"))
             stack.enter_context(mock.patch.object(backend.installer, "root_directory", side_effect=lambda path, **_: path.mkdir(parents=True, exist_ok=True)))
             stack.enter_context(mock.patch.object(backend.installer, "command", side_effect=fake_command))
-            stack.enter_context(mock.patch.object(Path, "unlink", checked_unlink))
             stack.enter_context(mock.patch.object(backend.installer, "health", side_effect=RuntimeError("health-failed-fixture") if failure == "health" else None))
             if failure == "backup":
                 stack.enter_context(mock.patch.object(backend.installer.shutil, "copytree", side_effect=OSError("backup-failed-fixture")))
-            error = "still running" if stopped_pid else "stop could not be confirmed" if stop_fails else "health-failed" if failure == "health" else "backup-failed"
-            with self.assertRaisesRegex((RuntimeError, OSError), error) if failure or stopped_pid else nullcontext():
+            error = ("special files" if leftover_socket else "still running" if stopped_pid else "stop could not be confirmed"
+                     if stop_fails else "health-failed" if failure == "health" else "backup-failed")
+            with self.assertRaisesRegex((RuntimeError, OSError, ValueError), error) if failure or stopped_pid or leftover_socket else nullcontext():
                 backend.installer.apply(metadata, members, "https://fixture.example/health")
+        if leftover_socket:
+            # Refused before anything changed: the old release still runs, nothing is removed.
+            self.assertEqual(service_state[0], "active")
+            self.assertEqual((prefix / "current").resolve(), previous)
+            self.assertNotIn(("systemctl", "stop", "mcport.service"), commands)
+            self.assertTrue(ipc.exists())
+            self.assertFalse(backups.exists())
+            for relative, contents in durable.items():
+                self.assertEqual((data / relative).read_bytes(), contents)
+            return
         candidate_selected = (failure is None and not stopped_pid) or stop_fails
         self.assertEqual((prefix / "current").resolve(), prefix / "releases" / REVISION if candidate_selected else previous)
         self.assertEqual(unit.read_bytes(), members["mcport.service"][0] if candidate_selected else b"previous-unit-fixture")
         self.assertEqual(service_state[0], "inactive" if stopped_pid or failure == "health" and not stop_fails else "active")
         self.assertEqual(("systemctl", "enable", "mcport.service") in commands, failure is None and not stopped_pid)
-        self.assertEqual(removals, [] if stopped_pid else [ipc])
-        self.assertEqual(ipc.exists(), bool(stopped_pid))
         for relative, contents in durable.items():
             self.assertEqual((data / relative).read_bytes(), contents)
             self.assertEqual((data / relative).stat().st_mode & 0o777, 0o600)
@@ -386,7 +341,6 @@ class BackendPackageTests(unittest.TestCase):
         else:
             for relative, contents in durable.items():
                 self.assertEqual((backup / "data" / relative).read_bytes(), contents)
-            self.assertFalse((backup / "data" / ipc.relative_to(data)).exists())
             self.assertEqual((backup / "runtime.env").read_bytes(), runtime.read_bytes())
 
     def test_runtime_data_path_must_be_covered_by_backup(self):

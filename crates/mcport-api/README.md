@@ -14,13 +14,16 @@ retried. Responses are bounded and MCP results keep their complete JSON.
 - Connections, sharing by `c:`/`si:` id (`grant_access`, `revoke_access`), the allow list that lets an account share
   with a Silicon (`allow`, `allowances`, `disallow`), tool policies, provider accounts (`account_for` and
   `disconnect_account_for` for a custodian), MCP calls, hosts (`legacy_host_accounts` for migrating old registries),
-  activity, assets and one-time download links (`asset_ticket`), directory entries and their shares, settings,
-  reports and telemetry.
+  activity, assets and one-time download links (`asset_ticket`), directory entries and their shares, and bug
+  reports.
 - `canonical_backend_url` normalizes and checks a backend URL without building an HTTP client.
 
 Errors keep MCPort's `{"error":{"code","message","recovery","outcome_unknown"}}` (`Error::code`, `message`,
 `recovery`, `status`, `is_code`, `needs_sign_in`); a `hint` field is read as the recovery. Directory updates use
 `DirectoryUpdate { input, version }` with the version read from the current entry; a `DirectoryTemplate` is setup
 metadata to review, never a connection or a credential.
+
+MCPort records no telemetry. Every request sends `X-MCPort-Telemetry: off` so services released before 0.4.0 record
+nothing either; `set_telemetry`, `telemetry` and `RequestContext::telemetry` remain as deprecated no-ops.
 
 Run `cargo test -p mcport-api` for the transport contract tests and the example.

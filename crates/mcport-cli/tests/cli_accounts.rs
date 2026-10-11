@@ -40,6 +40,10 @@ struct Stub {
     expired_access: Mutex<Option<String>>,
     /// An access token the backend answers with 401 sign_in_revoked (introspection said so).
     revoked_access: Mutex<Option<String>>,
+    /// `X-MCPort-Telemetry` of each connections request (empty when absent).
+    telemetry_headers: Mutex<Vec<String>>,
+    /// Requests to the route mcport 0.3 and earlier posted events to.
+    telemetry_posts: AtomicU32,
 }
 type Shared = Arc<Stub>;
 
@@ -202,6 +206,13 @@ async fn me(State(stub): State<Shared>, headers: HeaderMap) -> (StatusCode, Json
 async fn connections(State(stub): State<Shared>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
     let token = bearer(&headers);
     stub.bearers.lock().unwrap().push(token.clone());
+    stub.telemetry_headers.lock().unwrap().push(
+        headers
+            .get("x-mcport-telemetry")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_owned(),
+    );
     if stub.revoked_access.lock().unwrap().as_deref() == Some(token.as_str()) {
         return (
             StatusCode::UNAUTHORIZED,
@@ -233,7 +244,10 @@ async fn serve() -> (Shared, String) {
         .route("/api/v1/connections", get(connections))
         .route(
             "/api/v1/telemetry",
-            post(|| async { Json(json!({"data":{"recorded":false}})) }),
+            post(|State(stub): State<Shared>| async move {
+                stub.telemetry_posts.fetch_add(1, Ordering::SeqCst);
+                Json(json!({"data":{"recorded":false}}))
+            }),
         )
         .with_state(stub.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -628,6 +642,64 @@ async fn concurrent_commands_refresh_once_and_persist_the_rotation() {
         status["expires_at"].as_i64().unwrap() > now + 1000,
         "{status}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_cli_records_no_telemetry_and_the_old_setting_is_a_no_op() {
+    const REMOVED: &str = "Telemetry was removed from MCPort; there is nothing to turn on or off.";
+    let (stub, origin) = serve().await;
+    let home = tempfile::tempdir().unwrap();
+    // Scripts written for 0.3 still run: the setting is accepted, changes nothing,
+    // writes nothing and calls no service.
+    let output = run(mcport(
+        home.path(),
+        &origin,
+        &["config", "set", "telemetry", "false"],
+    ))
+    .await;
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("{REMOVED}\n")
+    );
+    let output = run(mcport(
+        home.path(),
+        &origin,
+        &["config", "set", "telemetry", "true", "--json"],
+    ))
+    .await;
+    assert!(output.status.success());
+    assert_eq!(
+        json_of(&output),
+        json!({"telemetry":"removed","note":REMOVED})
+    );
+    assert!(walk(home.path()).is_empty(), "the no-op wrote files");
+    assert_eq!(stub.issued.load(Ordering::SeqCst), 0);
+    assert!(stub.bearers.lock().unwrap().is_empty());
+    let help = run(mcport(home.path(), &origin, &["config", "set", "--help"])).await;
+    assert!(
+        !String::from_utf8(help.stdout)
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("telemetry")
+    );
+    // Commands say "off" to every service and post no events.
+    run_with_stdin(
+        mcport(home.path(), &origin, &["login", "--slt-stdin"]),
+        "slt_ok",
+    )
+    .await;
+    let output = run(mcport(
+        home.path(),
+        &origin,
+        &["connection", "ls", "--json"],
+    ))
+    .await;
+    assert!(output.status.success());
+    assert_eq!(*stub.telemetry_headers.lock().unwrap(), ["off"]);
+    assert_eq!(stub.telemetry_posts.load(Ordering::SeqCst), 0);
+    let show = json_of(&run(mcport(home.path(), &origin, &["config", "show", "--json"])).await);
+    assert!(show.get("telemetry").is_none(), "{show}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -43,7 +43,7 @@ changes). The [API contract](../../../docs/API.md) has the details.
 
 Under `${SILICON_HOME:-$HOME}/.mcport/dir` (directories 0700, files 0600, symbolic links refused):
 
-- `settings.json`: telemetry, backend and Silicon Accounts URLs.
+- `settings.json`: backend and Silicon Accounts URLs (keys earlier releases wrote are kept as they are).
 - `accounts/<key>.json` (+ `.lock`): the sign-in for one backend (`<key>` = SHA-256 of `["<backend>",null]`): the
   account (uuid, id, kind, display name, custodian), the access and refresh tokens, their expiry, the Silicon Accounts
   URL and app id that issued them.
@@ -79,8 +79,8 @@ export MCPORT_URL=http://127.0.0.1:4380 ACCOUNTS_URL=http://localhost:9590
 mcport login                     # or: silicon-accounts login --app mcport -q | mcport login --slt-stdin
 ```
 
-`deploy/environment.example` lists every service setting. Keep the app secret, webhook secret, encryption key, Postmark
-token and telemetry key out of repositories and client packages.
+`deploy/environment.example` lists every service setting. Keep the app secret, webhook secret, encryption key and Postmark
+token out of repositories and client packages. MCPort records no telemetry.
 
 ## Results and retries
 
@@ -98,7 +98,7 @@ host new` and `mcport daemon start`.
 
 The crates are published in dependency order: `mcport-core`, `mcport-mcp`, `mcport-api`, `mcport-daemon`,
 `mcport-client`, then `mcport-cli`. 0.3.0 changes the identity types and removes the old sign-in calls, so it is a
-breaking release.
+breaking release. 0.4.0 removes telemetry, and every crate moves to it together.
 
 The service is a single instance; several replicas would need shared leases and refresh coordination.
 

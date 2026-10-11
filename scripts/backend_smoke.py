@@ -39,7 +39,7 @@ def main():
         available.bind(("127.0.0.1", 0))
         port = available.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix="mcport-backend-smoke-") as directory:
-        env = {key: value for key, value in os.environ.items() if not key.startswith(("MCPORT_", "POSTMARK_", "ACCOUNTS_", "SPACE_STATION"))}
+        env = {key: value for key, value in os.environ.items() if not key.startswith(("MCPORT_", "POSTMARK_", "ACCOUNTS_"))}
         # Health needs no Silicon Accounts call; an unreachable loopback URL proves that.
         env.update(MCPORT_BIND="127.0.0.1:" + str(port), MCPORT_DATA_DIR=directory, MCPORT_APP_SECRET="candidate-smoke-fixture-not-an-app-secret", ACCOUNTS_URL="http://127.0.0.1:1")
         with tempfile.TemporaryFile() as logs:

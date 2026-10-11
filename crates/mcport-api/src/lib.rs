@@ -35,7 +35,12 @@ pub struct RequestContext {
     pub access_token: Option<String>,
     /// Optional audit context (`X-MCPort-ISI`); nothing depends on it.
     pub isi: Option<String>,
-    /// Propagate the caller's telemetry preference without including request contents.
+    /// Ignored. MCPort records no telemetry, and every request says
+    /// `X-MCPort-Telemetry: off` so a service released before 0.4.0 records nothing either.
+    #[deprecated(
+        since = "0.4.0",
+        note = "MCPort records no telemetry; this field is ignored"
+    )]
     pub telemetry: Option<bool>,
 }
 impl RequestContext {
@@ -66,7 +71,7 @@ impl HostContext {
         Ok(RequestContext {
             access_token: Some(self.host_token.clone()),
             isi: self.isi.clone(),
-            telemetry: None,
+            ..RequestContext::default()
         })
     }
 }
@@ -867,15 +872,18 @@ impl Client {
     pub async fn settings(&self, ctx: &RequestContext) -> Result<Value, Error> {
         self.get(ctx, &["settings"]).await
     }
-    pub async fn set_telemetry(&self, ctx: &RequestContext, enabled: bool) -> Result<Value, Error> {
-        self.request(
-            ctx,
-            Method::PATCH,
-            &["settings"],
-            &[],
-            Some(json!({"telemetry":enabled})),
-        )
-        .await
+    /// Does nothing and sends nothing: MCPort records no telemetry. Returns the empty
+    /// settings object.
+    #[deprecated(
+        since = "0.4.0",
+        note = "MCPort records no telemetry; there is nothing to turn on or off"
+    )]
+    pub async fn set_telemetry(
+        &self,
+        _ctx: &RequestContext,
+        _enabled: bool,
+    ) -> Result<Value, Error> {
+        Ok(json!({}))
     }
     pub async fn report(
         &self,
@@ -887,10 +895,14 @@ impl Client {
             .await
     }
 
-    /// Submit a bounded diagnostic event through MCPort. Never pass MCP inputs or results.
-    /// The backend applies the user's opt-out and its environment-specific Space Station sink.
-    pub async fn telemetry(&self, ctx: &RequestContext, event: &Value) -> Result<Value, Error> {
-        self.post(ctx, &["telemetry"], event).await
+    /// Does nothing and sends nothing: MCPort records no telemetry. Returns
+    /// `{"recorded": false}`, the answer earlier services gave for an event they dropped.
+    #[deprecated(
+        since = "0.4.0",
+        note = "MCPort records no telemetry; events are discarded without being sent"
+    )]
+    pub async fn telemetry(&self, _ctx: &RequestContext, _event: &Value) -> Result<Value, Error> {
+        Ok(json!({"recorded": false}))
     }
 }
 
@@ -953,7 +965,8 @@ fn to_value(value: impl Serialize) -> Result<Value, Error> {
     })
 }
 /// The headers every MCPort request carries: the bearer token, optional audit
-/// context and the caller's telemetry preference.
+/// context and `X-MCPort-Telemetry: off`. MCPort records no telemetry; the header
+/// keeps services released before 0.4.0 from recording this client's requests.
 fn with_context(
     mut request: reqwest::RequestBuilder,
     context: &RequestContext,
@@ -964,13 +977,7 @@ fn with_context(
     if let Some(isi) = &context.isi {
         request = request.header("X-MCPort-ISI", isi);
     }
-    if let Some(telemetry) = context.telemetry {
-        request = request.header(
-            "X-MCPort-Telemetry",
-            if telemetry { "true" } else { "false" },
-        );
-    }
-    request
+    request.header("X-MCPort-Telemetry", "off")
 }
 /// MCPort's `{error:{code,message,recovery,outcome_unknown}}`, or a precise stand-in
 /// when a proxy or an older service answered without one. Bodies that are not
@@ -1197,6 +1204,7 @@ mod tests {
         assert!(request.contains("authorization: bearer test-access"));
         assert!(!request.contains("x-mcport-test"));
         assert!(request.contains("x-mcport-isi: research"));
+        assert!(request.contains("x-mcport-telemetry: off"));
     }
 
     #[tokio::test]
@@ -1269,6 +1277,7 @@ mod tests {
             assert!(lowered.contains("authorization: bearer fixture-host-token"));
             assert!(!lowered.contains("x-mcport-test"));
             assert!(lowered.contains("x-mcport-isi: fixture-isi"));
+            assert!(lowered.contains("x-mcport-telemetry: off"));
         }
         assert!(requests[2].contains("\"complete\":true"));
     }

@@ -32,7 +32,7 @@ OAuth with PKCE and short-lived refresh rotation; connection deletion cleanup; l
 daemon (registry version 2), offline hosts and reconnects; idempotency and lost-response no-replay; cancellation;
 proofs refused; and every webhook event MCPort handles: id changes, renames, replayed and forged deliveries, the
 Silicon allow list, removed access, STK rotation, refresh-token reuse, a custodian transfer and account deletion;
-telemetry opt-out and a report with no mail configured.
+that no telemetry is sent (the retired `config set telemetry` is a no-op) and a report with no mail configured.
 
 `accounts_fake.py` signs access tokens with `ed25519.py` (RFC 8032 in pure Python, so the journey needs only the
 standard library; never use it outside tests). Its `/fixture/…` endpoints create accounts, mint short-lived tokens,
@@ -55,6 +55,6 @@ proofs from another app, the discovery commands from a freshly packed archive, a
 `.local/dev-accounts/e2e/run-<run>/` (`result.json`, `transcript.jsonl`; never tokens), and every sign-in made is
 signed out at the end.
 
-Fixture runners remove inherited Postmark and telemetry keys, so no live mail or telemetry leaves a test. These
+Fixture runners remove inherited Postmark keys, so no live mail leaves a test; MCPort records no telemetry. These
 suites prove integration behaviour with controlled providers and accounts, not compatibility with every live
 provider or a production deployment.
