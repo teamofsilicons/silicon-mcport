@@ -27,7 +27,6 @@ import {
   Notice,
   PageHead,
   Status,
-  Switch,
   Textarea,
 } from "./ui";
 const time = (v?: number) =>
@@ -409,30 +408,10 @@ export function SettingsPage({
   discovery: Discovery | null;
   notify: (s: string) => void;
 }) {
-  const [telemetry, setTelemetry] = useState<boolean | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [report, setReport] = useState("");
   const [pr, setPr] = useState("");
   const [reporting, setReporting] = useState(false);
-  useEffect(() => {
-    api
-      .settings()
-      .then((v) => setTelemetry(v.telemetry))
-      .catch((e) => setError(message(e)));
-  }, []);
-  async function toggle(v: boolean) {
-    setBusy(true);
-    try {
-      const r = await api.setSettings(v);
-      setTelemetry(r.telemetry);
-      notify(`Telemetry ${r.telemetry ? "enabled" : "disabled"}.`);
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function send() {
     setReporting(true);
     setError("");
@@ -477,32 +456,6 @@ export function SettingsPage({
             <div><dt>Account UUID</dt><dd>{session.uuid}</dd></div>
 
           </dl>
-        </section>
-        <section className="settings-section">
-          <h2>Privacy & diagnostics</h2>
-          <div className="setting-row">
-            <div>
-              <h3>Operational telemetry</h3>
-              <p>
-                Help diagnose failures across the website, CLI, daemon, and
-                backend. Secrets, raw tool inputs, results, and file contents
-                are excluded.
-              </p>
-            </div>
-            {telemetry === null ? (
-              <Loading />
-            ) : (
-              <Switch
-                aria-label="Operational telemetry"
-                checked={telemetry}
-                disabled={busy}
-                onCheckedChange={(v) => void toggle(v)}
-              />
-            )}
-          </div>
-          <p className="field-help">
-            CLI preference: <code>mcport config set telemetry false</code>
-          </p>
         </section>
         <section className="settings-section">
           <h2>Report a problem</h2>

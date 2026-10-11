@@ -177,79 +177,16 @@ async function downloadAsset(call:string,index:number):Promise<string> {
  return ticket.url;
 }
 const id = encodeURIComponent;
-type WebOperation =
-  | "navigation"
-  | "login"
-  | "connection.create"
-  | "tool.list"
-  | "tool.call"
-  | "resource.list"
-  | "resource.read"
-  | "prompt.list"
-  | "prompt.get";
-let webTelemetryEnabled = true;
-export function recordWebEvent(
-  operation: WebOperation,
-  step: "start" | "complete" | "render",
-  outcome: "pending" | "success" | "failure",
-  correlation_id?: string,
-  duration_ms?: number,
-) {
-  if (!webTelemetryEnabled) return;
-  void request("/telemetry", "POST", {
-    source: "web",
-    operation,
-    step,
-    outcome,
-    progress: step === "start" ? 0 : 1,
-    correlation_id,
-    duration_ms,
-  }).catch(() => {});
-}
 const rpc = async (
   connection: string,
   method: string,
   params: unknown = {},
 ) => {
-  const operations: Record<string, WebOperation> = {
-    "tools/list": "tool.list",
-    "tools/call": "tool.call",
-    "resources/list": "resource.list",
-    "resources/templates/list": "resource.list",
-    "resources/read": "resource.read",
-    "prompts/list": "prompt.list",
-    "prompts/get": "prompt.get",
-  };
-  const operation = operations[method];
-  const correlation = crypto.randomUUID();
-  const start = performance.now();
-  if (operation) recordWebEvent(operation, "start", "pending", correlation);
-  try {
-    const result = await request<CallResult>(
-      `/connections/${id(connection)}/mcp`,
-      "POST",
-      { method, params, timeout_ms: 60000 },
-    );
-    if (operation)
-      recordWebEvent(
-        operation,
-        "complete",
-        result.result.isError ? "failure" : "success",
-        correlation,
-        Math.round(performance.now() - start),
-      );
-    return result;
-  } catch (error) {
-    if (operation)
-      recordWebEvent(
-        operation,
-        "complete",
-        "failure",
-        correlation,
-        Math.round(performance.now() - start),
-      );
-    throw error;
-  }
+  return request<CallResult>(
+    `/connections/${id(connection)}/mcp`,
+    "POST",
+    { method, params, timeout_ms: 60000 },
+  );
 };
 async function listTools(connection: string) {
   const tools: Tool[] = [];
@@ -367,18 +304,6 @@ export const api = {
   downloadAsset,
   cancel: (call: string) =>
     request<Activity>(`/calls/${id(call)}/cancel`, "POST"),
-  settings: async () => {
-    const result = await request<{ telemetry: boolean }>("/settings");
-    webTelemetryEnabled = result.telemetry;
-    return result;
-  },
-  setSettings: async (telemetry: boolean) => {
-    const result = await request<{ telemetry: boolean }>("/settings", "PATCH", {
-      telemetry,
-    });
-    webTelemetryEnabled = result.telemetry;
-    return result;
-  },
   rpc,
   report: (message: string, pr?: string) =>
     request<{ id: string; status: string; repository_url: string }>(
