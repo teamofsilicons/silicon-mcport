@@ -225,8 +225,4 @@ Design for Silicons as well as Carbons: make required inputs, permissions, failu
 
 # Telemetry
 
-Use [Space Station](https://spacestation.teamofsilicons.com/docs) for telemetry from the backend, daemon, CLI and website. Telemetry is on by default and can be turned off in settings, including through the CLI with `mcport config set telemetry false`.
-
-Use its Rust package where applicable. Send useful, self-contained events with source, operation, step, progress, outcome and correlation context. Reuse automatically supplied system metadata. Web analytics and explicit web events may use separate tables.
-
-Keep secrets and raw MCP inputs, results and file contents out of telemetry. Record enough operational detail to diagnose failures without copying private provider data.
+MCPort records no telemetry.
