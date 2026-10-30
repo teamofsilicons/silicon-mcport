@@ -202,7 +202,7 @@ impl Client {
         path: &[&str],
         query: &[(&str, &str)],
         body: Option<Value>,
-        limits: Option<(Duration, usize)>,
+        limits: Option<(Duration, Option<usize>)>,
     ) -> Result<T, Error> {
         let may_mutate = !matches!(method, Method::GET | Method::HEAD);
         let mut url = self.endpoint(path);
@@ -227,7 +227,10 @@ impl Client {
             message: e.without_url().to_string(),
             outcome_unknown: may_mutate,
         })? {
-            if limits.is_some_and(|(_, max)| bytes.len() + chunk.len() > max) {
+            if limits
+                .and_then(|(_, max)| max)
+                .is_some_and(|max| bytes.len() + chunk.len() > max)
+            {
                 return Err(Error::Protocol {
                     message: "Host protocol response exceeds its size limit.".into(),
                     outcome_unknown: may_mutate,
@@ -549,13 +552,30 @@ impl Client {
     }
 
     /// Invoke one allowed MCP operation. Results, content blocks and pagination remain intact.
+    /// An explicit execution timeout gets the gateway's 100ms–600s clamp plus
+    /// 30 seconds for transport, including receiving the result. Without one,
+    /// retain the HTTP client's default timeout (180 seconds in `Client::new`).
     pub async fn rpc(
         &self,
         ctx: &RequestContext,
         id: &str,
         input: &RpcInput,
     ) -> Result<RpcOutput, Error> {
-        self.post(ctx, &["connections", id, "mcp"], input).await
+        let limits = input.timeout_ms.map(|timeout_ms| {
+            (
+                Duration::from_millis(timeout_ms.clamp(100, 600_000) + 30_000),
+                None,
+            )
+        });
+        self.request_options(
+            ctx,
+            Method::POST,
+            &["connections", id, "mcp"],
+            &[],
+            Some(to_value(input)?),
+            limits,
+        )
+        .await
     }
     async fn mcp(
         &self,
@@ -827,7 +847,7 @@ impl Client {
             &["hosts", &host.host_id, "poll"],
             &[],
             Some(to_value(poll)?),
-            Some((Duration::from_secs(25), 4 * 1024 * 1024)),
+            Some((Duration::from_secs(25), Some(4 * 1024 * 1024))),
         )
         .await
     }
@@ -847,7 +867,7 @@ impl Client {
             &["hosts", &host.host_id, "jobs", job, "result"],
             &[],
             Some(to_value(result)?),
-            Some((Duration::from_secs(600), 64 * 1024)),
+            Some((Duration::from_secs(600), Some(64 * 1024))),
         )
         .await
     }
@@ -865,7 +885,7 @@ impl Client {
             &["hosts", &host.host_id, "jobs", job, "progress"],
             &[],
             Some(json!({"progress":progress})),
-            Some((Duration::from_secs(25), 64 * 1024)),
+            Some((Duration::from_secs(25), Some(64 * 1024))),
         )
         .await
     }
@@ -1281,6 +1301,104 @@ mod tests {
             assert!(lowered.contains("x-mcport-telemetry: off"));
         }
         assert!(requests[2].contains("\"complete\":true"));
+    }
+
+    #[tokio::test]
+    async fn explicit_rpc_deadline_overrides_http_default_through_response_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let result = json!({"content":[{"type":"text","text":"x".repeat(128 * 1024)}]});
+        let body = json!({"data":{"call_id":"call-deadline","result":result}}).to_string();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..4 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                requests.push(String::from_utf8(request_bytes(&mut stream).await).unwrap());
+                // Both headers and the rest of the result outlive the injected
+                // HTTP default. The execution budget must cover body download too.
+                tokio::time::sleep(Duration::from_millis(75)).await;
+                let headers = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(headers.as_bytes()).await;
+                let half = body.len() / 2;
+                let _ = stream.write_all(&body.as_bytes()[..half]).await;
+                tokio::time::sleep(Duration::from_millis(75)).await;
+                let _ = stream.write_all(&body.as_bytes()[half..]).await;
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err(),
+                "RPC mutations must not retry automatically"
+            );
+            requests
+        });
+        let client = Client::with_http(
+            &format!("http://{address}"),
+            reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_millis(50))
+                .retry(reqwest::retry::never())
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+        let context = RequestContext::authenticated("deadline-fixture");
+        // Cover the maximum supported execution deadline and out-of-range input
+        // without overflowing before clamping. Preserve original wire values.
+        for timeout_ms in [600_000, u64::MAX, 0] {
+            let output = client
+                .rpc(
+                    &context,
+                    "connection",
+                    &RpcInput {
+                        method: "tools/call".into(),
+                        params: json!({"name":"slow","arguments":{}}),
+                        timeout_ms: Some(timeout_ms),
+                        idempotency_key: Some("deadline-key".into()),
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(output.call_id, "call-deadline");
+            assert_eq!(output.result, result);
+        }
+        let error = client
+            .rpc(
+                &context,
+                "connection",
+                &RpcInput {
+                    method: "tools/call".into(),
+                    params: json!({}),
+                    timeout_ms: None,
+                    idempotency_key: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::Transport {
+                    outcome_unknown: true,
+                    ..
+                }
+            ),
+            "an omitted deadline must preserve the injected HTTP default"
+        );
+        let requests = server.await.unwrap();
+        for (request, expected) in
+            requests
+                .iter()
+                .zip([Some(600_000), Some(u64::MAX), Some(0), None])
+        {
+            assert!(request.starts_with("POST /api/v1/connections/connection/mcp HTTP/1.1"));
+            let input: Value =
+                serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            assert_eq!(input["timeout_ms"], json!(expected));
+        }
     }
 
     #[tokio::test]
