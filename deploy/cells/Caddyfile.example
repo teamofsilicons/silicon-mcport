@@ -1,0 +1,27 @@
+# Replace only the existing api.mcport site. Keep all other sites unchanged.
+# CELLS_MCPORT_HOST is the cell hostname, without scheme/path.
+# CELLS_MCPORT_PUBLISHABLE_KEY is the publishable key, never a secret/author key.
+api.mcport.teamofsilicons.com {
+	encode zstd gzip
+	header X-Content-Type-Options nosniff
+	# Capture before reverse_proxy deletes Authorization from its upstream copy.
+	# This overwrites a caller's X-Mcport-Authorization; the app still validates
+	# the transported bearer with Accounts or its own local-host token verifier.
+	request_header X-Mcport-Authorization {http.request.header.Authorization}
+	rewrite * /services/mcport{uri}
+	# Connect to the verified origin certificate; Host selects this cell.
+	# The wildcard Cells CDN has a shorter response deadline than MCP calls.
+	reverse_proxy https://api.cells.teamofsilicons.com {
+		header_up Host {$CELLS_MCPORT_HOST}
+		header_up -Authorization
+		header_up -X-Cells-*
+		header_up -X-Forwarded-*
+		header_up -Forwarded
+		header_up apikey {$CELLS_MCPORT_PUBLISHABLE_KEY}
+		transport http {
+			tls_server_name api.cells.teamofsilicons.com
+			response_header_timeout 630s
+		}
+		flush_interval -1
+	}
+}

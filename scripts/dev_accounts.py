@@ -47,7 +47,7 @@ APP_ID = "mcport"
 WEBHOOK_PATH = "/webhooks/accounts"
 LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 # Never forward live mail credentials or a production key into a development service.
-SCRUBBED = ("POSTMARK_SERVER_TOKEN", "MCPORT_MASTER_KEY")
+SCRUBBED = ("POSTMARK_SERVER_TOKEN", "MCPORT_MASTER_KEY", "DATABASE_URL", "CELLS_DATABASE_URL", "CELLS_API_URL", "MCPORT_CELLS_INGRESS_SECRET")
 OPENER = build_opener(ProxyHandler({}))
 
 
@@ -140,7 +140,13 @@ def load_config():
     target = Path(env("CARGO_TARGET_DIR") or ROOT / "target")
     if not target.is_absolute():
         target = ROOT / target
+    database_url = env("MCPORT_TEST_DATABASE_URL")
+    if database_url:
+        parsed = urlparse(database_url)
+        if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in {"127.0.0.1", "::1"} or not parsed.path.endswith("_test"):
+            raise Failure("MCPORT_TEST_DATABASE_URL must name a disposable *_test PostgreSQL database on literal loopback.")
     return {
+        "database_url": database_url,
         "accounts_url": accounts_url,
         "accounts_api_url": api_url,
         "app_secret": secret,
@@ -333,6 +339,8 @@ def service_env(cfg, secret):
         RUST_LOG=os.environ.get("RUST_LOG", "mcport_server=info"),
         NO_COLOR="1",
     )
+    if cfg.get("database_url"):
+        env["DATABASE_URL"] = cfg["database_url"]
     return env
 
 

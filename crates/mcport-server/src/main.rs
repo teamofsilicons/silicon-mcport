@@ -3,7 +3,9 @@ mod accounts_webhook;
 mod allowances;
 mod assets;
 mod auth;
+mod cells_ingress;
 mod connections;
+mod database;
 mod directory;
 mod error;
 mod execution;
@@ -12,6 +14,7 @@ mod identity;
 mod identity_store;
 mod oauth;
 mod operations;
+mod postgres_store;
 mod public_ids;
 mod state;
 mod store;
@@ -43,6 +46,15 @@ struct Cli {
 enum Command {
     /// Serve the API (the default when no command is given).
     Serve,
+    /// Verify and import a stopped SQLite snapshot into an empty Cells database.
+    /// Reads DATABASE_URL and MCPORT_MASTER_KEY from the environment.
+    ImportPostgres {
+        #[arg(long)]
+        source: PathBuf,
+        /// Commit the verified copy; without this flag every write is rolled back.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Preview/apply an Accounts UUID export. Stop service and daemons first; back up the store.
     MigrateAccountUuids {
         #[arg(long)]
@@ -86,6 +98,12 @@ async fn discovery(State(app): State<App>) -> Json<Value> {
         install_url: format!("https://apps.teamofsilicons.com/apps/{}", app.config.app_id),
         version: env!("CARGO_PKG_VERSION").into(),
     }}))
+}
+async fn health(State(app): State<App>) -> error::Result<Json<Value>> {
+    app.store.health()?;
+    Ok(Json(
+        json!({"status":"ok","version":env!("CARGO_PKG_VERSION"),"source_revision":option_env!("MCPORT_BUILD_REVISION")}),
+    ))
 }
 async fn me(State(app): State<App>, a: auth::Auth) -> error::Result<Json<Value>> {
     let custodian = match a
@@ -172,53 +190,123 @@ async fn not_found() -> error::Error {
     error::Error::missing()
 }
 fn router(app: App) -> Router {
+    let ingress = if app.config.cells_runtime {
+        cells_ingress::CellsIngress::from_env().expect("Cells ingress was validated at startup")
+    } else {
+        None
+    };
     Router::new()
-    .route("/health",get(||async{Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION"),"source_revision":option_env!("MCPORT_BUILD_REVISION")}))}))
-    .route("/api/v1/discovery",get(discovery))
-    .route("/api/v1/me",get(me))
-    .route("/api/v1/iam",get(gone))
-    .route("/api/v1/auth/{*removed}",get(gone).post(gone))
-    .route("/api/{*unknown}",get(not_found).post(not_found))
-    .route("/api/v1/settings",get(operations::get_settings).patch(operations::update_settings))
-    .route("/api/v1/reports",post(operations::report))
-    .route("/api/v1/allow",get(allowances::list).post(allowances::add))
-    .route("/api/v1/allow/{account}",delete(allowances::remove))
-    .route("/api/v1/directory",get(directory::list).post(directory::create))
-    .route("/api/v1/directory/{entry}",get(directory::get).put(directory::update).delete(directory::remove))
-    .route("/api/v1/directory/{entry}/access",get(directory::access_list).post(directory::share))
-    .route("/api/v1/directory/{entry}/access/{account}",delete(directory::unshare))
-    .route("/api/v1/connections",get(connections::list).post(connections::create))
-    .route("/api/v1/connections/{connection}",get(connections::get).patch(connections::update).delete(connections::remove))
-    .route("/api/v1/connections/{connection}/access",get(connections::access_list).post(connections::invite))
-    .route("/api/v1/connections/{connection}/access/{account}",delete(connections::uninvite))
-    .route("/api/v1/connections/{connection}/policies",get(connections::policies).put(connections::set_policy))
-    .route("/api/v1/connections/{connection}/account",get(connections::account_get).post(connections::account_set).delete(connections::account_remove))
-    .route("/api/v1/connections/{connection}/account/authorize",post(oauth::authorize))
-    .route("/api/v1/connections/{connection}/mcp",post(execution::execute))
-    .route("/api/v1/calls",get(execution::list))
-    .route("/api/v1/calls/{call}",get(execution::get))
-    .route("/api/v1/calls/{call}/assets",get(assets::list))
-    .route("/api/v1/calls/{call}/assets/{index}",get(assets::download))
-    .route("/api/v1/calls/{call}/assets/{index}/ticket",post(assets::ticket))
-    .route("/api/v1/calls/{call}/cancel",post(execution::cancel))
-    .route("/api/v1/downloads/{ticket}",get(assets::redeem))
-    .route("/api/v1/hosts",get(hosts::list).post(hosts::create))
-    .route("/api/v1/hosts/{host}",get(hosts::get).delete(hosts::remove))
-    .route("/api/v1/hosts/{host}/legacy-accounts",get(hosts::legacy_accounts))
-    .route("/api/v1/hosts/{host}/poll",post(hosts::poll))
-    .route("/api/v1/hosts/{host}/jobs/{job}/result",post(hosts::complete))
-    .route("/api/v1/hosts/{host}/jobs/{job}/progress",post(hosts::progress))
-    .route("/webhooks/accounts",post(accounts_webhook::receive))
-    .route("/webhooks/iam",post(webhook_moved))
-    .route("/oauth/start",get(oauth::start))
-    .route("/oauth/client-metadata.json",get(oauth::client_metadata))
-    .route("/oauth/callback",get(oauth::callback))
-    .fallback(not_found)
-    .layer(DefaultBodyLimit::max(20*1024*1024))
-    .layer(middleware::from_fn(secure_headers))
-    .with_state(app)
+        .route("/health", get(health))
+        .route("/api/v1/discovery", get(discovery))
+        .route("/api/v1/me", get(me))
+        .route("/api/v1/iam", get(gone))
+        .route("/api/v1/auth/{*removed}", get(gone).post(gone))
+        .route("/api/{*unknown}", get(not_found).post(not_found))
+        .route(
+            "/api/v1/settings",
+            get(operations::get_settings).patch(operations::update_settings),
+        )
+        .route("/api/v1/reports", post(operations::report))
+        .route("/api/v1/allow", get(allowances::list).post(allowances::add))
+        .route("/api/v1/allow/{account}", delete(allowances::remove))
+        .route(
+            "/api/v1/directory",
+            get(directory::list).post(directory::create),
+        )
+        .route(
+            "/api/v1/directory/{entry}",
+            get(directory::get)
+                .put(directory::update)
+                .delete(directory::remove),
+        )
+        .route(
+            "/api/v1/directory/{entry}/access",
+            get(directory::access_list).post(directory::share),
+        )
+        .route(
+            "/api/v1/directory/{entry}/access/{account}",
+            delete(directory::unshare),
+        )
+        .route(
+            "/api/v1/connections",
+            get(connections::list).post(connections::create),
+        )
+        .route(
+            "/api/v1/connections/{connection}",
+            get(connections::get)
+                .patch(connections::update)
+                .delete(connections::remove),
+        )
+        .route(
+            "/api/v1/connections/{connection}/access",
+            get(connections::access_list).post(connections::invite),
+        )
+        .route(
+            "/api/v1/connections/{connection}/access/{account}",
+            delete(connections::uninvite),
+        )
+        .route(
+            "/api/v1/connections/{connection}/policies",
+            get(connections::policies).put(connections::set_policy),
+        )
+        .route(
+            "/api/v1/connections/{connection}/account",
+            get(connections::account_get)
+                .post(connections::account_set)
+                .delete(connections::account_remove),
+        )
+        .route(
+            "/api/v1/connections/{connection}/account/authorize",
+            post(oauth::authorize),
+        )
+        .route(
+            "/api/v1/connections/{connection}/mcp",
+            post(execution::execute),
+        )
+        .route("/api/v1/calls", get(execution::list))
+        .route("/api/v1/calls/{call}", get(execution::get))
+        .route("/api/v1/calls/{call}/assets", get(assets::list))
+        .route("/api/v1/calls/{call}/assets/{index}", get(assets::download))
+        .route(
+            "/api/v1/calls/{call}/assets/{index}/ticket",
+            post(assets::ticket),
+        )
+        .route("/api/v1/calls/{call}/cancel", post(execution::cancel))
+        .route("/api/v1/downloads/{ticket}", get(assets::redeem))
+        .route("/api/v1/hosts", get(hosts::list).post(hosts::create))
+        .route(
+            "/api/v1/hosts/{host}",
+            get(hosts::get).delete(hosts::remove),
+        )
+        .route(
+            "/api/v1/hosts/{host}/legacy-accounts",
+            get(hosts::legacy_accounts),
+        )
+        .route("/api/v1/hosts/{host}/poll", post(hosts::poll))
+        .route(
+            "/api/v1/hosts/{host}/jobs/{job}/result",
+            post(hosts::complete),
+        )
+        .route(
+            "/api/v1/hosts/{host}/jobs/{job}/progress",
+            post(hosts::progress),
+        )
+        .route("/webhooks/accounts", post(accounts_webhook::receive))
+        .route("/webhooks/iam", post(webhook_moved))
+        .route("/oauth/start", get(oauth::start))
+        .route("/oauth/client-metadata.json", get(oauth::client_metadata))
+        .route("/oauth/callback", get(oauth::callback))
+        .fallback(not_found)
+        .layer(DefaultBodyLimit::max(20 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(
+            ingress,
+            cells_ingress::restore,
+        ))
+        .layer(middleware::from_fn(secure_headers))
+        .with_state(app)
 }
 async fn serve(config: Config) -> anyhow::Result<()> {
+    cells_ingress::CellsIngress::from_env().map_err(anyhow::Error::msg)?;
     let bind = config.bind.clone();
     let app = App::new(config).map_err(|e| anyhow::anyhow!(e.1.message))?;
     app.store
@@ -229,6 +317,28 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     let shutdown = tokio_util::sync::CancellationToken::new();
     let worker = tokio::spawn(operations::report_worker(app.clone(), shutdown.clone()));
     let account_worker = tokio::spawn(accounts::account_worker(app.clone(), shutdown.clone()));
+    let store = app.store.clone();
+    let database_shutdown = shutdown.clone();
+    let database_worker = tokio::spawn(async move {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(5));
+        loop {
+            tokio::select! {
+                _ = database_shutdown.cancelled() => return false,
+                _ = timer.tick() => {
+                    let store = store.clone();
+                    let healthy = tokio::task::spawn_blocking(move || store.health().is_ok()).await.unwrap_or(false);
+                    if !healthy {
+                        // Never reconnect without reacquiring the single-writer
+                        // lease. Exit so Cells can replace the whole instance;
+                        // recovery marks uncertain calls instead of replaying them.
+                        tracing::error!("Database connection lost; stopping the backend");
+                        database_shutdown.cancel();
+                        return true;
+                    }
+                }
+            }
+        }
+    });
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!(address=%bind,accounts=%app.config.accounts_url,"Silicon MCPort listening");
     let shutdown_app = app.clone();
@@ -240,11 +350,11 @@ async fn serve(config: Config) -> anyhow::Result<()> {
                 let mut terminate =
                     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                         .expect("SIGTERM handler");
-                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} }
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {}, _ = worker_shutdown.cancelled() => {} }
             }
             #[cfg(not(unix))]
             {
-                let _ = tokio::signal::ctrl_c().await;
+                tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = worker_shutdown.cancelled() => {} }
             }
             worker_shutdown.cancel();
             if let Ok(connections) = shutdown_app
@@ -269,6 +379,9 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     shutdown.cancel();
     let _ = worker.await;
     let _ = account_worker.await;
+    if database_worker.await.unwrap_or(true) {
+        anyhow::bail!("Database connection lost; a fresh backend instance is required");
+    }
     Ok(())
 }
 #[tokio::main]
@@ -281,12 +394,31 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
+    if let Some(Command::ImportPostgres { source, apply }) = &cli.command {
+        let database_url = std::env::var("DATABASE_URL")
+            .map_err(|_| anyhow::anyhow!("DATABASE_URL is required for the PostgreSQL import."))?;
+        let raw_key = std::env::var("MCPORT_MASTER_KEY").map_err(|_| {
+            anyhow::anyhow!(
+                "MCPORT_MASTER_KEY is required; use the existing SQLite encryption key."
+            )
+        })?;
+        let key: [u8; 32] = hex::decode(raw_key)
+            .ok()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| {
+                anyhow::anyhow!("MCPORT_MASTER_KEY must be 64 hexadecimal characters.")
+            })?;
+        let report = postgres_store::import_sqlite(source, &database_url, &key, *apply)?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
     let (config, warnings) = Config::from_env().map_err(|message| anyhow::anyhow!(message))?;
     for warning in warnings {
         tracing::warn!("{warning}");
     }
     match cli.command.unwrap_or(Command::Serve) {
         Command::Serve => serve(config).await,
+        Command::ImportPostgres { .. } => unreachable!("handled before application configuration"),
         Command::MigrateAccountUuids { file, apply } => uuid_backfill::run(config, &file, apply),
         Command::LegacyPrincipals => identity::print_principals(config),
         Command::LinkIdentities {

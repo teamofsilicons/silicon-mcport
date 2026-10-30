@@ -1,3 +1,4 @@
+use crate::database::Connection;
 use crate::{
     error::{Error, Result},
     public_ids::{Cursor, INITIAL_CURSOR},
@@ -7,7 +8,7 @@ use aes_gcm::{
     aead::{Aead, Payload},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{path::Path, sync::Mutex};
 
@@ -30,6 +31,13 @@ pub struct Store {
     cipher: Aes256Gcm,
 }
 impl Store {
+    /// Checks the same connection that retains the writer lock. No reconnect or
+    /// replacement connection may turn a lost writer lease into apparent health.
+    pub fn health(&self) -> Result<()> {
+        let db = self.db.lock().map_err(|_| Error::internal())?;
+        let _: i64 = db.query_row("SELECT 1", [], |r| r.get(0))?;
+        Ok(())
+    }
     pub fn open(path: &Path, key: &[u8; 32]) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -63,6 +71,55 @@ impl Store {
             db: Mutex::new(db),
             cipher: Aes256Gcm::new(key.into()),
         })
+    }
+    /// Connect to the Cells instance's own PostgreSQL gate. The database worker
+    /// retains a session advisory lock for this store's complete lifetime.
+    pub fn open_postgres(url: &str, key: &[u8; 32]) -> Result<Self> {
+        let mut db = Connection::postgres(url)?;
+        crate::postgres_store::initialize(&mut db)?;
+        let store = Self {
+            db: Mutex::new(db),
+            cipher: Aes256Gcm::new(key.into()),
+        };
+        {
+            let db = store.db.lock().map_err(|_| Error::internal())?;
+            let marker: Option<String> = db
+                .query_row(
+                    "SELECT value FROM metadata WHERE name='key_check'",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(marker) = marker {
+                let valid: bool = store.decrypt(&marker, "mcport.postgres.key-check.v1")?;
+                if !valid {
+                    return Err(Error::internal());
+                }
+            }
+            // Validate every ciphertext before serving, including inactive/legacy
+            // records. A missing or wrong secret must never start a fresh store.
+            let mut rows =
+                db.prepare("SELECT kind,id,environment,org_id,owner_id,value FROM records")?;
+            for row in rows.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })? {
+                let (kind, id, env, org, owner, value) = row?;
+                let _: serde_json::Value =
+                    store.decrypt(&value, &Self::aad(&kind, &id, &env, &org, &owner))?;
+            }
+            db.execute(
+                "INSERT OR IGNORE INTO metadata(name,value) VALUES('key_check',?)",
+                [store.encrypt(&true, "mcport.postgres.key-check.v1")?],
+            )?;
+        }
+        Ok(store)
     }
     /// Additive, numbered schema steps gated by `PRAGMA user_version`. Each step runs
     /// in one IMMEDIATE transaction together with its version bump. Never edit an
@@ -152,12 +209,25 @@ impl Store {
         Ok(STANDARD.encode(packed))
     }
     pub(crate) fn decrypt<T: DeserializeOwned>(&self, value: &str, aad: &str) -> Result<T> {
+        Self::decrypt_cipher(&self.cipher, value, aad)
+    }
+    pub(crate) fn decrypt_with_key<T: DeserializeOwned>(
+        key: &[u8; 32],
+        value: &str,
+        aad: &str,
+    ) -> Result<T> {
+        Self::decrypt_cipher(&Aes256Gcm::new(key.into()), value, aad)
+    }
+    fn decrypt_cipher<T: DeserializeOwned>(
+        cipher: &Aes256Gcm,
+        value: &str,
+        aad: &str,
+    ) -> Result<T> {
         let packed = STANDARD.decode(value).map_err(|_| Error::internal())?;
         if packed.len() < 28 {
             return Err(Error::internal());
         }
-        let plain = self
-            .cipher
+        let plain = cipher
             .decrypt(
                 Nonce::from_slice(&packed[..12]),
                 Payload {
@@ -325,7 +395,7 @@ impl Store {
     /// account epoch goes with it.
     fn delete_connection_records(
         &self,
-        tx: &rusqlite::Transaction<'_>,
+        tx: &crate::database::Transaction<'_>,
         connection_id: &str,
         kinds: &[&str],
     ) -> Result<()> {
@@ -378,7 +448,10 @@ impl Store {
         tx.commit()?;
         Ok(changed)
     }
-    fn migrate_private_visibility_in(&self, tx: &rusqlite::Transaction<'_>) -> Result<usize> {
+    fn migrate_private_visibility_in(
+        &self,
+        tx: &crate::database::Transaction<'_>,
+    ) -> Result<usize> {
         let rows = {
             let mut statement = tx.prepare(
                 "SELECT id,environment,org_id,owner_id,value FROM records WHERE kind='connection'",
@@ -460,7 +533,7 @@ impl Store {
     }
     pub fn list<T: DeserializeOwned>(&self, kind: &str, env: Option<&str>) -> Result<Vec<T>> {
         let db = self.db.lock().map_err(|_| Error::internal())?;
-        let mut stmt=db.prepare("SELECT id,environment,org_id,owner_id,value FROM records WHERE kind=? AND (? IS NULL OR environment=?) ORDER BY rowid DESC")?;
+        let mut stmt=db.prepare("SELECT id,environment,org_id,owner_id,value FROM records WHERE kind=? AND (CAST(? AS TEXT) IS NULL OR environment=?) ORDER BY rowid DESC")?;
         let rows = stmt
             .query_map(params![kind, env, env], |r| {
                 Ok((
@@ -568,11 +641,11 @@ pub struct RawRecord {
 }
 /// Raw record access inside one transaction (see `Store::raw_transaction`).
 pub struct RawTx<'t, 'c> {
-    tx: &'t rusqlite::Transaction<'c>,
+    tx: &'t crate::database::Transaction<'c>,
     store: &'t Store,
 }
 impl RawTx<'_, '_> {
-    pub fn connection(&self) -> &rusqlite::Connection {
+    pub fn connection(&self) -> &Connection {
         self.tx
     }
     pub fn migrate_private_visibility(&self) -> Result<usize> {

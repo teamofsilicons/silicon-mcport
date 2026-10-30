@@ -11,7 +11,7 @@ description = "Primary Rust interface for Silicon MCPort: the API client, Silico
 default = ["accounts"]
 # Sign in with Silicon Accounts as MCPort's public client: the device flow for
 # Carbons, short-lived tokens for Silicons, refresh and sign-out. Stateless.
-accounts = ["dep:silicon-accounts-client", "dep:reqwest", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:tokio", "dep:url"]
+accounts = ["dep:silicon-accounts-client", "dep:reqwest", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:tokio", "dep:url", "dep:sha2"]
 # Keep a sign-in in one explicit file: owner-only, atomic writes, single-flight
 # refresh under a file lock.
 session = ["accounts", "dep:fs2"]
@@ -19,10 +19,10 @@ session = ["accounts", "dep:fs2"]
 local = ["dep:mcport-daemon", "dep:mcport-mcp", "dep:serde_json", "dep:thiserror", "dep:fs2", "dep:tokio", "dep:tokio-util"]
 
 [dependencies]
-mcport-api = { path = "../mcport-api", version = "0.4.0" }
-mcport-daemon = { path = "../mcport-daemon", version = "0.4.0", optional = true }
-mcport-mcp = { path = "../mcport-mcp", version = "0.4.0", optional = true }
-silicon-accounts-client = { version = "0.4.0", optional = true }
+mcport-api = { path = "../mcport-api", version = "0.5.0" }
+mcport-daemon = { path = "../mcport-daemon", version = "0.5.0", optional = true }
+mcport-mcp = { path = "../mcport-mcp", version = "0.5.0", optional = true }
+silicon-accounts-client = { version = "0.7.0", optional = true }
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "form"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
@@ -40,3 +40,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tempfile = "3"
 axum = "0.8"
+
+[dependencies.sha2]
+version = "0.10"
+optional = true

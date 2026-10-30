@@ -1,17 +1,18 @@
 //! Plaintext identity tables: cached accounts, IAM-era identity links, webhook
 //! deliveries already handled and Silicons' allow lists. None of these hold
 //! secrets; encrypted application records stay in `records`.
+use crate::database::{Connection, Row};
 use crate::{
     accounts::AccountRow,
     error::{Error, Result},
     state::now,
     store::Store,
 };
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, params};
 
 const ACCOUNT_COLUMNS: &str = "uuid,kind,id,display_name,pfp_url,status,custodian_uuid,custodian_id,version,revoked_before,synced_at_ms,looked_up_at,last_fid,updated_at,signed_in_at";
 
-fn account_row(row: &Row<'_>) -> rusqlite::Result<AccountRow> {
+fn account_row(row: &Row) -> rusqlite::Result<AccountRow> {
     Ok(AccountRow {
         uuid: row.get(0)?,
         kind: row.get(1)?,
@@ -30,10 +31,10 @@ fn account_row(row: &Row<'_>) -> rusqlite::Result<AccountRow> {
         signed_in_at: row.get(14)?,
     })
 }
-pub(crate) fn write_account(db: &rusqlite::Connection, a: &AccountRow) -> Result<()> {
+pub(crate) fn write_account(db: &Connection, a: &AccountRow) -> Result<()> {
     db.execute(
         &format!(
-            "INSERT OR REPLACE INTO accounts({ACCOUNT_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO accounts({ACCOUNT_COLUMNS}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET kind=excluded.kind,id=excluded.id,display_name=excluded.display_name,pfp_url=excluded.pfp_url,status=excluded.status,custodian_uuid=excluded.custodian_uuid,custodian_id=excluded.custodian_id,version=excluded.version,revoked_before=excluded.revoked_before,synced_at_ms=excluded.synced_at_ms,looked_up_at=excluded.looked_up_at,last_fid=excluded.last_fid,updated_at=excluded.updated_at,signed_in_at=excluded.signed_in_at"
         ),
         params![
             a.uuid,
@@ -55,7 +56,7 @@ pub(crate) fn write_account(db: &rusqlite::Connection, a: &AccountRow) -> Result
     )?;
     Ok(())
 }
-pub(crate) fn read_account(db: &rusqlite::Connection, uuid: &str) -> Result<Option<AccountRow>> {
+pub(crate) fn read_account(db: &Connection, uuid: &str) -> Result<Option<AccountRow>> {
     Ok(db
         .query_row(
             &format!("SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE uuid=?"),

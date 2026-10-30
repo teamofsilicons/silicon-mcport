@@ -12,6 +12,9 @@ MCPORT_E2E_BASE sets the default base port (scripts/check.py passes the environm
 """
 import argparse
 import concurrent.futures
+import csv
+import io
+import shutil
 import html
 import http.cookiejar
 import json
@@ -25,7 +28,7 @@ import sys
 import tempfile
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, unquote
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,7 +38,7 @@ import directory_journey  # noqa: E402
 OPENER = build_opener(ProxyHandler({}))
 # Variables that would point the development stack somewhere else than the fake.
 FOREIGN = ("ACCOUNTS_URL", "ACCOUNTS_API_URL", "MCPORT_APP_SECRET", "MCPORT_TEST_STACK", "MCPORT_DEV_DIR", "MCPORT_DEV_PIDS",
-           "MCPORT_DEV_BASE", "MCPORT_URL", "MCPORT_SERVER_BIN", "POSTMARK_SERVER_TOKEN")
+           "MCPORT_DEV_BASE", "MCPORT_URL", "MCPORT_SERVER_BIN", "POSTMARK_SERVER_TOKEN", "DATABASE_URL", "CELLS_DATABASE_URL", "CELLS_API_URL", "MCPORT_MASTER_KEY", "MCPORT_CELLS_INGRESS_SECRET")
 
 
 def free_block(size=4):
@@ -78,6 +81,7 @@ def request(url, body=None, method=None, headers=None, expected=200):
 class Journey:
     def __init__(self, directory, base):
         self.directory = directory
+        self.database_url = os.environ.get("MCPORT_TEST_DATABASE_URL")
         self.base = base
         self.backend = f"http://127.0.0.1:{base + 1}"
         self.provider = f"http://127.0.0.1:{base + 2}"
@@ -239,15 +243,34 @@ class Journey:
             time.sleep(0.2)
         raise AssertionError(label + ": timed out")
 
+    def read_indexes(self, query):
+        # Only fixed non-secret index queries are accepted by this fixture helper.
+        if not self.database_url:
+            database = (self.directory / "dev" / "server" / "mcport.sqlite").as_uri() + "?mode=ro"
+            with sqlite3.connect(database, uri=True) as connection:
+                return connection.execute(query).fetchall()
+        parsed = urlparse(self.database_url)
+        if parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in {"127.0.0.1", "::1"} or not parsed.path.endswith("_test"):
+            raise AssertionError("PostgreSQL E2E requires a disposable *_test database on literal loopback")
+        psql = os.environ.get("MCPORT_PSQL") or shutil.which("psql")
+        if not psql:
+            raise AssertionError("PostgreSQL E2E requires psql on PATH or MCPORT_PSQL")
+        env = {k:v for k,v in os.environ.items() if not k.startswith("PG")}
+        env.update(PGHOST=parsed.hostname, PGPORT=str(parsed.port or 5432), PGDATABASE=unquote(parsed.path.lstrip("/")),
+                   PGUSER=unquote(parsed.username or ""), PGPASSWORD=unquote(parsed.password or ""), PGSSLMODE="disable",
+                   PGOPTIONS="-csearch_path=mcport,pg_catalog", PGCONNECT_TIMEOUT="5")
+        response = subprocess.run([psql, "-X", "-q", "-v", "ON_ERROR_STOP=1"], input=f"COPY ({query}) TO STDOUT WITH (FORMAT CSV);", text=True, env=env, capture_output=True, timeout=15)
+        if response.returncode:
+            raise AssertionError("PostgreSQL index inspection failed; verify the disposable database")
+        return [tuple(row) for row in csv.reader(io.StringIO(response.stdout))]
+
     def authority_index(self):
         # Read only non-secret record indexes. All authority is created/removed
         # through the real API; no ciphertext, master key or database writes.
-        database = (self.directory / "dev" / "server" / "mcport.sqlite").as_uri() + "?mode=ro"
-        with sqlite3.connect(database, uri=True) as connection:
-            return set(connection.execute(
-                "SELECT kind,id FROM records WHERE environment='production' "
-                "AND kind IN ('connection','credential','account_epoch','grant','policy','oauth_attempt')"
-            ).fetchall())
+        return set(self.read_indexes(
+            "SELECT kind,id FROM records WHERE environment='production' "
+            "AND kind IN ('connection','credential','account_epoch','grant','policy','oauth_attempt')"
+        ))
 
     def wait_connection(self, name, ready=True):
         for _ in range(160):
@@ -617,9 +640,7 @@ class Journey:
                                headers={"Authorization": "Bearer " + self.access_token("owner")[1]["access_token"]})["data"] == {})
         report = self.cli("owner", "report", "Fixture report with no mail configuration", expected=False)
         self.check("Missing Postmark configuration is not silent success", report["status"] == "delivery_failed" and bool(report["id"]))
-        database = (self.directory / "dev" / "server" / "mcport.sqlite").as_uri() + "?mode=ro"
-        with sqlite3.connect(database, uri=True) as connection:
-            resources = connection.execute("SELECT kind,id FROM records WHERE kind IN ('connection','host','call','report')").fetchall()
+        resources = self.read_indexes("SELECT kind,id FROM records WHERE kind IN ('connection','host','call','report')")
         self.check("All public resource creation paths use globally unique three-character base62 IDs", {
             kind for kind, _ in resources
         } == {"connection", "host", "call", "report"} and all(
@@ -643,7 +664,7 @@ def main():
     try:
         journey.start()
         journey.run()
-        result = {"passed": len(journey.checks), "checks": journey.checks, "run_dir": str(directory)}
+        result = {"passed": len(journey.checks), "checks": journey.checks, "run_dir": str(directory), "storage": "postgresql" if journey.database_url else "sqlite"}
         (directory / "result.json").write_text(json.dumps(result, indent=2))
         print(json.dumps({"passed": result["passed"], "run_dir": result["run_dir"]}))
     finally:

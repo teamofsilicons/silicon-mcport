@@ -68,8 +68,22 @@ async fn poll(
             .iter()
             .any(|id| id == "registered")
     );
-    // Deliberately duplicate leases: the connector must never repeat execution.
-    Json(json!({"data":{"jobs":fixture.jobs,"cancelled":[]}}))
+    // Match the gateway's capacity contract, including results awaiting upload.
+    let occupied = input["capabilities"]["active_jobs"].as_u64().unwrap() as usize;
+    let active = input["capabilities"]["active_job_ids"].as_array().unwrap();
+    let results = fixture.results.lock().unwrap();
+    let mut jobs: Vec<_> = fixture
+        .jobs
+        .iter()
+        .filter(|job| !results.contains_key(&job.id) && !active.iter().any(|id| id == &job.id))
+        .take(4usize.saturating_sub(occupied))
+        .cloned()
+        .collect();
+    // Deliberately duplicate a lease too: the connector must never repeat execution.
+    if !jobs.iter().any(|job| job.id == fixture.jobs[0].id) {
+        jobs.push(fixture.jobs[0].clone());
+    }
+    Json(json!({"data":{"jobs":jobs,"cancelled":[]}}))
 }
 async fn result(
     State(fixture): State<Fixture>,

@@ -304,6 +304,24 @@ async fn disconnected_account_rejects_a_pending_lease_without_provider_execution
         harness.fixture.result_received.notified(),
     )
     .await;
+    if received.is_ok() {
+        // Receiving the request is distinct from the connector observing its ack.
+        // Shutdown is now allowed to cancel an in-flight upload and retain it.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let journal: Value = serde_json::from_slice(
+                    &std::fs::read(harness.path.parent().unwrap().join("journal.json")).unwrap(),
+                )
+                .unwrap();
+                if journal["jobs"]["leased-once"]["delivered"] == true {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
     let fixture = harness.fixture.clone();
     let journal = harness.stop().await;
     assert!(

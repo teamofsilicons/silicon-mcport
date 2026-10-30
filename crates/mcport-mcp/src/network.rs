@@ -9,6 +9,9 @@ use url::{Host, Url};
 pub enum NetworkPolicy {
     /// Central executor: HTTPS and globally routable addresses only.
     PublicInternet,
+    /// Cells' trusted runtime proxy resolves and pins public addresses. The
+    /// isolated guest has no DNS or direct network access.
+    CellsPublicInternet,
     /// Explicitly registered endpoint on the local host connector.
     LocalHost,
 }
@@ -38,15 +41,11 @@ fn public_address(ip: IpAddr) -> bool {
     }
 }
 
-async fn resolve_endpoint(
-    url: &str,
-    policy: NetworkPolicy,
-    timeout: Duration,
-) -> Result<(Url, Vec<SocketAddr>), McpError> {
+fn parse_endpoint(url: &str, policy: NetworkPolicy) -> Result<Url, McpError> {
     let url = Url::parse(url)
         .map_err(|_| McpError::new("invalid_url", "MCP endpoint must be a valid absolute URL."))?;
     if !matches!(url.scheme(), "http" | "https")
-        || (policy == NetworkPolicy::PublicInternet && url.scheme() != "https")
+        || (policy != NetworkPolicy::LocalHost && url.scheme() != "https")
     {
         return Err(McpError::new(
             "unsafe_endpoint",
@@ -58,6 +57,40 @@ async fn resolve_endpoint(
             "unsafe_endpoint",
             "Endpoint URLs cannot contain user credentials or fragments. Configure authentication separately.",
         ));
+    }
+    if policy == NetworkPolicy::CellsPublicInternet {
+        if url.port_or_known_default() != Some(443) {
+            return Err(McpError::new(
+                "unsafe_endpoint",
+                "Cells cloud MCP endpoints must use HTTPS on port 443.",
+            ));
+        }
+        let address = match url.host() {
+            Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+            Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+            _ => None,
+        };
+        if address.is_some_and(|ip| !public_address(ip)) {
+            return Err(McpError::new(
+                "unsafe_endpoint",
+                "Cloud MCP endpoints cannot use private or reserved addresses.",
+            ));
+        }
+    }
+    Ok(url)
+}
+
+async fn resolve_endpoint(
+    url: &str,
+    policy: NetworkPolicy,
+    timeout: Duration,
+) -> Result<(Url, Vec<SocketAddr>), McpError> {
+    let url = parse_endpoint(url, policy)?;
+    if policy == NetworkPolicy::CellsPublicInternet {
+        // DNS validation and address pinning happen in the trusted Cells host,
+        // immediately before it opens the CONNECT destination. Guest DNS would
+        // both fail in the sandbox and duplicate that security boundary.
+        return Ok((url, vec![]));
     }
     let port = url
         .port_or_known_default()
@@ -103,6 +136,13 @@ pub async fn validate_public_url(url: &str) -> Result<(), McpError> {
         .map(|_| ())
 }
 
+/// Validate a URL with the same authority used when opening its transport.
+pub async fn validate_url(url: &str, policy: NetworkPolicy) -> Result<(), McpError> {
+    resolve_endpoint(url, policy, Duration::from_secs(10))
+        .await
+        .map(|_| ())
+}
+
 /// A client pinned to the validated endpoint's DNS answers. Redirects and
 /// environment proxies are disabled to avoid bypassing the address policy.
 /// Use this client only for the URL whose hostname was validated here.
@@ -119,7 +159,18 @@ pub async fn validated_http_client(
         .connect_timeout(connect_timeout)
         .timeout(timeout)
         .pool_max_idle_per_host(0);
-    if let Some(Host::Domain(host)) = url.host() {
+    if policy == NetworkPolicy::CellsPublicInternet {
+        // This endpoint is part of Cells' service ABI, not a caller-provided
+        // proxy or an inherited machine environment variable.
+        builder = builder.proxy(
+            reqwest::Proxy::https("http://127.0.0.1:18082").map_err(|_| {
+                McpError::new(
+                    "http_configuration",
+                    "Could not configure the Cells network gateway.",
+                )
+            })?,
+        );
+    } else if let Some(Host::Domain(host)) = url.host() {
         builder = builder.resolve_to_addrs(host, &addresses);
     }
     builder.build().map_err(|_| {
@@ -169,5 +220,74 @@ mod tests {
         ] {
             assert!(validate_public_url(url).await.is_err(), "{url}");
         }
+    }
+
+    #[tokio::test]
+    async fn cells_uses_host_dns_and_keeps_url_guards() {
+        // A deliberately nonexistent DNS name passes syntactic validation:
+        // only the Cells proxy is allowed to resolve and connect it.
+        validate_url(
+            "https://mcport-fixture.invalid/mcp",
+            NetworkPolicy::CellsPublicInternet,
+        )
+        .await
+        .unwrap();
+        for url in [
+            "http://example.com/mcp",
+            "https://127.0.0.1/mcp",
+            "https://[::1]/mcp",
+            "https://169.254.169.254/",
+            "https://example.com:8443/mcp",
+            "https://user:secret@example.com/mcp",
+            "https://example.com/mcp#secret",
+        ] {
+            assert!(
+                validate_url(url, NetworkPolicy::CellsPublicInternet)
+                    .await
+                    .is_err(),
+                "{url}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cells_transport_sends_connect_to_the_runtime_proxy() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:18082")
+            .await
+            .unwrap();
+        let proxy = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(socket.read_u8().await.unwrap());
+                assert!(request.len() < 8192);
+            }
+            socket
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let client = validated_http_client(
+            "https://mcport-fixture.invalid/mcp",
+            NetworkPolicy::CellsPublicInternet,
+            Duration::from_secs(2),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap();
+        assert!(
+            client
+                .get("https://mcport-fixture.invalid/mcp")
+                .send()
+                .await
+                .is_err()
+        );
+        let request = tokio::time::timeout(Duration::from_secs(3), proxy)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(request.starts_with("CONNECT mcport-fixture.invalid:443 HTTP/1.1\r\n"));
     }
 }

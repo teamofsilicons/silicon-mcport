@@ -1,8 +1,16 @@
 # Architecture
 
-MCPort has a central Rust gateway, a public Rust client package, a stateful CLI with an outbound host daemon, and a configuration website (a Next.js server that keeps each sign-in and calls the gateway with bearer tokens).
+MCPort runs its central Rust gateway as a Silicon Cells persistent service, with a public Rust client package, a stateful CLI with an outbound host daemon, and a configuration website (a Next.js server that keeps each sign-in and calls the gateway with bearer tokens).
 
 ## Identity and permissions
+
+The public Caddy edge forwards to the cell service and transports the original
+McPort bearer in `X-Mcport-Authorization`. Cells removes ordinary authorization
+credentials before ingress. McPort verifies the injected request capability with
+the instance's local Cells broker, then runs its normal Accounts or host-token
+verification. The custom header is a transport, never identity evidence. The
+cell's publishable key carries no McPort account authority. No business logic or
+database remains on the public edge.
 
 Identity is Silicon Accounts. Every request carries a Silicon Accounts access token issued to the `mcport` app; the gateway verifies it locally against the cached Accounts JWKS (EdDSA, audience, issuer, expiry) and refuses tokens issued before the account signed out, rotated its key or removed MCPort's access. Execution, provider-account changes, sharing, deletion and host creation also introspect the token with Silicon Accounts (answers reused for 30 seconds). The gateway issues no sessions or cookies.
 
@@ -16,7 +24,7 @@ Provider credentials have their own lifecycle. Shared mode selects the owner's g
 
 ## Execution
 
-Cloud HTTP calls execute centrally through bounded MCP transports. Public destinations require HTTPS, DNS validation and pinned public addresses. Redirects and environment proxies are disabled. Operators may explicitly allow exact private origins for controlled environments; clients cannot override this policy.
+Cloud HTTP calls execute through bounded MCP transports. In Cells, HTTPS requests use the runtime's fixed loopback CONNECT proxy; the trusted Cells host resolves, validates and pins public addresses. Guest DNS and direct networking are unavailable. HTTPS port 443 is required and redirects remain disabled. Outside Cells, McPort pins validated public DNS answers itself and disables environment proxies. Explicit private-origin overrides are only available outside Cells for controlled local fixtures; callers cannot override either policy.
 
 Local HTTP and stdio execute through a registered host. The daemon connects outward, authenticating with a host-specific token. Jobs carry connection IDs, methods, arguments and verified actor context; they never carry arbitrary endpoints, commands or provider credentials. The local registry is authoritative. Per-user process/transport sessions are isolated, bounded and invalidated when credentials or configuration change. The daemon separately checks registered MCP availability with bounded protocol handshakes (at most four concurrently), using each account’s own configuration and no tool/resource calls. Existing stdio sessions are reused for liveness to avoid a competing process. Status starts as checking, becomes ready/offline after a check, and returns to checking when evidence is stale. Host and protocol health are separate; a health snapshot never prevents an authorized call from trying its normal timeout. Health is normally refreshed within 50 seconds, with longer checking states on very large registries.
 
@@ -26,13 +34,20 @@ Calls record the caller, selected provider account, method, timestamps, progress
 
 ## Persistence and lifecycle
 
-This version runs one gateway process over SQLite WAL with full synchronous durability. AES-256-GCM encrypts record bodies using record- and owner-bound authenticated data. The data directory is mode 0700 and key/database files are mode 0600 on Unix. Back up both the encrypted database and its protected master key. Do not deploy multiple independent gateway writers: family and dispatch coordination currently use in-process locks.
+Production runs one gateway process over actual PostgreSQL tables in the cell's
+private `mcport` schema. A session advisory lock enforces a single writer because
+dispatch still has process-local coordination. Losing that database connection
+fails readiness and stops the process; Cells restarts it, and uncertain calls are
+never automatically replayed. SQLite WAL remains available for local fixtures.
+The migration copies all durable tables in one verified transaction, preserves
+ciphertext, IDs, allocator/replay state and identities, and refuses nonempty
+targets, a wrong key or pending calls. AES-256-GCM encrypts record bodies using record- and owner-bound authenticated data. The data directory is mode 0700 and key/database files are mode 0600 on Unix. Back up both the encrypted database and its protected master key. Do not deploy multiple independent gateway writers: family and dispatch coordination currently use in-process locks.
 
 The access upgrade atomically converts stored `private` connections to `invited` and removes their dormant invitations, preserving owner-only use. Legacy clients may still send `private`: creation becomes invited with no grants, and an owner-only reset clears invitations in the same transaction as the update. Provider credentials, connection IDs and tool policies stay intact.
 
 Schema steps are numbered with `PRAGMA user_version` and only add tables and columns. Records written before Silicon Accounts keep their fields verbatim (typed reads preserve unknown fields) and stay unreachable until the operator re-keys them with `mcport-server link-identities`, which rewrites identity fields, derived record ids, owner columns and the authenticated data in one transaction, keeps the original identity in `legacy_*` columns and each value's `legacy` record, converts connections that earlier releases made visible to everyone around their owner into `circle` connections, with explicit grants for accounts outside the circle that used them, and can be re-run with another mapping before cutover.
 
-Public resource creation allocates a compact ID in the same SQLite `IMMEDIATE` transaction as the encrypted record. A persisted arbitrary-width base62 cursor traverses each complete width through a seeded affine bijection; it does not truncate random identifiers, retry random collisions, or grow early. Three-character IDs provide 62³ = 238,328 values, followed by four, five, and further widths. A global allocation ledger survives resource and account deletion. Failed transactions roll back both allocation and creation. These public locators are not security credentials.
+Public resource creation allocates a compact ID in the same database transaction as the encrypted record (SQLite `IMMEDIATE` locally, PostgreSQL under the sole writer lock in Cells). A persisted arbitrary-width base62 cursor traverses each complete width through a seeded affine bijection; it does not truncate random identifiers, retry random collisions, or grow early. Three-character IDs provide 62³ = 238,328 values, followed by four, five, and further widths. A global allocation ledger survives resource and account deletion. Failed transactions roll back both allocation and creation. These public locators are not security credentials.
 
 The additive migration leaves legacy records and references unchanged and reserves existing public IDs. New idempotent calls have compact public IDs plus a private replay index, scoped to the calling account, committed with the call. Existing hash-keyed calls remain replayable without dispatching again. Deleting a call (also when its account is deleted) removes its replay mapping but preserves the allocation cursor and ledger. Backups must include the whole database; do not reset the allocator or restore its tables independently of records. Rolling back to an older binary after compact keyed calls have been created would bypass the new replay index and can repeat upstream actions, so use a coordinated database/application backup rollback rather than a binary-only downgrade.
 

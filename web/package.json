@@ -1,6 +1,6 @@
 {
   "name": "@silicon-mcport/web",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "description": "The Silicon Mcport web workspace",
   "scripts": {
@@ -28,7 +28,9 @@
     "motion": "14.0.0",
     "next": "16.3.8",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "@aws-sdk/client-dynamodb": "3.1160.0",
+    "@vercel/oidc-aws-credentials-provider": "3.3.17"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
@@ -43,7 +45,7 @@
     "typescript": "5.9.3"
   },
   "engines": {
-    "node": ">=24"
+    "node": "24.x"
   },
   "packageManager": "pnpm@10.33.0"
 }

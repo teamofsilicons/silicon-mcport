@@ -7,9 +7,10 @@
 //! - **Silicons** never see a page: they mint a short-lived token with
 //!   `silicon-accounts login --app mcport -q` and hand it over; [`SignIn::exchange_slt`]
 //!   exchanges it (single use, 2 minutes, bound to MCPort).
-//! - [`SignIn::refresh`] rotates the refresh token. A used refresh token ends the whole
-//!   sign-in, so refresh one at a time and store the new pair before using it (the
-//!   `session` feature's [`crate::session::SessionFile`] does both).
+//! - [`SignIn::refresh`] rotates the refresh token with a stable recovery key. An
+//!   interrupted response can be retried with the old token without rotating twice.
+//!   Store the new pair before using it (`crate::session::SessionFile` does so under
+//!   a cross-process lock). A different key with a used token ends the sign-in.
 //! - [`SignIn::revoke`] signs this sign-in out at Silicon Accounts.
 //!
 //! [`Tokens::access_token`] is what [`crate::RequestContext::authenticated`] sends to
@@ -29,8 +30,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 pub use silicon_accounts_client::Secret;
-use silicon_accounts_client::{AccountsClient, DevicePoll, SLT_GRANT_TYPE, TokenResponse};
+use silicon_accounts_client::{AccountsClient, DevicePoll, TokenResponse};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -54,7 +56,7 @@ fn now() -> i64 {
 /// The signed-in Carbon or Silicon, as Silicon Accounts shares it with MCPort.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedInAccount {
-    /// Permanent Silicon Accounts uuid (short, case-sensitive). Key on this.
+    /// Permanent Silicon Accounts UUID. Key on this, never on the public id.
     pub uuid: String,
     /// Current public id (`c:ada`, `si:scout`); it can change.
     pub id: String,
@@ -503,8 +505,6 @@ impl SignIn {
         let client = AccountsClient::builder()
             .base_url(base.as_str())
             .user_agent(agent)
-            // MCPort records no telemetry, and the Accounts client's own stays off.
-            .telemetry(false)
             .build()
             .map_err(|e| configuration(e.message()))?;
         let http = reqwest::Client::builder()
@@ -640,26 +640,64 @@ impl SignIn {
                 ),
             });
         }
-        self.token_form(
-            &[
-                ("grant_type", SLT_GRANT_TYPE),
-                ("slt", slt),
-                ("client_id", &self.app_id),
-            ],
-            Grant::Slt,
-        )
-        .await
-    }
-
-    /// Rotate a refresh token with the app id alone. The old refresh token stops
-    /// working at once: store the returned pair before using it.
-    pub async fn refresh(&self, refresh_token: &str) -> Result<Tokens, SignInError> {
         let received_at = now();
         let response = self
             .client
-            .refresh_app_public_client(&self.app_id, refresh_token)
+            .exchange_slt_public_client(&self.app_id, slt)
             .await
-            .map_err(|e| from_accounts(e, Grant::Refresh))?;
+            .map_err(|e| from_accounts(e, Grant::Slt))?;
+        Tokens::from_response(response, received_at)
+    }
+
+    /// Rotate a refresh token with the app id alone. Retries after an interrupted
+    /// response use the same Accounts recovery key, including across processes.
+    /// The old token has high entropy; its domain-separated hash is an opaque
+    /// operation identifier and never contains the token itself.
+    pub async fn refresh(&self, refresh_token: &str) -> Result<Tokens, SignInError> {
+        let key = refresh_key(&self.app_id, refresh_token);
+        self.refresh_with_key(refresh_token, &key).await
+    }
+
+    /// Rotate with an explicit durable operation key. Reuse the key only for the
+    /// same old token; Accounts checks both the token and the current family.
+    pub async fn refresh_with_key(
+        &self,
+        refresh_token: &str,
+        key: &str,
+    ) -> Result<Tokens, SignInError> {
+        if key.is_empty() || key.len() > 200 || !key.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(SignInError::Configuration {
+                message: "The refresh operation key must be 1–200 visible ASCII characters.".into(),
+                hint: "Keep the same operation key when retrying the same refresh token.".into(),
+            });
+        }
+        let received_at = now();
+        // The published official 0.7.0 client has no keyed public-app refresh
+        // method. Keep this narrow adapter until that method is published.
+        let response = self
+            .http
+            .post(self.endpoint("v1/oauth/token"))
+            .header("Idempotency-Key", key)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token.trim()),
+                ("client_id", &self.app_id),
+            ])
+            .send()
+            .await
+            .map_err(transport)?;
+        let status = response.status().as_u16();
+        let body = response.bytes().await.map_err(transport)?;
+        if !(200..300).contains(&status) {
+            return Err(from_body(status, &body, Grant::Refresh));
+        }
+        let response: TokenResponse =
+            serde_json::from_slice(&body).map_err(|_| SignInError::Accounts {
+                status: Some(status),
+                code: "unexpected_response".into(),
+                message: "Silicon Accounts returned an unreadable refresh response.".into(),
+                hint: Some("Retry the same refresh operation to recover its result.".into()),
+            })?;
         Tokens::from_response(response, received_at)
     }
 
@@ -685,36 +723,21 @@ impl SignIn {
         Err(from_body(status, &body, Grant::Revoke))
     }
 
-    async fn token_form(&self, form: &[(&str, &str)], grant: Grant) -> Result<Tokens, SignInError> {
-        let received_at = now();
-        let response = self
-            .http
-            .post(self.endpoint("v1/oauth/token"))
-            .form(form)
-            .send()
-            .await
-            .map_err(transport)?;
-        let status = response.status().as_u16();
-        let body = response.bytes().await.map_err(transport)?;
-        if !(200..300).contains(&status) {
-            return Err(from_body(status, &body, grant));
-        }
-        let parsed: TokenResponse =
-            serde_json::from_slice(&body).map_err(|e| SignInError::Accounts {
-                status: Some(status),
-                code: "unexpected_response".into(),
-                message: format!("Silicon Accounts answered the sign-in with a body this client cannot read: {e}."),
-                hint: Some("Check ACCOUNTS_URL points at Silicon Accounts, then retry.".into()),
-            })?;
-        Tokens::from_response(parsed, received_at)
-    }
-
     fn endpoint(&self, path: &str) -> Url {
         let mut url = self.base.clone();
         let prefix = url.path().trim_end_matches('/').to_owned();
         url.set_path(&format!("{prefix}/{path}"));
         url
     }
+}
+
+fn refresh_key(app_id: &str, refresh_token: &str) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"mcport-public-refresh-v1\0");
+    hash.update(app_id.as_bytes());
+    hash.update(b"\0");
+    hash.update(refresh_token.trim().as_bytes());
+    format!("mcport-refresh-{:x}", hash.finalize())
 }
 
 fn transport(error: reqwest::Error) -> SignInError {

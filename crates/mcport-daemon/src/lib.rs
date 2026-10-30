@@ -12,8 +12,10 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File, OpenOptions},
+    future::Future,
     io::Write,
     path::Path,
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -489,6 +491,9 @@ struct JournalEntry {
 struct Journal {
     jobs: BTreeMap<String, JournalEntry>,
 }
+// Owned by the event loop: dropping it cancels an upload without losing the
+// journaled result, including on shutdown or a rejected host credential.
+type ResultUpload = Pin<Box<dyn Future<Output = (String, Result<bool, DaemonError>)> + Send>>;
 
 #[derive(Clone)]
 struct Backend {
@@ -530,14 +535,17 @@ impl Backend {
                 ),
             })
     }
-    async fn complete(&self, id: &str, result: &HostJobResult) -> bool {
+    async fn complete(&self, id: &str, result: &HostJobResult) -> Result<bool, DaemonError> {
         match self.client.host_result(&self.context, id, result).await {
-            Ok(_) => true,
+            Ok(_) => Ok(true),
+            Err(mcport_api::Error::Api {
+                status: 401 | 403, ..
+            }) => Err(DaemonError::Unauthorized),
             Err(mcport_api::Error::Api {
                 status: 404 | 409 | 410,
                 ..
-            }) => true,
-            Err(_) => false,
+            }) => Ok(true),
+            Err(_) => Ok(false),
         }
     }
 }
@@ -611,9 +619,15 @@ pub async fn run(
     let mut polling: Option<tokio::task::JoinHandle<Result<HostPollResult, DaemonError>>> = None;
     let mut poll_at = tokio::time::Instant::now();
     let mut failures = 0u32;
+    let mut uploading: Option<ResultUpload> = None;
+    let mut upload_at = tokio::time::Instant::now();
+    let mut upload_failures = 0u32;
     let mut registry_modified = fs::metadata(&registry_path)?.modified()?;
     let mut control_tick = tokio::time::interval(Duration::from_millis(250));
     loop {
+        if uploading.is_none() && tokio::time::Instant::now() >= upload_at {
+            uploading = next_result_upload(&backend, &journal);
+        }
         if polling.is_none() && tokio::time::Instant::now() >= poll_at {
             registry = reload_registry(&registry_path, &registry)?;
             health.sync(&registry);
@@ -632,7 +646,14 @@ pub async fn run(
             });
             let backend = backend.clone();
             let snapshot = registry.clone();
-            let active_ids = active.keys().cloned().collect();
+            // An executed job still occupies its slot until its durable result
+            // is acknowledged. Slow uploads must not grow an unbounded outbox.
+            let active_ids = journal
+                .jobs
+                .iter()
+                .filter(|(_, entry)| !entry.delivered)
+                .map(|(id, _)| id.clone())
+                .collect();
             let health_snapshot = health.snapshot();
             polling = Some(tokio::spawn(async move {
                 backend.poll(&snapshot, active_ids, health_snapshot).await
@@ -655,12 +676,33 @@ pub async fn run(
                     poll_at=tokio::time::Instant::now();
                 }
             },
-            _=shutdown.cancelled()=>{for job in active.values(){job.cancellation.cancel();}if let Some(task)=polling.take(){task.abort();}break;},
+            _=shutdown.cancelled()=>{for job in active.values(){job.cancellation.cancel();}if let Some(task)=polling.take(){task.abort();}uploading.take();break;},
+            (id,accepted)=async {uploading.as_mut().expect("guarded upload").await},if uploading.is_some()=>{
+                uploading=None;
+                let accepted=match accepted {
+                    Ok(accepted)=>accepted,
+                    Err(failure)=>{
+                        for job in active.values(){job.cancellation.cancel();}
+                        if let Some(task)=polling.take(){task.abort();}
+                        return Err(failure);
+                    },
+                };
+                if accepted {
+                    // Only an acknowledged upload becomes a durable tombstone.
+                    // A lost response or shutdown leaves the original result for retry.
+                    if let Some(entry)=journal.jobs.get_mut(&id){entry.delivered=true;entry.result=None;}
+                    private_json(&journal_path,&journal)?;
+                    upload_failures=0;
+                    upload_at=tokio::time::Instant::now();
+                } else {
+                    upload_failures=upload_failures.saturating_add(1);
+                    upload_at=tokio::time::Instant::now()+Duration::from_secs((1u64<<upload_failures.min(5)).min(30));
+                }
+            },
             Some((id,result))=completed_rx.recv()=>{
                 active.remove(&id);
                 if let Some(entry)=journal.jobs.get_mut(&id){entry.result=Some(result);}
                 private_json(&journal_path,&journal)?;
-                flush_results(&backend,&mut journal,&journal_path).await?;
             },
             poll=async {polling.as_mut().expect("guarded poll").await},if polling.is_some()=>{
                 polling=None;
@@ -681,7 +723,7 @@ pub async fn run(
                             private_json(&journal_path,&journal)?;
                             let reject=if cancelled.contains(&id){Some(error("cancelled","This job was cancelled before dispatch.",false))}
                                 else if job.expires_at<=now(){Some(error("expired","The job expired before reaching its host.",false))}
-                                else if active.len()>=4{Some(error("host_busy","This host is executing its maximum number of concurrent jobs. Try again after current work finishes.",false))}
+                                else if journal.jobs.values().filter(|entry|!entry.delivered).count()>4{Some(error("host_busy","This host is executing or delivering its maximum number of concurrent jobs. Try again after current work finishes.",false))}
                                 else {None};
                             if let Some(result)=reject {journal.jobs.get_mut(&id).unwrap().result=Some(result);continue;}
                             let account=registry.account_key(&job.actor).to_owned();
@@ -700,7 +742,6 @@ pub async fn run(
                             }
                         }
                         private_json(&journal_path,&journal)?;
-                        flush_results(&backend,&mut journal,&journal_path).await?;
                     },
                     Ok(Err(DaemonError::Unauthorized))=>{for job in active.values(){job.cancellation.cancel();}return Err(DaemonError::Unauthorized);},
                     _=>{failures=failures.saturating_add(1);poll_at=tokio::time::Instant::now()+Duration::from_secs((1u64<<failures.min(5)).min(30));},
@@ -749,27 +790,22 @@ fn cancel_changed_jobs(
     }
 }
 
-async fn flush_results(
-    backend: &Backend,
-    journal: &mut Journal,
-    path: &Path,
-) -> Result<(), DaemonError> {
-    for (id, entry) in journal
+fn next_result_upload(backend: &Backend, journal: &Journal) -> Option<ResultUpload> {
+    let (id, result) = journal
         .jobs
-        .iter_mut()
+        .iter()
         .filter(|(_, entry)| !entry.delivered)
-    {
-        if let Some(result) = &entry.result {
-            if backend.complete(id, result).await {
-                entry.delivered = true;
-                entry.result = None;
-            } else {
-                break;
-            }
-        }
-    }
-    // Keep compact durable tombstones. They must not be mistaken for interrupted jobs.
-    private_json(path, journal)
+        .find_map(|(id, entry)| {
+            entry
+                .result
+                .as_ref()
+                .map(|result| (id.clone(), result.clone()))
+        })?;
+    let backend = backend.clone();
+    Some(Box::pin(async move {
+        let accepted = backend.complete(&id, &result).await;
+        (id, accepted)
+    }))
 }
 
 async fn execute_job(

@@ -5,7 +5,7 @@
 mod network;
 mod transport;
 
-pub use network::{NetworkPolicy, validate_public_url, validated_http_client};
+pub use network::{NetworkPolicy, validate_public_url, validate_url, validated_http_client};
 use rmcp::{
     ClientHandler, ClientLifecycleMode, ClientServiceExt, RoleClient,
     model::{
