@@ -834,6 +834,7 @@ impl Client {
 
     /// Upload an already journaled result once. The caller may retry the same
     /// job/result through its durable outbox; this client performs no retry.
+    /// Allow up to ten minutes for a supported large result on a slow connection.
     pub async fn host_result(
         &self,
         host: &HostContext,
@@ -846,7 +847,7 @@ impl Client {
             &["hosts", &host.host_id, "jobs", job, "result"],
             &[],
             Some(to_value(result)?),
-            Some((Duration::from_secs(3), 64 * 1024)),
+            Some((Duration::from_secs(600), 64 * 1024)),
         )
         .await
     }
