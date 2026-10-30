@@ -26,3 +26,5 @@ npm-debug.log*
 /blob-report/
 
 .dev/
+
+/.vercel/
