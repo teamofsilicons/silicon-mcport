@@ -80,6 +80,28 @@ test("concurrent refreshes of one sign-in make one request, and late requests ge
   assert.equal(mock.calls.length, 2);
 });
 
+test("a fresh process recovers the same refresh operation after a lost response", async () => {
+  const receipts = new Map<string, ReturnType<typeof tokenBody>>();
+  let first = true;
+  let rotations = 0;
+  const mock = mockFetch((_url, init) => {
+    const key = (init.headers as Record<string, string>)["Idempotency-Key"]!;
+    assert.match(key, /^mcport-refresh-[a-f0-9]{64}$/);
+    assert.ok(!key.includes("sar_old"));
+    if (!receipts.has(key)) receipts.set(key, tokenBody(++rotations));
+    if (first) { first = false; throw new TypeError("response lost after commit"); }
+    return json(200, receipts.get(key));
+  });
+  restore = mock.restore;
+  assert.equal((await refreshSession(session(), {})).ok, false);
+  forgetRefreshes(); // Simulate another server instance with no process cache.
+  const recovered = await refreshSession(session(), {});
+  assert.equal(recovered.ok && recovered.session.rt, "sar_refresh_1");
+  assert.equal(rotations, 1);
+  await refreshSession(session({ rt: "sar_next" }), {});
+  assert.equal(rotations, 2);
+});
+
 test("a failed refresh is remembered only briefly, so a network blip does not end the session for a minute", async () => {
   let fail = true;
   const mock = mockFetch(() => (fail ? Promise.reject(new TypeError("socket hang up")) : json(200, tokenBody(7))));

@@ -39,6 +39,9 @@ Open `http://127.0.0.1:4240`. Register this exact origin plus `/auth/callback` i
 
 Values are validated at server startup and read at request time. External production origins require HTTPS. Cookies use Secure and the __Host prefix on HTTPS. The proxy forwards only allowlisted headers and refreshes access tokens on the server; state-changing requests require the site's Origin. Browser paths `/api/api/v1/...` forward to the backend's `/api/v1/...`.
 
+Refresh requests use a deterministic HMAC operation key derived from the old refresh token and the shared session secret. Silicon Accounts 0.7 recovery receipts let independent server instances or retried requests recover the same committed token pair after response loss. Per-process single-flight remains an optimization; correctness does not depend on requests reaching the same instance. Keep the same session secret across the deployment. Revocation and expired-family checks still apply.
+
+
 ## Verification
 
 ```sh

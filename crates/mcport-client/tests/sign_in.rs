@@ -2,7 +2,12 @@
 //! and revoke endpoints MCPort's public client uses).
 #![cfg(all(feature = "accounts", feature = "session"))]
 
-use axum::{Form, Json, Router, extract::State, http::StatusCode, routing::post};
+use axum::{
+    Form, Json, Router,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::post,
+};
 use mcport_client::accounts::{DeviceProgress, SignIn, SignInError, SltRefusal};
 use mcport_client::session::{SessionError, SessionFile, StoredSignIn};
 use serde_json::{Value, json};
@@ -23,6 +28,8 @@ struct Stub {
     forms: Mutex<Vec<BTreeMap<String, String>>>,
     /// Answer refreshes with 503 (a passing failure).
     unavailable: Mutex<bool>,
+    receipts: Mutex<BTreeMap<(String, String), Value>>,
+    lose_response: Mutex<bool>,
 }
 type Shared = Arc<Stub>;
 
@@ -45,6 +52,7 @@ async fn authorize(Json(body): Json<Value>) -> Json<Value> {
 
 async fn token(
     State(stub): State<Shared>,
+    headers: HeaderMap,
     Form(form): Form<BTreeMap<String, String>>,
 ) -> (StatusCode, Json<Value>) {
     stub.forms.lock().unwrap().push(form.clone());
@@ -103,6 +111,12 @@ async fn token(
             // Widen the window in which a second refresher could race.
             tokio::time::sleep(Duration::from_millis(150)).await;
             let mut current = stub.refresh.lock().unwrap();
+            let key = headers.get("idempotency-key").unwrap().to_str().unwrap();
+            assert!(!key.contains("sar_"));
+            let receipt_key = (form["refresh_token"].clone(), key.to_owned());
+            if let Some(receipt) = stub.receipts.lock().unwrap().get(&receipt_key) {
+                return (StatusCode::OK, Json(receipt.clone()));
+            }
             if form["refresh_token"] != *current {
                 return oauth(
                     "invalid_grant",
@@ -112,7 +126,20 @@ async fn token(
             let mut rotations = stub.rotations.lock().unwrap();
             *rotations += 1;
             *current = format!("sar_{}", *rotations + 1);
-            (StatusCode::OK, Json(tokens(*rotations + 1)))
+            let response = tokens(*rotations + 1);
+            stub.receipts
+                .lock()
+                .unwrap()
+                .insert(receipt_key, response.clone());
+            if std::mem::take(&mut *stub.lose_response.lock().unwrap()) {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(
+                        json!({"error":{"code":"response_lost","message":"Response interrupted."}}),
+                    ),
+                );
+            }
+            (StatusCode::OK, Json(response))
         }
         other => panic!("unexpected grant {other}"),
     }
@@ -254,7 +281,13 @@ async fn refresh_rotates_and_a_spent_token_ends_the_sign_in_and_revoke_is_public
     let client = sign_in(&url);
     let next = client.refresh("sar_1").await.unwrap();
     assert_eq!(next.refresh_token.expose(), "sar_2");
-    let error = client.refresh("sar_1").await.unwrap_err();
+    let recovered = sign_in(&url).refresh("sar_1").await.unwrap();
+    assert_eq!(recovered.refresh_token.expose(), "sar_2");
+    assert_eq!(*stub.rotations.lock().unwrap(), 1);
+    let error = client
+        .refresh_with_key("sar_1", "different-operation")
+        .await
+        .unwrap_err();
     assert!(matches!(error, SignInError::SignInEnded { .. }));
     assert!(error.hint().contains("mcport login"));
     client.revoke("sar_2").await.unwrap();
@@ -263,6 +296,21 @@ async fn refresh_rotates_and_a_spent_token_ends_the_sign_in_and_revoke_is_public
     assert_eq!(revoke["token"], "sar_2");
     assert_eq!(revoke["token_type_hint"], "refresh_token");
     assert_eq!(revoke["client_id"], "mcport");
+}
+
+#[tokio::test]
+async fn refresh_recovers_after_response_loss_and_process_restart() {
+    let stub = Shared::default();
+    *stub.refresh.lock().unwrap() = "sar_1".into();
+    *stub.lose_response.lock().unwrap() = true;
+    let url = serve(stub.clone()).await;
+    let error = sign_in(&url).refresh("sar_1").await.unwrap_err();
+    assert!(error.is_transient());
+    // A new process has only the original token persisted. It deterministically
+    // recovers the exact committed result, rather than consuming it twice.
+    let recovered = sign_in(&url).refresh("sar_1").await.unwrap();
+    assert_eq!(recovered.refresh_token.expose(), "sar_2");
+    assert_eq!(*stub.rotations.lock().unwrap(), 1);
 }
 
 #[test]

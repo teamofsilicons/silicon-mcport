@@ -1,6 +1,6 @@
 {
   "name": "@silicon-mcport/web",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "description": "The Silicon Mcport web workspace",
   "scripts": {

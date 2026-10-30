@@ -1,0 +1,18 @@
+{
+  "image": "ghcr.io/teamofsilicons/mcport-server@sha256:REPLACE_WITH_VERIFIED_MANIFEST_DIGEST",
+  "port": 4381,
+  "memory_mb": 512,
+  "cpu_millis": 1000,
+  "pids_limit": 64,
+  "tmpfs_mb": 64,
+  "user": 10001,
+  "health_path": "/health",
+  "startup_timeout_ms": 60000,
+  "allowed_origins": ["https://mcport.teamofsilicons.com"],
+  "env": {
+    "ACCOUNTS_URL": "https://accounts.teamofsilicons.com",
+    "MCPORT_APP_ID": "mcport",
+    "MCPORT_PUBLIC_URL": "https://api.mcport.teamofsilicons.com",
+    "MCPORT_WEB_URL": "https://mcport.teamofsilicons.com"
+  }
+}

@@ -6,7 +6,9 @@
 //! an exclusive lock on `<file>.lock`, re-reads the file (another process may have just
 //! refreshed), rotates the refresh token only if the access token still has less than
 //! the requested validity, and stores the new pair before returning it, because
-//! presenting an already-used refresh token ends the whole sign-in.
+//! the next process must resume from the newest pair. Accounts recovery keys are
+//! derived from the old token before sending, so a lost response or failed disk
+//! write can recover the same pair after restart without rotating twice.
 
 use crate::accounts::{Secret, SignIn, SignInError, SignedInAccount, Tokens};
 use fs2::FileExt;

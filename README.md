@@ -54,8 +54,13 @@ See [development](docs/development.md) for configuration, tests and releases.
 
 ## Status
 
-0.3.0 moves MCPort to Silicon Accounts and Silicon Apps: personal accounts with explicit sharing and custodians, the
-device flow and short-lived tokens for sign-in, and Silicon Apps packages. It is not released yet; the
-[cutover runbook](docs/migration/cutover.md) lists what the operator does to switch production over. Earlier releases
-(0.1.x) and their evidence are recorded under [docs/history](docs/history/README.md). 0.4.0 removes telemetry: MCPort
-records no telemetry.
+0.5.0 runs the Rust backend as a Silicon Cells persistent service, with encrypted
+records in the cell's PostgreSQL database and the official Silicon Accounts
+client 0.7.0. The public API, website and local host protocol keep their existing
+addresses and authentication rules. SQLite remains available for local fixtures
+and as the verified source for the production migration.
+
+See [Cells deployment](deploy/cells/README.md) for the image, network boundary,
+database migration and cutover checks. The deployment receipt must confirm the
+actual running source before treating a candidate as live. Earlier Accounts and
+Apps release evidence is in [the 0.3.0 record](docs/migration/release-2026-10-10.md).

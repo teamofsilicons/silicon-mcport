@@ -22,6 +22,40 @@ the webhook and proving a signed test delivery. It uses four consecutive loopbac
 providers, Silicon Accounts): a free block by default, `--base` or `MCPORT_E2E_BASE` to choose one. Homes and data
 are fresh under the run directory (`result.json` and every log stay there); it stops everything it started.
 
+The same complete journey can use PostgreSQL. Create an empty disposable database
+whose name ends in `_test` on literal loopback, then set `MCPORT_TEST_DATABASE_URL`
+in the process environment and run `run.py` normally. `psql` must be on `PATH`, or
+set `MCPORT_PSQL` to its absolute executable path. The harness passes the database
+credentials only through the environment, reads the same non-secret indexes, and
+records `storage: "postgresql"` in `result.json`. It does not reset an existing
+database: use a new database and run directory for each journey. Development
+launchers discard inherited production `DATABASE_URL`, Cells runtime variables,
+mail credentials and master keys; only this explicitly selected test database is
+forwarded.
+
+The separate offline-import test verifies per-table digests, encryption keys,
+durable replay, the single-writer lock and transaction rollback against PostgreSQL:
+
+```sh
+cargo test -p mcport-server postgres_import_and_runtime_contract -- --ignored
+```
+
+It uses the same `MCPORT_TEST_DATABASE_URL` and clears only its private `mcport`
+schema in that disposable `_test` database. Do not run it alongside the journey.
+
+The real-process recovery proof uses another fresh disposable `_test` database:
+
+```sh
+python3 tests/e2e/postgres_recovery.py --run-dir NEW_DIR
+```
+
+It creates a connection and completed result through the actual CLI, starts a
+provider call, terminates only the writer session identified by McPort's advisory
+lock in that test database, and requires a bounded nonzero backend exit. After a
+restart, it verifies retained IDs/results and an unknown pending outcome whose
+original idempotency key never dispatches again. It starts and stops its own
+Accounts/provider/service fixtures and writes the evidence to `result.json`.
+
 Identities: a Carbon `c:owner`, the Silicon `si:researcher` in its care, and two unrelated Carbons `c:stranger` and
 `c:outsider`. Silicons sign in with a short-lived token (`mcport login --slt-stdin`), Carbons through the device flow,
 approved at the fake. Coverage: the community directory and personal entries shared by id; invite-only and circle

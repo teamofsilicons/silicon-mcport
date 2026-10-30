@@ -52,6 +52,10 @@ const REMOVED_VARIABLES: [&str; 10] = [
 /// secret, Postmark token), so logging a configuration never prints them.
 #[derive(Clone)]
 pub struct Config {
+    /// The backend is running in a Cells isolated persistent service.
+    pub cells_runtime: bool,
+    pub database_url: Option<String>,
+    pub master_key: Option<[u8; 32]>,
     pub bind: String,
     pub app_id: String,
     pub app_secret: String,
@@ -72,6 +76,8 @@ impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let redacted = |set: bool| if set { "<redacted>" } else { "<not set>" };
         f.debug_struct("Config")
+            .field("database_url", &redacted(self.database_url.is_some()))
+            .field("master_key", &redacted(self.master_key.is_some()))
             .field("bind", &self.bind)
             .field("app_id", &self.app_id)
             .field("app_secret", &redacted(!self.app_secret.is_empty()))
@@ -125,6 +131,16 @@ impl Config {
     pub fn from_env() -> std::result::Result<(Self, Vec<String>), String> {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let env = |k: &str, d: &str| var(k).unwrap_or_else(|| d.into());
+        let master_key = var("MCPORT_MASTER_KEY")
+            .map(|raw| {
+                hex::decode(raw)
+                    .ok()
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .ok_or_else(|| {
+                        "MCPORT_MASTER_KEY must be 64 hexadecimal characters.".to_owned()
+                    })
+            })
+            .transpose()?;
         let accounts_url = checked_url(
             "ACCOUNTS_URL",
             &env("ACCOUNTS_URL", DEFAULT_ACCOUNTS_URL),
@@ -182,6 +198,9 @@ impl Config {
         }
         Ok((
             Self {
+                cells_runtime: var("CELLS_API_URL").is_some(),
+                database_url: var("DATABASE_URL"),
+                master_key,
                 bind: env("MCPORT_BIND", "127.0.0.1:4380"),
                 app_id,
                 app_secret,
@@ -207,6 +226,9 @@ impl Config {
     #[cfg(test)]
     pub fn local(data_dir: impl Into<PathBuf>, accounts_url: &str) -> Self {
         Self {
+            cells_runtime: false,
+            database_url: None,
+            master_key: None,
             bind: "127.0.0.1:0".into(),
             app_id: "mcport".into(),
             app_secret: "fixture-app-secret".into(),
@@ -235,6 +257,11 @@ pub struct App {
 }
 impl App {
     pub fn new(config: Config) -> Result<Self> {
+        if config.cells_runtime && config.master_key.is_none() {
+            return Err(Error::bad(
+                "Cells requires MCPORT_MASTER_KEY in cell Secrets; a temporary filesystem key cannot preserve encrypted data.",
+            ));
+        }
         std::fs::create_dir_all(&config.data_dir)?;
         #[cfg(unix)]
         {
@@ -242,12 +269,8 @@ impl App {
             std::fs::set_permissions(&config.data_dir, std::fs::Permissions::from_mode(0o700))?;
         }
         let key_path = config.data_dir.join("master.key");
-        let key = if let Ok(raw) = std::env::var("MCPORT_MASTER_KEY") {
-            let bytes = hex::decode(raw)
-                .map_err(|_| Error::bad("MCPORT_MASTER_KEY must be 64 hex characters."))?;
-            bytes
-                .try_into()
-                .map_err(|_| Error::bad("MCPORT_MASTER_KEY must be 32 bytes."))?
+        let key = if let Some(key) = config.master_key {
+            key
         } else if key_path.exists() {
             std::fs::read(&key_path)?
                 .try_into()
@@ -265,11 +288,18 @@ impl App {
             opts.open(&key_path)?.write_all(&key)?;
             key
         };
-        let store = Store::open(&config.data_dir.join("mcport.sqlite"), &key)?;
+        let store = if let Some(database_url) = &config.database_url {
+            Store::open_postgres(database_url, &key)?
+        } else if config.cells_runtime {
+            return Err(Error::bad(
+                "Cells requires its DATABASE_URL; local SQLite is not durable in the service runtime.",
+            ));
+        } else {
+            Store::open(&config.data_dir.join("mcport.sqlite"), &key)?
+        };
         let client = silicon_accounts_client::AccountsClient::builder()
             .base_url(&config.accounts_api_url)
             .user_agent(format!("mcport-server/{}", env!("CARGO_PKG_VERSION")))
-            .telemetry(false)
             .build()
             .map_err(|error| {
                 Error::new(

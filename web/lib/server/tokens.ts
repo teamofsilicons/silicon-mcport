@@ -2,12 +2,12 @@
  * Calls to the Silicon Accounts token endpoints with this app's credentials (HTTP Basic app_id:app_secret, server side
  * only): the code exchange at the end of a sign-in, refreshing, and revoking on sign-out.
  *
- * Refresh tokens rotate on every use, and presenting a used one revokes the whole sign-in (Accounts treats it as theft).
- * So refreshing is single-flight per refresh token in this process, and the answer is remembered for a minute: requests
- * the browser sent with the old cookie before the new one arrived get the same new tokens instead of presenting the
- * used refresh token again. Across server instances nothing is shared; see README.md (Refresh) for how the kit keeps
- * concurrent refreshes rare (the browser's session keeper refreshes ahead, one tab at a time).
+ * Refresh rotation is single-flight within a process and recoverable across instances:
+ * every instance derives the same opaque operation key for an old refresh token.
+ * Accounts' durable receipt returns the same next token pair after a lost response;
+ * family revocation and expiry still apply. Never send or log the raw token as a key.
  */
+import { createHmac } from "node:crypto";
 import { basicAuth, callbackUrl, serverEnv } from "./env";
 import { accountFrom, type StoredSession } from "./session";
 
@@ -96,7 +96,11 @@ export function refreshSession(session: StoredSession, headers: Record<string, s
   for (const [key, memo] of memos) if (memo.until < now) memos.delete(key);
   const existing = memos.get(session.rt);
   if (existing) return existing.promise;
-  const promise = tokenCall({ grant_type: "refresh_token", refresh_token: session.rt }, headers, session);
+  const env = serverEnv();
+  const key = createHmac("sha256", env.sessionSecret)
+    .update(`mcport-web-refresh-v1\0${env.appId}\0${session.rt}`)
+    .digest("hex");
+  const promise = tokenCall({ grant_type: "refresh_token", refresh_token: session.rt }, { ...headers, "Idempotency-Key": `mcport-refresh-${key}` }, session);
   const memo: RefreshMemo = { promise, until: now + 2 * REFRESH_MEMO_MS };
   memos.set(session.rt, memo);
   void promise.then(result => {

@@ -787,7 +787,7 @@ fn link_in(tx: &RawTx<'_, '_>, mapping: &Mapping, known: &Known, commit: bool) -
     }
     for link in mapping.links.values() {
         db.execute(
-            "INSERT OR REPLACE INTO identity_links(iam_principal_id,iam_public_id,accounts_uuid,linked_at,source) VALUES(?,?,?,?,?)",
+            "INSERT INTO identity_links(iam_principal_id,iam_public_id,accounts_uuid,linked_at,source) VALUES(?,?,?,?,?) ON CONFLICT(iam_principal_id) DO UPDATE SET iam_public_id=excluded.iam_public_id,accounts_uuid=excluded.accounts_uuid,linked_at=excluded.linked_at,source=excluded.source",
             rusqlite::params![link.principal, link.public_id, link.uuid, linked_at, source],
         )?;
     }

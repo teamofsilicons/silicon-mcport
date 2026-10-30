@@ -92,6 +92,10 @@ pub fn save(app: &App, r: &CallRecord) -> Result<()> {
     )
 }
 pub async fn network_policy(app: &App, url: &str) -> Result<NetworkPolicy> {
+    if app.config.cells_runtime {
+        mcport_mcp::validate_url(url, NetworkPolicy::CellsPublicInternet).await?;
+        return Ok(NetworkPolicy::CellsPublicInternet);
+    }
     let parsed = url::Url::parse(url).map_err(|_| Error::bad("Invalid MCP URL."))?;
     if app
         .config

@@ -1,0 +1,157 @@
+name: Build and publish Cells backend
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/cells-backend]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'deploy/cells/**'
+      - '.github/workflows/cells.yml'
+permissions:
+  contents: read
+concurrency:
+  group: mcport-cells-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      packages: write
+    services:
+      postgres:
+        image: postgres:16-bookworm@sha256:e8a07d2c7579b038938cdba6c539e580e5001caf9ea203d397b5cc83e76bd938
+        env:
+          POSTGRES_USER: mcport_fixture
+          POSTGRES_PASSWORD: disposable-ci-only
+          POSTGRES_DB: mcport_fixture_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mcport_fixture"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and test exact source on native ARM64
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(git rev-parse HEAD)" = "$SOURCE_REVISION"
+          mkdir "$RUNNER_TEMP/mcport-source"
+          git archive "$SOURCE_REVISION" | tar -x -C "$RUNNER_TEMP/mcport-source"
+          docker build --platform linux/arm64 --pull --network host \
+            --file "$RUNNER_TEMP/mcport-source/deploy/cells/Dockerfile" \
+            --build-arg SOURCE_REVISION="$SOURCE_REVISION" \
+            --build-arg MCPORT_TEST_DATABASE_URL=postgresql://mcport_fixture:disposable-ci-only@127.0.0.1:5432/mcport_fixture_test \
+            --tag "ghcr.io/teamofsilicons/mcport-server:$SOURCE_REVISION" \
+            "$RUNNER_TEMP/mcport-source"
+      - name: Verify runtime restrictions and executable
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+        shell: python
+        run: |
+          import json, os, subprocess
+          image = 'ghcr.io/teamofsilicons/mcport-server:' + os.environ['SOURCE_REVISION']
+          config = json.loads(subprocess.check_output(['docker','image','inspect',image]))[0]
+          assert config['Architecture'] == 'arm64' and config['Os'] == 'linux'
+          assert config['Config']['User'] == '10001:10001'
+          assert not config['Config'].get('Volumes')
+          assert config['Config']['Labels']['org.opencontainers.image.revision'] == os.environ['SOURCE_REVISION']
+          subprocess.run(['docker','run','--rm','--read-only','--network','none',
+              '--cap-drop','ALL','--security-opt','no-new-privileges',
+              '--tmpfs','/tmp:rw,noexec,nosuid,size=64m',image,'--help'],check=True)
+      - name: Smoke PostgreSQL startup and restart in restricted runtime
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        shell: python
+        run: |
+          import json, os, subprocess, time, urllib.request
+          subprocess.run(['docker','exec',os.environ['POSTGRES_CONTAINER'],'createdb',
+              '-U','mcport_fixture','mcport_runtime_test'],check=True)
+          image = 'ghcr.io/teamofsilicons/mcport-server:' + os.environ['SOURCE_REVISION']
+          # Credentials below belong only to this disposable CI database.
+          fixture_env = dict(os.environ,
+              DATABASE_URL='postgresql://mcport_fixture:disposable-ci-only@127.0.0.1:5432/mcport_runtime_test',
+              MCPORT_MASTER_KEY='00'*32, MCPORT_APP_SECRET='ci-app-secret',
+              ACCOUNTS_URL='http://127.0.0.1:9', MCPORT_PUBLIC_URL='http://127.0.0.1:4381',
+              MCPORT_WEB_URL='http://127.0.0.1:4382')
+          command = ['docker','run','--detach','--read-only','--network','host',
+              '--cap-drop','ALL','--security-opt','no-new-privileges',
+              '--tmpfs','/tmp:rw,noexec,nosuid,size=64m']
+          for key in ('DATABASE_URL','MCPORT_MASTER_KEY','MCPORT_APP_SECRET','ACCOUNTS_URL',
+                      'MCPORT_PUBLIC_URL','MCPORT_WEB_URL'):
+              command.extend(['--env',key])
+          container = subprocess.check_output(command+[image],env=fixture_env,text=True).strip()
+          try:
+              for phase in ('startup','restart'):
+                  if phase == 'restart':
+                      subprocess.run(['docker','restart',container],check=True)
+                  deadline = time.monotonic()+30
+                  while True:
+                      try:
+                          with urllib.request.urlopen('http://127.0.0.1:4381/health',timeout=2) as response:
+                              health=json.load(response)
+                          assert health['status']=='ok' and health['source_revision']==os.environ['SOURCE_REVISION']
+                          break
+                      except Exception:
+                          if time.monotonic()>deadline:
+                              raise RuntimeError('Runtime health smoke failed at '+phase)
+                          time.sleep(0.5)
+                  with urllib.request.urlopen('http://127.0.0.1:4381/api/v1/discovery',timeout=2) as response:
+                      assert json.load(response)['data']['app_id']=='mcport'
+              print('PostgreSQL runtime startup/restart and source-revision health passed')
+          finally:
+              subprocess.run(['docker','rm','--force',container],stdout=subprocess.DEVNULL,check=True)
+      - name: Publish immutable image and provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REVISION: ${{ github.sha }}
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, subprocess, tempfile
+          revision = os.environ['SOURCE_REVISION']
+          image = 'ghcr.io/teamofsilicons/mcport-server:' + revision
+          with tempfile.TemporaryDirectory(prefix='mcport-registry-') as config_dir:
+              pathlib.Path(config_dir).chmod(0o700)
+              env = dict(os.environ, DOCKER_CONFIG=config_dir)
+              token = env.pop('GH_TOKEN')
+              result = subprocess.run(['docker','login','ghcr.io','--username',os.environ['GITHUB_ACTOR'],
+                  '--password-stdin'],input=token+'\n',text=True,env=env,capture_output=True)
+              if result.returncode:
+                  raise SystemExit('Registry sign-in failed')
+              try:
+                  subprocess.run(['docker','push',image],env=env,check=True)
+                  item = json.loads(subprocess.check_output(['docker','image','inspect',image],env=env))[0]
+                  digests = [d for d in item.get('RepoDigests',[]) if d.startswith('ghcr.io/teamofsilicons/mcport-server@sha256:')]
+                  if len(digests) != 1:
+                      raise SystemExit('Expected one verified repository digest')
+                  receipt = {
+                      'schema': 1, 'source_revision': revision, 'image': digests[0],
+                      'config_digest': item['Id'], 'architecture': item['Architecture'],
+                      'layers': item['RootFS']['Layers'],
+                      'dockerfile_sha256': hashlib.sha256(pathlib.Path('deploy/cells/Dockerfile').read_bytes()).hexdigest(),
+                      'cargo_lock_sha256': hashlib.sha256(pathlib.Path('Cargo.lock').read_bytes()).hexdigest(),
+                      'workflow_run': os.environ['GITHUB_RUN_ID'],
+                      'tests': 'server/core/mcp tests; real PostgreSQL16 import/runtime contract; restricted runtime help, startup and restart',
+                      'production_deployed': False,
+                      'anonymous_pull_required_before_deploy': True,
+                  }
+                  rendered = json.dumps(receipt,sort_keys=True,indent=2)
+                  pathlib.Path('cells-image-receipt.json').write_text(rendered+'\n')
+                  print('MCPORT_CELLS_IMAGE_RECEIPT='+json.dumps(receipt,sort_keys=True))
+                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+                      summary.write('```json\n'+rendered+'\n```\n')
+              finally:
+                  subprocess.run(['docker','logout','ghcr.io'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+# Publication prepares an image. It never changes Cells, credentials, DNS or the
+# public McPort proxy, and it never changes package visibility implicitly.
