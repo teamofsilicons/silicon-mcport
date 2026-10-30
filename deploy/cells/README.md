@@ -51,7 +51,7 @@ native `ubuntu-24.04-arm`, runs the server/core/MCP tests plus the explicitly
 enabled PostgreSQL importer/runtime test against a disposable PostgreSQL16
 database, checks execution with a
 read-only root and no network, then publishes `ghcr.io/teamofsilicons/mcport-server`.
-The builder is official Rust1.98 and the runtime is Debian Bookworm; both base
+The builder is official Rust1.98.1 and the runtime is Debian Bookworm; both base
 indexes are digest-pinned. Runtime apt package resolution can change, so the
 resulting manifest digest and workflow receipt identify the deployable artifact.
 The image contains source-built executable bytes and system certificates, never

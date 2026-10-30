@@ -1,4 +1,5 @@
 # Both official-image indexes were resolved from Docker Hub on 2026-10-30.
+# The pinned Rust ARM64 configuration declares RUST_VERSION=1.98.1.
 FROM rust:1.98-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -8,7 +9,7 @@ COPY crates ./crates
 ARG SOURCE_REVISION
 ARG MCPORT_TEST_DATABASE_URL
 ENV MCPORT_BUILD_REVISION=${SOURCE_REVISION} CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
-RUN test "$(rustc --version | cut -d' ' -f2)" = 1.98.0 \
+RUN test "$(rustc --version | cut -d' ' -f2)" = 1.98.1 \
     && test "${#SOURCE_REVISION}" = 40 \
     && cargo test --locked -p mcport-server -p mcport-core -p mcport-mcp \
     && if [ -n "$MCPORT_TEST_DATABASE_URL" ]; then \
