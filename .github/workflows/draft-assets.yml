@@ -1,0 +1,141 @@
+name: Complete the McPort 0.5.0 draft assets
+
+# This bounded transfer never builds, tags, publishes, or replaces an asset.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/cells-backend]
+    paths: [.github/workflows/draft-assets.yml]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: mcport-0.5.0-draft-assets
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require the reviewed successful build and unpublished draft
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          base = 'https://api.github.com/repos/teamofsilicons/silicon-mcport'
+          def read(path):
+              request = urllib.request.Request(base + path, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              })
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          source = '42e7ef37e7c334a73e05d99405a6596099cf8b29'
+          run = read('/actions/runs/41042728054')
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          assert run['head_sha'] == source
+          artifact = read('/actions/artifacts/12971747329')
+          assert artifact['name'] == 'mcport-silicon-apps-release'
+          assert artifact['expired'] is False
+          assert artifact['workflow_run']['id'] == 41042728054
+          assert artifact['workflow_run']['head_sha'] == source
+          assert artifact['digest'] == 'sha256:ac4d524b593618d3e62ff3d0ab77d922333e9cd5e307ce6a6d675c1490131427'
+          release = read('/releases/428953356')
+          assert release['draft'] is True and release['published_at'] is None
+          assert release['tag_name'] == 'v0.5.0'
+          print('Reviewed build, exact artifact, and unpublished draft verified.')
+          PY
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          artifact-ids: '12971747329'
+          run-id: '41042728054'
+          github-token: ${{ github.token }}
+          path: candidate
+          merge-multiple: true
+      - name: Verify every archive and upload only missing draft assets
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, tarfile, urllib.parse, urllib.request
+          from pathlib import Path
+          root = Path('candidate')
+          expected = {
+              'linux-aarch64': '959d0af50890adc45978c91c2a702512e6f4ec108758595da38f2436e325c842',
+              'linux-armv7hf': '71c49e2d2dffab3d338f95911d9db2c3ca497b0554fcb1c83bf0efc1e76afc12',
+              'linux-i686': '25796adcb9992b9ccad7f43dfeeb104f887697ddab21043317b8deaebead90f9',
+              'linux-x86_64': 'e44a4585641536263ec3d29044be735fce432fb8c9ccc77175a8b9d57b2ebd73',
+              'macos-aarch64': '39f6615029432e8f8c0ffce394607a4052acf39b900e327fc7199e90936ca6fb',
+              'macos-x86_64': '3f1ed1284f5dc25cbd39fa719c2639b7e4877ce8deb2ec5f892a2fc26784da4b',
+              'windows-aarch64': '57d8fac254b047715fef75d8d0765e215619c82a904c09e62228e2f1a4101aae',
+              'windows-x86_64': 'bc601d7a7cc6df96617c369269384d72d01b42e4fe217d90ad106c7933dde11c',
+          }
+          manifest = {}
+          for line in (root / 'SHA256SUMS').read_text().splitlines():
+              digest, name = line.split(None, 1)
+              name = name.lstrip('*')
+              assert name not in manifest
+              manifest[name] = digest
+          assert manifest == {f'mcport-0.5.0-{target}.tar.gz': digest
+                              for target, digest in expected.items()}
+          files = [root / 'SHA256SUMS']
+          required_hosts = {'linux-x86_64': 'Linux x86_64',
+                            'macos-aarch64': 'Darwin arm64',
+                            'windows-x86_64': 'Windows AMD64'}
+          for target, digest in expected.items():
+              archive = root / f'mcport-0.5.0-{target}.tar.gz'
+              assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
+              sidecar = root / (archive.name + '.sha256')
+              assert sidecar.read_text().split()[0] == digest
+              record = json.loads((root / 'checks' / f'mcport-{target}.json').read_text())
+              assert record['app_id'] == 'mcport' and record['version'] == '0.5.0'
+              assert record['target'] == target and record['discovery'] == 'passed'
+              assert set(record['commands']) >= {'--version', '--help', 'accounts --json', 'login status --json'}
+              if target in required_hosts:
+                  assert record['checked_on'] == required_hosts[target]
+              binary_name = 'bin/mcport.exe' if target.startswith('windows-') else 'bin/mcport'
+              with tarfile.open(archive, 'r:gz') as package:
+                  binary = package.getmember(binary_name)
+                  assert binary.isfile() and 0 < binary.size < 100 * 1024 * 1024
+                  assert hashlib.sha256(package.extractfile(binary).read()).hexdigest() == record['sha256']
+              files.extend([archive, sidecar])
+          assert len(files) == 17
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          opener = urllib.request.build_opener(NoRedirect)
+          def request(url, data=None):
+              headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                         'Accept': 'application/vnd.github+json',
+                         'X-GitHub-Api-Version': '2022-11-28'}
+              if data is not None:
+                  headers['Content-Type'] = 'application/octet-stream'
+              with opener.open(urllib.request.Request(url, data=data, headers=headers), timeout=120) as response:
+                  return json.load(response)
+          base = 'https://api.github.com/repos/teamofsilicons/silicon-mcport'
+          verified = []
+          for file in files:
+              release = request(base + '/releases/428953356')
+              assert release['draft'] is True and release['published_at'] is None
+              assert release['tag_name'] == 'v0.5.0'
+              matches = [asset for asset in release['assets'] if asset['name'] == file.name]
+              assert len(matches) <= 1
+              data = file.read_bytes()
+              digest = 'sha256:' + hashlib.sha256(data).hexdigest()
+              if matches:
+                  asset = matches[0]
+              else:
+                  url = 'https://uploads.github.com/repos/teamofsilicons/silicon-mcport/releases/428953356/assets?'
+                  asset = request(url + urllib.parse.urlencode({'name': file.name}), data)
+              assert asset['state'] == 'uploaded' and asset['size'] == len(data)
+              assert asset['digest'] == digest
+              verified.append({'name': file.name, 'sha256': digest, 'id': asset['id']})
+              print(f'Verified draft asset: {file.name}')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('All 8 archives and 9 checksum files match the reviewed artifact.\n\n')
+              summary.write('Release 428953356 remains a draft. No tag or publication was performed.\n\n')
+              summary.write('```json\n' + json.dumps(verified, indent=2) + '\n```\n')
+          PY
