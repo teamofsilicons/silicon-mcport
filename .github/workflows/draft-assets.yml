@@ -1,6 +1,7 @@
 name: Complete the McPort 0.5.0 draft assets
 
-# This bounded transfer never builds, tags, publishes, or replaces an asset.
+# This bounded transfer never builds, tags, or publishes. It replaces only the
+# earlier verified private assets in this one unpublished draft.
 on:
   workflow_dispatch:
   push:
@@ -35,16 +36,16 @@ jobs:
               })
               with urllib.request.urlopen(request, timeout=30) as response:
                   return json.load(response)
-          source = '42e7ef37e7c334a73e05d99405a6596099cf8b29'
-          run = read('/actions/runs/41042728054')
+          source = 'a9370dfdb5de0d76a662726ff768f09419c2f733'
+          run = read('/actions/runs/41058763684')
           assert run['status'] == 'completed' and run['conclusion'] == 'success'
           assert run['head_sha'] == source
-          artifact = read('/actions/artifacts/12971747329')
+          artifact = read('/actions/artifacts/12978358680')
           assert artifact['name'] == 'mcport-silicon-apps-release'
           assert artifact['expired'] is False
-          assert artifact['workflow_run']['id'] == 41042728054
+          assert artifact['workflow_run']['id'] == 41058763684
           assert artifact['workflow_run']['head_sha'] == source
-          assert artifact['digest'] == 'sha256:ac4d524b593618d3e62ff3d0ab77d922333e9cd5e307ce6a6d675c1490131427'
+          assert artifact['digest'] == 'sha256:981f2b391406ac84133cbe43f4a8266ecf2007352e24ca6f5f0d75047d382563'
           release = read('/releases/428953356')
           assert release['draft'] is True and release['published_at'] is None
           assert release['tag_name'] == 'v0.5.0'
@@ -52,26 +53,26 @@ jobs:
           PY
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          artifact-ids: '12971747329'
-          run-id: '41042728054'
+          artifact-ids: '12978358680'
+          run-id: '41058763684'
           github-token: ${{ github.token }}
           path: candidate
           merge-multiple: true
-      - name: Verify every archive and upload only missing draft assets
+      - name: Verify every archive and replace only reviewed draft assets
         run: |
           python3 - <<'PY'
           import hashlib, json, os, tarfile, urllib.parse, urllib.request
           from pathlib import Path
           root = Path('candidate')
           expected = {
-              'linux-aarch64': '959d0af50890adc45978c91c2a702512e6f4ec108758595da38f2436e325c842',
-              'linux-armv7hf': '71c49e2d2dffab3d338f95911d9db2c3ca497b0554fcb1c83bf0efc1e76afc12',
-              'linux-i686': '25796adcb9992b9ccad7f43dfeeb104f887697ddab21043317b8deaebead90f9',
-              'linux-x86_64': 'e44a4585641536263ec3d29044be735fce432fb8c9ccc77175a8b9d57b2ebd73',
-              'macos-aarch64': '39f6615029432e8f8c0ffce394607a4052acf39b900e327fc7199e90936ca6fb',
-              'macos-x86_64': '3f1ed1284f5dc25cbd39fa719c2639b7e4877ce8deb2ec5f892a2fc26784da4b',
-              'windows-aarch64': '57d8fac254b047715fef75d8d0765e215619c82a904c09e62228e2f1a4101aae',
-              'windows-x86_64': 'bc601d7a7cc6df96617c369269384d72d01b42e4fe217d90ad106c7933dde11c',
+              "linux-aarch64": "6a031de38af71b4bb72175374f33cdc908d1f1f0b38bd18db84e10684c905abd",
+              "linux-armv7hf": "601230d2e1166f8644b51bd211a11a0656670e3d06299af4b4aa6ad6f0eb6c70",
+              "linux-i686": "193498ff9827c89bbff1c9fd257f7e9b4f46df36376a24e5c524fc002a5e6cd2",
+              "linux-x86_64": "07fd67c1e5e468b149df86d4bc26976c67851520272b321b40edeecb91c92370",
+              "macos-aarch64": "475f40f1ccbbd84abbe8865203e92a962093b4c43a8ca80f57fbc0bd96ab9695",
+              "macos-x86_64": "2926499aeb47adac1bef9d8d5c026cb5ffc4befe3aa6d1fbe30403bc72d41059",
+              "windows-aarch64": "4b4ad58fee5ba7d826db87bc0221313fd5b1fa9b9e450eed3055fb163fb4df16",
+              "windows-x86_64": "145db8a740a422eade9a2b946c79c2aa8c59483e0e2b72c5916816f43c981393"
           }
           manifest = {}
           for line in (root / 'SHA256SUMS').read_text().splitlines():
@@ -107,15 +108,86 @@ jobs:
               def redirect_request(self, req, fp, code, msg, headers, newurl):
                   return None
           opener = urllib.request.build_opener(NoRedirect)
-          def request(url, data=None):
+          def request(url, data=None, method=None):
               headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
                          'Accept': 'application/vnd.github+json',
                          'X-GitHub-Api-Version': '2022-11-28'}
               if data is not None:
                   headers['Content-Type'] = 'application/octet-stream'
-              with opener.open(urllib.request.Request(url, data=data, headers=headers), timeout=120) as response:
-                  return json.load(response)
+              with opener.open(urllib.request.Request(url, data=data, headers=headers, method=method), timeout=120) as response:
+                  return None if response.status == 204 else json.load(response)
           base = 'https://api.github.com/repos/teamofsilicons/silicon-mcport'
+          old_assets = {
+              "mcport-0.5.0-linux-aarch64.tar.gz": {
+                  "digest": "sha256:959d0af50890adc45978c91c2a702512e6f4ec108758595da38f2436e325c842",
+                  "size": 7902195
+              },
+              "mcport-0.5.0-linux-armv7hf.tar.gz": {
+                  "digest": "sha256:71c49e2d2dffab3d338f95911d9db2c3ca497b0554fcb1c83bf0efc1e76afc12",
+                  "size": 7459030
+              },
+              "mcport-0.5.0-linux-i686.tar.gz": {
+                  "digest": "sha256:25796adcb9992b9ccad7f43dfeeb104f887697ddab21043317b8deaebead90f9",
+                  "size": 8108218
+              },
+              "mcport-0.5.0-linux-x86_64.tar.gz": {
+                  "digest": "sha256:e44a4585641536263ec3d29044be735fce432fb8c9ccc77175a8b9d57b2ebd73",
+                  "size": 8458783
+              },
+              "mcport-0.5.0-macos-aarch64.tar.gz": {
+                  "digest": "sha256:39f6615029432e8f8c0ffce394607a4052acf39b900e327fc7199e90936ca6fb",
+                  "size": 7720516
+              },
+              "mcport-0.5.0-macos-x86_64.tar.gz": {
+                  "digest": "sha256:3f1ed1284f5dc25cbd39fa719c2639b7e4877ce8deb2ec5f892a2fc26784da4b",
+                  "size": 8277319
+              },
+              "mcport-0.5.0-windows-aarch64.tar.gz": {
+                  "digest": "sha256:57d8fac254b047715fef75d8d0765e215619c82a904c09e62228e2f1a4101aae",
+                  "size": 7786752
+              },
+              "mcport-0.5.0-windows-x86_64.tar.gz": {
+                  "digest": "sha256:bc601d7a7cc6df96617c369269384d72d01b42e4fe217d90ad106c7933dde11c",
+                  "size": 8315031
+              },
+              "mcport-0.5.0-linux-aarch64.tar.gz.sha256": {
+                  "digest": "sha256:90fbd361368049b9fd08c8a678a1df781dc2a67644d142fe344757f20c0b8714",
+                  "size": 100
+              },
+              "mcport-0.5.0-linux-armv7hf.tar.gz.sha256": {
+                  "digest": "sha256:0083001a35b9a41e6d1638b128ccf8e2908c66e99b3c0f0a31095d647a54d50a",
+                  "size": 100
+              },
+              "mcport-0.5.0-linux-i686.tar.gz.sha256": {
+                  "digest": "sha256:4a6b5ce2c6c7198ce38ffc27a9f630a6d15b7c77998e44ac26536d451c6374a0",
+                  "size": 97
+              },
+              "mcport-0.5.0-linux-x86_64.tar.gz.sha256": {
+                  "digest": "sha256:1ac8d732081004a56ffa444a401ee76d502e5eaf656977fda2de88a9bf491507",
+                  "size": 99
+              },
+              "mcport-0.5.0-macos-aarch64.tar.gz.sha256": {
+                  "digest": "sha256:6f22fd9a1273b72cbb1da98cf1234692d41174f58533aaf376fca66bc5632ffc",
+                  "size": 100
+              },
+              "mcport-0.5.0-macos-x86_64.tar.gz.sha256": {
+                  "digest": "sha256:1c519058b6c2d8c44dda01bb39a2ddb7ccae6763e9af0e4db1fa5f48ee1ea411",
+                  "size": 99
+              },
+              "mcport-0.5.0-windows-aarch64.tar.gz.sha256": {
+                  "digest": "sha256:9b712ea9e24cb9f30d1d58d371df1f3aaed752c6c86f04b88618a884495d368d",
+                  "size": 102
+              },
+              "mcport-0.5.0-windows-x86_64.tar.gz.sha256": {
+                  "digest": "sha256:d5ef152388b77646fc3f6a0c78511806202845d38504fbe77c485f40049d81f1",
+                  "size": 101
+              },
+              "SHA256SUMS": {
+                  "digest": "sha256:aa94d90e4063d8c6eaa892c61e14b970b3f64d62960147a57d8924072725d521",
+                  "size": 798
+              }
+          }
+          assert set(old_assets) == {file.name for file in files}
           verified = []
           for file in files:
               release = request(base + '/releases/428953356')
@@ -125,9 +197,18 @@ jobs:
               assert len(matches) <= 1
               data = file.read_bytes()
               digest = 'sha256:' + hashlib.sha256(data).hexdigest()
-              if matches:
-                  asset = matches[0]
-              else:
+              asset = matches[0] if matches else None
+              if asset is not None and not (asset['state'] == 'uploaded' and asset['size'] == len(data) and asset['digest'] == digest):
+                  old = old_assets[file.name]
+                  assert asset['name'] == file.name and asset['state'] == 'uploaded'
+                  assert asset['size'] == old['size'] and asset['digest'] == old['digest']
+                  request(base + f"/releases/assets/{asset['id']}", method='DELETE')
+                  asset = None
+              if asset is None:
+                  # Check again before each upload, including after a reviewed deletion.
+                  release = request(base + '/releases/428953356')
+                  assert release['draft'] is True and release['published_at'] is None
+                  assert release['tag_name'] == 'v0.5.0'
                   url = 'https://uploads.github.com/repos/teamofsilicons/silicon-mcport/releases/428953356/assets?'
                   asset = request(url + urllib.parse.urlencode({'name': file.name}), data)
               assert asset['state'] == 'uploaded' and asset['size'] == len(data)
