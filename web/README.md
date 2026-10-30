@@ -12,7 +12,7 @@ Next.js 16, React 19 and Silicon UI, using the Accounts/Apps theme and workspace
 
 ## Local setup
 
-Use Node 24+ and the pinned pnpm version in package.json. From the repository root, configure and start `scripts/dev-accounts.sh` using `docs/migration/progress.md`. The backend listens on `4241`. Then:
+Use Node 24 and the pinned pnpm version in package.json. From the repository root, configure and start `scripts/dev-accounts.sh` using `docs/migration/progress.md`. The backend listens on `4241`. Then:
 
 ```sh
 cd web
@@ -39,9 +39,6 @@ Open `http://127.0.0.1:4240`. Register this exact origin plus `/auth/callback` i
 
 Values are validated at server startup and read at request time. External production origins require HTTPS. Cookies use Secure and the __Host prefix on HTTPS. The proxy forwards only allowlisted headers and refreshes access tokens on the server; state-changing requests require the site's Origin. Browser paths `/api/api/v1/...` forward to the backend's `/api/v1/...`.
 
-Refresh requests use a deterministic HMAC operation key derived from the old refresh token and the shared session secret. Silicon Accounts 0.7 recovery receipts let independent server instances or retried requests recover the same committed token pair after response loss. Per-process single-flight remains an optimization; correctness does not depend on requests reaching the same instance. Keep the same session secret across the deployment. Revocation and expired-family checks still apply.
-
-
 ## Verification
 
 ```sh
@@ -64,3 +61,23 @@ Vercel: project root `web`, use the checked-in Next configuration and the enviro
 ## Design and provenance
 
 Shared styles and Silicon UI components are under `styles/`, `components/silicon-ui/` and `components/foundation/`. Product components are under `components/mcport/`. See `DESIGN.md`, `vendor/silicon-ui/PROVENANCE.md`, `vendor/uiarc/LICENSE` and the BDO Grotesk font licenses.
+
+## Durable browser sessions
+
+`lib/server/refresh-store.ts` and `refresh-state.ts` hold the current session and a random refresh operation key before
+calling Accounts. A compare-and-set update prevents late responses from overwriting newer tokens or a saved sign-out.
+Existing sealed cookies are adopted atomically. Cookies remain HttpOnly and encrypted; server state is encrypted with
+`SESSION_SECRET`, with a separate purpose for each record. Keep that secret stable across deployments.
+
+Production requires either `REFRESH_STATE_TABLE` plus `REFRESH_STATE_REGION` (DynamoDB, consistent reads and conditional
+writes), or `REFRESH_STATE_PATH` on a durable, private local volume shared by all web processes on one host. Vercel
+requires DynamoDB; `REFRESH_STATE_ROLE_ARN` selects an app-specific Vercel OIDC role with GetItem/PutItem permissions.
+EC2 can use its instance role. Never share a development store with production. Development defaults to
+`.dev/refresh-state.sqlite`; its parent directory and database are private. Configure DynamoDB TTL on `expires`.
+
+Storage failures, transport failures, 5xx and recovery conflicts preserve the session and return a retryable error.
+Recovered absolute access-token expiry is respected, including zero remaining lifetime: the successor is saved before
+rotating again. Only a definitive `invalid_grant` ends the sign-in. Sign-out is saved before the cookie is cleared.
+Tests in `tests/refresh-recovery.test.ts` cover competing refreshes, process restart, lost replies, expired recovery,
+stale cookies, storage failure and sign-out racing a refresh. All replicas must use this protocol before traffic is
+switched; do not roll back to the old token-refresh code once these sessions are in use.
