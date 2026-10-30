@@ -25,10 +25,16 @@ cell is unnecessary for this direct Accounts-token integration.
 
 Use [Caddyfile.example](Caddyfile.example) as the replacement for only the current
 API site. Keep the website, legacy retirement response and unrelated hosts intact.
-Keep the Cells hostname for TLS/SNI/Host and preserve the original request path
-after the `/services/mcport` prefix. Caddy automatically handles upgrades and
-streams. Both the Cells runtime and Caddy need the bounded 630-second response
-header deadline to preserve McPort's maximum 600-second MCP call. The initial
+Connect to `api.cells.teamofsilicons.com` with normal verified TLS and that SNI,
+and send the fixed cell hostname as `Host`. This selects the cell at the origin
+without passing through the wildcard Cells CDN's 120-second response deadline.
+Remove caller-supplied Cells/CDN and forwarding headers. No CDN signing secret
+belongs on this edge. Preserve the original path after `/services/mcport`.
+Caddy automatically handles upgrades and streams. The Cells outer service
+middleware, service proxy, origin Caddy route and McPort edge need the bounded
+630-second response deadline to preserve McPort's maximum 600-second MCP call.
+The origin route must match only this cell's `/services/mcport` prefix; leave
+unrelated routes at their existing limits. The initial
 Cells 30-second deadline cannot serve a long synchronous tool call. McPort's
 local host long-poll returns within 20 seconds.
 

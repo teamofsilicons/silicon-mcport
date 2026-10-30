@@ -58,8 +58,8 @@ def main():
         cert, key = root/"cert.pem", root/"key.pem"
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                         "-keyout", str(key), "-out", str(cert), "-days", "1",
-                        "-subj", "/CN=fixture.mcport.test",
-                        "-addext", "subjectAltName=DNS:fixture.mcport.test"],
+                        "-subj", "/CN=origin.mcport.test",
+                        "-addext", "subjectAltName=DNS:origin.mcport.test"],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         upstream = ThreadingHTTPServer(("127.0.0.1", 0), Echo)
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -69,10 +69,10 @@ def main():
         thread.start()
         port = free_port()
         config = template.replace("api.mcport.teamofsilicons.com {", f"http://127.0.0.1:{port} {{")
-        config = config.replace("reverse_proxy https://{$CELLS_MCPORT_HOST}",
+        config = config.replace("reverse_proxy https://api.cells.teamofsilicons.com",
                                 f"reverse_proxy https://127.0.0.1:{upstream.server_port}")
-        config = config.replace("tls_server_name {$CELLS_MCPORT_HOST}",
-                                "tls_server_name {$CELLS_MCPORT_HOST}\n"+
+        config = config.replace("tls_server_name api.cells.teamofsilicons.com",
+                                "tls_server_name origin.mcport.test\n"+
                                 "\t\t\ttls_trust_pool file "+str(cert))
         path = root/"Caddyfile"
         path.write_text("{\n\tadmin off\n}\n"+config)
@@ -96,6 +96,10 @@ def main():
                 headers = {"Authorization": "Bearer genuine-fixture-bearer",
                            "X-Mcport-Authorization": "Bearer forged-fixture-bearer",
                            "apikey": "forged-cell-key", "X-Cells-Identity": "forged-context",
+                           "X-Cells-Cdn-Proof": "forged-proof",
+                           "X-Forwarded-Host": "attacker.invalid",
+                           "X-Forwarded-For": "192.0.2.123",
+                           "Forwarded": "host=attacker.invalid",
                            "Content-Type": "application/json"}
                 request = urllib.request.Request(f"http://127.0.0.1:{port}/webhooks/accounts?x=one%20two",
                                                  data=body, headers=headers)
@@ -107,6 +111,8 @@ def main():
                 assert received.get("x-mcport-authorization") == "Bearer genuine-fixture-bearer"
                 assert "authorization" not in received
                 assert not any(k.startswith("x-cells-") for k in received)
+                assert not any(k.startswith("x-forwarded-") for k in received)
+                assert "forwarded" not in received
                 assert received["apikey"] == "fixture-publishable-key"
                 assert received["host"] == "fixture.mcport.test"
                 request = urllib.request.Request(f"http://127.0.0.1:{port}/health",
@@ -117,7 +123,8 @@ def main():
                 assert result["path"] == "/services/mcport/health"
                 print(json.dumps({"passed": True, "checks": ["verified upstream TLS", "bearer transport",
                     "spoofed bearer replacement", "missing bearer remains unauthenticated", "cell header removal",
-                    "publishable key replacement", "upstream Host", "path and query preservation",
+                    "publishable key replacement", "cell Host distinct from verified TLS origin",
+                    "forwarded header removal", "path and query preservation",
                     "webhook body preservation"]}))
             finally:
                 process.terminate()
