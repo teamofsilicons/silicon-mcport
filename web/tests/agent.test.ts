@@ -27,7 +27,7 @@ test("llms.txt says what the app is, how a Silicon installs it and signs in, and
   assert.match(text, /^# MCPort\n\n> One place for your MCP connections\.\n/);
   assert.ok(text.includes("`silicon-apps install mcport`"));
   assert.ok(text.includes("`silicon-accounts login --app mcport -q | mcport login --slt-stdin`"));
-  assert.ok(text.includes("- [Docs](https://github.com/teamofsilicons/silicon-mcport/tree/main/docs)"));
+  assert.ok(text.includes("- [Docs](https://api.mcport.teamofsilicons.com/interface-api)"));
   for (const word of ["AI agent", "human", "user account", "organization", " org ", "Honeycomb", "IAM"]) assert.ok(!text.includes(word), `never "${word}"`);
 });
 
