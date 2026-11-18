@@ -12,14 +12,19 @@ mod execution;
 mod hosts;
 mod identity;
 mod identity_store;
+#[cfg(test)]
+mod interface_tests;
 mod oauth;
 mod operations;
+mod organizations;
+mod people;
 mod postgres_store;
 mod public_ids;
 mod state;
 mod store;
 #[cfg(test)]
 mod test_support;
+mod ting;
 mod uuid_backfill;
 use axum::{
     Json, Router,
@@ -93,7 +98,7 @@ async fn discovery(State(app): State<App>) -> Json<Value> {
         backend_url: app.config.public_url.clone(),
         website_url: app.config.web_url.clone(),
         repository_url: REPOSITORY.into(),
-        docs_url: format!("{REPOSITORY}/tree/main/docs"),
+        docs_url: format!("{}/interface-api",app.config.public_url),
         package_url: "https://crates.io/crates/mcport-client".into(),
         install_url: format!("https://apps.teamofsilicons.com/apps/{}", app.config.app_id),
         version: env!("CARGO_PKG_VERSION").into(),
@@ -197,8 +202,41 @@ fn router(app: App) -> Router {
     };
     Router::new()
         .route("/health", get(health))
+        .route(
+            "/interface-api",
+            get(async || {
+                (
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    include_str!("../../../docs/API.md"),
+                )
+            }),
+        )
+        .route(
+            "/openapi.yaml",
+            get(async || {
+                (
+                    [(header::CONTENT_TYPE, "application/yaml")],
+                    include_str!("../../../docs/openapi.yaml"),
+                )
+            }),
+        )
         .route("/api/v1/discovery", get(discovery))
         .route("/api/v1/me", get(me))
+        .route("/api/v1/organizations", get(organizations::get))
+        .route("/api/v1/people", get(people::list))
+        .route("/api/v1/people/resolve", get(people::resolve))
+        .route(
+            "/api/v1/contacts/connection",
+            axum::routing::put(people::connect),
+        )
+        .route("/api/v1/contacts", post(people::save))
+        .route("/api/v1/contacts/photos/{id}", get(people::photo))
+        .route(
+            "/api/v1/notifications/subscription",
+            get(ting::subscription)
+                .post(ting::enroll)
+                .delete(ting::unsubscribe),
+        )
         .route("/api/v1/iam", get(gone))
         .route("/api/v1/auth/{*removed}", get(gone).post(gone))
         .route("/api/{*unknown}", get(not_found).post(not_found))
@@ -317,6 +355,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     let shutdown = tokio_util::sync::CancellationToken::new();
     let worker = tokio::spawn(operations::report_worker(app.clone(), shutdown.clone()));
     let account_worker = tokio::spawn(accounts::account_worker(app.clone(), shutdown.clone()));
+    let ting_worker = tokio::spawn(ting::worker(app.clone(), shutdown.clone()));
     let store = app.store.clone();
     let database_shutdown = shutdown.clone();
     let database_worker = tokio::spawn(async move {
@@ -379,6 +418,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     shutdown.cancel();
     let _ = worker.await;
     let _ = account_worker.await;
+    let _ = ting_worker.await;
     if database_worker.await.unwrap_or(true) {
         anyhow::bail!("Database connection lost; a fresh backend instance is required");
     }

@@ -1,4 +1,5 @@
 "use client";
+import { PersonLabel } from "./people";
 import { DirectorySharing } from "./sharing";
 import { useEffect, useState } from "react";
 import {
@@ -258,7 +259,7 @@ export function DirectoryPage({
                     <span>No source link provided</span>
                   )}
                   {entry.source === "personal" && (
-                    <small>Added by {(entry.owner?.id || entry.owner?.uuid || "the community")}</small>
+                    <div><small>Added by</small>{entry.owner && <PersonLabel account={entry.owner}/>}</div>
                   )}
                 </div>
                 <div className="directory-card-actions">

@@ -45,6 +45,8 @@ const env = {
   PUBLIC_URL: `http://127.0.0.1:${PORT}`,
   EXTRA_IMG_ORIGINS: pick("EXTRA_IMG_ORIGINS", "http://127.0.0.1:9594")!,
 };
+// Session-expiry tests and the test server use the same sealed local state.
+Object.assign(process.env, env);
 // The tests read these too (e2e/support.ts).
 process.env.E2E_BASE_URL = env.PUBLIC_URL;
 process.env.E2E_ACCOUNTS_URL = env.ACCOUNTS_URL;

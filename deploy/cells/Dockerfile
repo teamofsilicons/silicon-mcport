@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 pkg-con
 WORKDIR /source
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY docs/API.md docs/openapi.yaml ./docs/
 ARG SOURCE_REVISION
 ARG MCPORT_TEST_DATABASE_URL
 ENV MCPORT_BUILD_REVISION=${SOURCE_REVISION} CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0

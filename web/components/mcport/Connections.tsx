@@ -1,4 +1,5 @@
 "use client";
+import { useGroupTargets, PersonLabel, PersonPicker } from "./people";
 import { ProviderCustody } from "./sharing";
 import type { ConnectionTab } from "./lib/routing";
 import { useEffect, useMemo, useState } from "react";
@@ -73,6 +74,7 @@ export function CreateConnection({
   onCreated: (c: Connection) => void;
   entry?: DirectoryEntry | null;
 }) {
+  const groupTargets = useGroupTargets(open);
   const [step, setStep] = useState(0);
   const [location, setLocation] = useState<"cloud" | "local">("cloud");
   const [data, setData] = useState<ConnectionInput>(() =>
@@ -383,11 +385,12 @@ export function CreateConnection({
               >
                 <option value="invited">Invite only</option>
                 <option value="circle">Me and my Silicons</option>
+                {groupTargets.map(t=><option key={t.type+":"+t.id} value={t.type+":"+t.id}>{(t.type==="team"?"Team · ":"Organization · ")+t.name}</option>)}
               </Select>
               <p className="field-help">
                 {data.visibility === "circle"
                   ? "The owner’s custodial group can use this connection, subject to its tool and provider account permissions."
-                  : "Only you can use this connection until you invite people. Directory membership does not grant connection access."}
+                  : data.visibility==="invited" ? "Only you can use this connection until you invite people." : "Current members can use this connection. Its administrators manage it."}
               </p>
               <div className="review-summary">
                 <span>
@@ -484,12 +487,7 @@ export function ConnectionDetail({
           ) : (
             <Users size={15} />
           )}
-          {
-            {
-              circle: "You and your Silicons",
-              invited: "Invite only",
-            }[c.visibility]
-          }
+          {c.visibility==="circle"?"You and your Silicons":c.visibility==="invited"?"Invite only":c.owner.display_name}
         </span>
         <span>
           <KeyRound size={15} />
@@ -722,12 +720,7 @@ function Tools({
         <div className="policy-context">
           <ShieldCheck size={17} />
           <span>Editing tool access for</span>
-          <input
-            aria-label="Tool permission account"
-            value={principal}
-            onChange={(e) => setPrincipal(e.target.value)}
-            placeholder="Everyone (or enter a c: / si: ID)"
-          />
+          <PersonPicker label="Tool permission account" value={principal} onChange={setPrincipal} placeholder="Everyone"/>
           <small>Connection-wide restrictions always apply.</small>
         </div>
       )}
@@ -1189,7 +1182,7 @@ function ConnectionAccess({
         <div>
           <h2>People & Silicons</h2>
           <p>
-            Grant permission to use this connection. The owner and a Silicon owner’s custodian manage its configuration.
+            {c.owner.kind === "team" || c.owner.kind === "organization" ? "Active members can use this connection. Administrators manage its configuration in McPort." : "Grant permission to use this connection. The owner and a Silicon owner’s custodian manage its configuration."}
           </p>
         </div>
       </div>
@@ -1199,17 +1192,12 @@ function ConnectionAccess({
         </span>
         <div>
           <strong>
-            {
-              {
-                  circle: "The owner’s custodial group",
-                invited: "Invite only — selected people and Silicons",
-              }[c.visibility]
-            }
+            {c.visibility==="circle"?"The owner’s custodial group":c.visibility==="invited"?"Invite only":c.owner.display_name}
           </strong>
-          <p>Change visibility in Configuration.</p>
+          {c.visibility==="invited" || c.visibility==="circle" ? <p>Change visibility in Configuration.</p> : <p>Membership is managed in <a href="https://organizations.teamofsilicons.com/">Silicon Organizations</a>.</p>}
         </div>
       </div>
-      {!c.can_manage ? (
+      {c.owner.kind==="team" || c.owner.kind==="organization" ? null : !c.can_manage ? (
         <Notice>
           The connection owner and a Silicon owner’s custodian manage invitations and tool permissions.
         </Notice>
@@ -1227,12 +1215,7 @@ function ConnectionAccess({
             }}
             className="invite-form"
           >
-            <Input
-              label="Carbon or Silicon ID"
-              value={principal}
-              onChange={(e) => setPrincipal(e.target.value)}
-              placeholder="si:designer or a Carbon ID"
-            />
+            <PersonPicker label="Carbon or Silicon ID" value={principal} onChange={setPrincipal}/>
             <Button type="submit" loading={busy} disabled={!principal.trim()}>
               <Plus size={15} />
               Grant access
@@ -1245,7 +1228,7 @@ function ConnectionAccess({
                 <ShieldCheck size={15} />
               </span>
               <div>
-                <strong>{(c.owner.id || c.owner.uuid)}</strong>
+                <PersonLabel account={c.owner}/>
                 <small>Can use, configure, share, and delete</small>
               </div>
               <span className="small-pill">Owner</span>
@@ -1255,13 +1238,7 @@ function ConnectionAccess({
             ) : (
               grants.map((g) => (
                 <div className="access-row" key={g.account.uuid}>
-                  <span className="mini-avatar">
-                    <Users size={15} />
-                  </span>
-                  <div>
-                    <strong>{g.account.id || g.account.uuid}</strong>
-                    <small>Can use enabled tools</small>
-                  </div>
+                  <div><PersonLabel account={g.account}/><small>Can use enabled tools</small></div>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1461,7 +1438,7 @@ function ConnectionSettings({
           onChange={setDescription}
           rows={3}
         />
-        {c.can_manage && (
+        {c.can_manage && (c.visibility==="invited" || c.visibility==="circle") && (
           <Select
             label="Visibility"
             value={visibility}

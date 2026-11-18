@@ -571,28 +571,25 @@ pub async fn share(
     }
     crate::connections::ensure_reachable(&app, &a.account, &target).await?;
     let key = entry_grant_key(&entry.id, &target.uuid);
-    let grant = match app.store.get::<EntryGrant>("directory_grant", &key)? {
-        Some(existing) => existing,
-        None => {
-            let grant = EntryGrant {
-                entry_id: entry.id.clone(),
-                account_uuid: target.uuid.clone(),
-                created_at: now(),
-                created_by: a.uuid().into(),
-            };
-            app.store.put(
-                "directory_grant",
-                &key,
-                ENV,
-                &entry.owner_uuid,
-                &entry.owner_uuid,
-                None,
-                &grant,
-                None,
-            )?;
-            grant
-        }
+    let proposed = EntryGrant {
+        entry_id: entry.id.clone(),
+        account_uuid: target.uuid.clone(),
+        created_at: now(),
+        created_by: a.uuid().into(),
     };
+    let grant = crate::ting::grant(
+        &app,
+        &key,
+        crate::ting::ShareDetails {
+            kind: crate::ting::Share::Directory,
+            owner: &entry.owner_uuid,
+            recipient: &target.uuid,
+            sender: a.uuid(),
+            resource_id: &entry.id,
+            name: &entry.name,
+        },
+        &proposed,
+    )?;
     Ok(Json(json!({"data": grant_view(&app, &grant)})))
 }
 pub async fn unshare(

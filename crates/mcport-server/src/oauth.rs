@@ -626,7 +626,7 @@ pub async fn authorize(
     if let Some(scope) = scope {
         destination.query_pairs_mut().append_pair("scope", &scope);
     }
-    let attempt = Attempt {
+    let mut attempt = Attempt {
         key: key.clone(),
         connection_id: c.id.clone(),
         account_uuid: a.uuid().into(),
@@ -644,6 +644,11 @@ pub async fn authorize(
         account_epoch,
         other: Map::new(),
     };
+    if crate::organizations::is_group(&c.owner_uuid) {
+        attempt
+            .other
+            .insert("work_session".into(), json!(app.work_sessions.retain(&a)));
+    }
     let (current, _) =
         connections::resolve(&app, &a.account, &attempt.connection_id, false).await?;
     if current.version != c.version || epoch(&app, &current, &account)? != account_epoch {
@@ -702,7 +707,13 @@ pub async fn start(State(app): State<App>, Query(q): Query<OAuthQuery>) -> Resul
     if attempt.expires_at <= now() {
         return Err(attempt_expired());
     }
-    let a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    let mut a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    crate::organizations::restore(
+        &app,
+        &mut a.account,
+        attempt.other.get("work_session").and_then(Value::as_str),
+    )
+    .await?;
     let (c, _) = connections::resolve(&app, &a.account, &attempt.connection_id, false).await?;
     let mut response=Html(format!("<!doctype html><html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Authorize MCP account · Silicon MCPort</title><body style='font:18px system-ui;max-width:560px;margin:10vh auto;padding:24px'><h1>Connect {}</h1><p>This will save the provider account for <strong>{}</strong>.</p><p>{}</p><a href='{}'>Continue to provider authorization</a><p>You can close this window to cancel.</p></body></html>",escape(&c.name),escape(a.account.label()),if c.auth_mode=="shared"{"Carbons and Silicons with access to this connection will be able to act through this provider account."}else{"This provider account will be used only for your own calls."},escape(&attempt.authorization_url))).into_response();
     response.headers_mut().insert(
@@ -738,7 +749,13 @@ pub async fn callback(
         return Err(attempt_expired());
     }
     validate_issuer(&attempt.issuer, q.iss.as_deref(), attempt.require_iss)?;
-    let a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    let mut a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    crate::organizations::restore(
+        &app,
+        &mut a.account,
+        attempt.other.get("work_session").and_then(Value::as_str),
+    )
+    .await?;
     let (c, access) = connections::resolve(&app, &a.account, &attempt.connection_id, false).await?;
     if c.auth_mode == "shared" && !access.manages() {
         return Err(Error::denied());
@@ -800,7 +817,13 @@ pub async fn callback(
     let tokens = body(response).await?;
     validate_token(&tokens)?;
     let token = required(&tokens, "access_token")?;
-    let a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    let mut a = auth::for_account(&app, &attempt.account_uuid, attempt.created_at)?;
+    crate::organizations::restore(
+        &app,
+        &mut a.account,
+        attempt.other.get("work_session").and_then(Value::as_str),
+    )
+    .await?;
     let (current, _) = connections::resolve(&app, &a.account, &c.id, false).await?;
     if current.version != c.version {
         return Err(Error::denied());

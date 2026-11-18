@@ -63,6 +63,9 @@ pub struct Config {
     pub accounts_url: String,
     /// Where MCPort calls Silicon Accounts (defaults to `accounts_url`).
     pub accounts_api_url: String,
+    pub contacts_url: String,
+    pub ting_url: String,
+    pub organizations_url: String,
     /// `whsec_…` secret that signs Silicon Accounts webhook deliveries.
     pub accounts_webhook_secret: Option<String>,
     pub public_url: String,
@@ -206,6 +209,24 @@ impl Config {
                 app_secret,
                 accounts_url,
                 accounts_api_url,
+                organizations_url: checked_url(
+                    "MCPORT_ORGANIZATIONS_URL",
+                    &env(
+                        "MCPORT_ORGANIZATIONS_URL",
+                        "https://organizations.teamofsilicons.com",
+                    ),
+                    "Silicon Organizations",
+                )?,
+                contacts_url: checked_url(
+                    "MCPORT_CONTACTS_URL",
+                    &env("MCPORT_CONTACTS_URL", "https://contacts.teamofsilicons.com"),
+                    "Silicon Contacts",
+                )?,
+                ting_url: checked_url(
+                    "MCPORT_TING_URL",
+                    &env("MCPORT_TING_URL", "https://ting.teamofsilicons.com"),
+                    "Silicon Ting",
+                )?,
                 accounts_webhook_secret,
                 public_url,
                 web_url,
@@ -234,6 +255,9 @@ impl Config {
             app_secret: "fixture-app-secret".into(),
             accounts_url: accounts_url.trim_end_matches('/').into(),
             accounts_api_url: accounts_url.trim_end_matches('/').into(),
+            organizations_url: accounts_url.into(),
+            contacts_url: accounts_url.into(),
+            ting_url: accounts_url.into(),
             accounts_webhook_secret: None,
             public_url: "http://127.0.0.1:4241".into(),
             web_url: "http://127.0.0.1:4240".into(),
@@ -250,6 +274,8 @@ pub struct App {
     pub config: Arc<Config>,
     pub store: Arc<Store>,
     pub accounts: Arc<Accounts>,
+    pub http: reqwest::Client,
+    pub work_sessions: Arc<crate::organizations::Sessions>,
     pub locks: Arc<Mutex<HashMap<String, Weak<AsyncMutex<()>>>>>,
     pub active: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub jobs: Arc<Notify>,
@@ -322,6 +348,12 @@ impl App {
             config: Arc::new(config),
             store: Arc::new(store),
             accounts: Arc::new(accounts),
+            work_sessions: Default::default(),
+            http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(12))
+                .build()
+                .map_err(|_| Error::internal())?,
             locks: Arc::new(Mutex::new(HashMap::new())),
             active: Arc::new(Mutex::new(HashMap::new())),
             jobs: Arc::new(Notify::new()),

@@ -59,6 +59,10 @@ impl TestKey {
 /// What the stub answers, and how often it was asked.
 #[derive(Default)]
 pub struct Stub {
+    pub roles: Mutex<BTreeMap<String, String>>,
+    pub contacts: Mutex<BTreeMap<(String, String), Value>>,
+    pub tings: Mutex<Vec<Value>>,
+    pub ting_subscribers: Mutex<HashSet<String>>,
     pub keys: Mutex<Vec<Value>>,
     /// What an app's lookup answers: the public identity only (no name or photo).
     pub accounts: Mutex<BTreeMap<String, Value>>,
@@ -147,7 +151,7 @@ async fn introspect(State(stub): State<Arc<Stub>>, body: String) -> Json<Value> 
         return Json(json!({"active":false}));
     }
     Json(
-        json!({"active":true,"sub":claims["sub"],"aud":claims["aud"],"exp":claims["exp"],"iat":claims["iat"],"kind":claims["kind"],"id":claims["id"]}),
+        json!({"active":true,"token_type":claims.get("test_token_type").and_then(Value::as_str).unwrap_or("access_token"),"client_id":claims.get("test_client_id").unwrap_or(&claims["aud"]),"sub":claims["sub"],"aud":claims["aud"],"exp":claims["exp"],"iat":claims["iat"],"kind":claims["kind"],"id":claims["id"]}),
     )
 }
 
@@ -180,6 +184,7 @@ pub async fn fixture_with(change: impl FnOnce(&mut Config)) -> Fixture {
         .route("/v1/accounts/{uuid}", get(lookup))
         .route("/v1/apps/{app}/users/{uuid}", get(user))
         .route("/v1/oauth/introspect", post(introspect))
+        .merge(crate::interface_tests::routes())
         .with_state(stub.clone());
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
