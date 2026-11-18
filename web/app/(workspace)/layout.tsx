@@ -12,7 +12,7 @@ import { accountsOrigin } from "@/lib/server/site";
 export default async function WorkspaceLayout({ children }: { children: ReactNode }) {
   const session = await requireSession();
   return (
-    <Providers session={{ signedIn: true, account: session.account, expiresAt: session.expiresAt }}>
+    <Providers key={session.account.uuid} session={{ signedIn: true, account: session.account, expiresAt: session.expiresAt }}>
       <AppShell account={session.account} accountsUrl={accountsOrigin()}>
         {children}
       </AppShell>

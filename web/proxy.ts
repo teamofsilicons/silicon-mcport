@@ -93,7 +93,7 @@ export const config = {
     {
       // Route handlers (the BFF under /api and /auth, the agent files, the icons and the social image) and static files
       // set their own headers.
-      source: "/((?!api/|auth/|_next/static|_next/image|fonts/|favicon\\.ico|icon|apple-icon|og\\.png|robots\\.txt|sitemap\\.xml|llms\\.txt|manifest\\.webmanifest).*)",
+      source: "/((?!api/|interface/api/|auth/|_next/static|_next/image|fonts/|favicon\\.ico|icon|apple-icon|og\\.png|robots\\.txt|sitemap\\.xml|llms\\.txt|manifest\\.webmanifest).*)",
     },
   ],
 };

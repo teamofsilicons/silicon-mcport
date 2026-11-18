@@ -1,4 +1,5 @@
 "use client";
+import { PersonLabel } from "./people";
 import { useEffect, useState } from "react";
 import {
   Activity as ActivityIcon,
@@ -103,7 +104,7 @@ export function HostsPage() {
               <h3>{h.name}</h3>
               <p>Last connected {time(h.last_seen)}</p>
               <code>{h.id}</code>
-              <small>{h.owner.id||h.owner.uuid}</small>
+              <PersonLabel account={h.owner}/>
               {h.can_manage&&<HoldToConfirm tone="danger" label={"Hold to remove "+h.name} onConfirm={()=>{void api.deleteHost(h.id).then(load).catch(e=>setError(message(e)));}}/>}
               <div className="host-card-footer">
                 <ShieldCheck size={14} />
@@ -298,7 +299,7 @@ export function ActivityPage({
                       </span>
                       <span>
                         <strong>{a.tool_name || a.method}</strong>
-                        <small>{a.caller.id}</small>
+                        <PersonLabel account={a.caller}/>
                       </span>
                     </button>
                   </td>
@@ -350,7 +351,7 @@ export function ActivityPage({
                 </div>
                 <div>
                   <dt>Caller</dt>
-                  <dd>{selected.caller.id}</dd>
+                  <dd><PersonLabel account={selected.caller}/></dd>
                 </div>
                 <div>
                   <dt>Account</dt>

@@ -14,7 +14,7 @@ export type Connection = {
   name: string;
   description: string;
   owner: AccountRef;
-  visibility: "circle" | "invited";
+  visibility: "circle" | "invited" | `team:${string}` | `organization:${string}`;
   transport: "http" | "stdio";
   url?: string;
   host_id?: string;

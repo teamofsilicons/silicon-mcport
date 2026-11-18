@@ -2971,3 +2971,9 @@ th {
   .code-block pre, .code-block code, .code-block header { color: var(--foreground); }
   .eyebrow, .breadcrumb { font-size: 12px; }
 }
+
+.person-picker { position: relative; min-width: 0; flex: 1 1 15rem; }
+.person-options { position: absolute; z-index: 5; width: 100%; margin: 2px 0 0; padding: 4px; background: var(--surface, Canvas); color: var(--text, CanvasText); border: 1px solid var(--border, GrayText); list-style: none; max-height: 16rem; overflow: auto; box-shadow: 0 6px 18px #0002; }
+.person-options [role=option] { padding: 6px 8px; cursor: pointer; }
+.person-options [role=option]:hover, .person-options [aria-selected=true] { background: var(--surface-hover, color-mix(in srgb, CanvasText 8%, Canvas)); }
+.person-preview { padding: 6px 0; }

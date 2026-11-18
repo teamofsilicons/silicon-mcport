@@ -26,7 +26,7 @@ test("creates a connection, discovers paginated tools and executes a structured 
 test("tool policy switches and account grants persist",async()=>{
  const toggle=page.getByRole("switch",{name:"Disable echo",exact:true});await toggle.click();await expect(page.getByRole("switch",{name:"Enable echo",exact:true})).toBeVisible();await page.reload();await expect(page.getByRole("switch",{name:"Enable echo",exact:true})).toBeVisible();await page.getByRole("switch",{name:"Enable echo",exact:true}).click();
  await page.goto(connectionPath+"/access");
- await page.getByRole("textbox").filter({hasNot:page.locator("[type=password]")}).first().fill(runAccounts().friend.id);
+ await page.getByRole("combobox",{name:"Carbon or Silicon ID"}).fill(runAccounts().friend.id);
  await page.getByRole("button",{name:"Grant access",exact:true}).click();
  await expect(page.locator(".access-list")).toContainText(runAccounts().friend.id);
  await shot("mcport-connection-access");
@@ -43,7 +43,7 @@ test("directory is searchable and personal entries can be created and shared",as
  await page.goto("/directory");await expect(page.getByRole("heading",{level:1})).toBeVisible();await page.getByRole("button",{name:"Add personal entry",exact:true}).click();
  const dialog=page.getByRole("dialog");await dialog.getByRole("textbox",{name:"Name",exact:true}).fill("Browser reference");await dialog.getByRole("textbox",{name:"Description",exact:true}).fill("A reusable MCP server reference.");await dialog.getByRole("textbox",{name:"Category",exact:true}).fill("Testing");await dialog.getByRole("button",{name:/Add entry|Save entry|Create entry/,exact:false}).click();
  const card=page.locator("article").filter({has:page.getByRole("heading",{name:"Browser reference",exact:true})});await expect(card).toBeVisible();
- await card.getByRole("button",{name:"Share entry",exact:true}).click();const share=page.getByRole("dialog");await share.getByRole("textbox",{name:"Carbon or Silicon ID"}).fill(runAccounts().friend.id);await share.getByRole("button",{name:"Share entry",exact:true}).click();await expect(share).toContainText(runAccounts().friend.id);await page.keyboard.press("Escape");await shot("mcport-directory-desktop");
+ await card.getByRole("button",{name:"Share entry",exact:true}).click();const share=page.getByRole("dialog");await share.getByRole("combobox",{name:"Carbon or Silicon ID"}).fill(runAccounts().friend.id);await share.getByRole("button",{name:"Share entry",exact:true}).click();await expect(share).toContainText(runAccounts().friend.id);await page.keyboard.press("Escape");await shot("mcport-directory-desktop");
 });
 test("mobile dark pages fit without client errors",async()=>{
  await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:"dark",reducedMotion:"reduce"});
