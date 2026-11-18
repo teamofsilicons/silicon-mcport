@@ -51,7 +51,7 @@ test("the shell: the app's sections, the account menu and the ⌘K palette", asy
   const menu = page.getByRole("menu");
   await expect(menu).toContainText(me);
   await expect(menu).toContainText("Carbon");
-  await expect(menu.getByRole("menuitemradio", { name: "System" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Your account" })).toBeVisible();
   await page.keyboard.press("Escape");
 
   const target = appConfig.nav[appConfig.nav.length - 1]!;

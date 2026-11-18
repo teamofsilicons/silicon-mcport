@@ -16,13 +16,13 @@ test("a standalone browser can use McPort with its own app bearer", async ({
     await signIn(await primary.newPage(), runAccounts().carbon.email);
     const { session } = await storedSession(primary);
     const page = await standalone.newPage();
-    await page.route("http://interface.example.test/", (route) =>
+    await page.route("http://127.0.0.1:4242/standalone-interface", (route) =>
       route.fulfill({
         contentType: "text/html",
         body: "<title>Independent interface</title>",
       }),
     );
-    await page.goto("http://interface.example.test/");
+    await page.goto("http://127.0.0.1:4242/standalone-interface");
     const result = await page.evaluate(
       async ({ base, token }) => {
         const url = base + "/interface/api/v1";

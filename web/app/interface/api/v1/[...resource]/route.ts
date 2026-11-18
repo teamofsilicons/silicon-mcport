@@ -9,7 +9,7 @@ import {
 } from "@/lib/server/forward";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 800;
+export const maxDuration = 300;
 const prefix = "/interface/api/v1/";
 const cors = {
   "access-control-allow-origin": "*",
@@ -58,7 +58,7 @@ async function handle(request: NextRequest) {
         headers,
         cache: "no-store",
         redirect: "manual",
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(625000)]),
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(285_000)]),
         ...(hasBody ? { body: request.body, duplex: "half" } : {}),
       } as RequestInit,
     );
