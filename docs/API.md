@@ -16,7 +16,7 @@ own formats.
 
 ## Start an interface
 
-Request app ID `mcport` at Silicon Accounts sign-in. Take `apps["mcport"].access_token` from the result. Your interface backend calls `https://api.mcport.teamofsilicons.com/api/v1`. Browser clients on another origin can call `https://mcport.teamofsilicons.com/interface/api/v1` with the same bearer and `credentials: "omit"`. Use the service origin from your backend for large uploads and long calls, and one-time download tickets for large files. Keep refresh credentials and the interface secret on the interface backend. See the [OpenAPI contract](https://api.mcport.teamofsilicons.com/openapi.yaml).
+Request app ID `mcport` at Silicon Accounts sign-in. Take `apps["mcport"].access_token` from the result. Your interface backend calls `https://api.mcport.teamofsilicons.com/api/v1`. Browser clients on another origin can call `https://mcport.teamofsilicons.com/interface/api/v1` with the same bearer and `credentials: "omit"`. The browser transport waits up to 285 seconds for the upstream response. Use the service origin from your interface backend for large payloads and longer calls, and one-time download tickets for large files. Keep refresh credentials and the interface secret on the interface backend. See the [OpenAPI contract](https://api.mcport.teamofsilicons.com/openapi.yaml).
 
 ```js
 const token = signIn.apps["mcport"].access_token;
@@ -47,7 +47,7 @@ A new account can receive `{"data":[]}` from the connections list. Create a pers
 | PUT `/contacts/connection` | Explicit consent `{"enabled":true}` enables address-book reads and edits. Send false to disconnect. Returns `{"data":{"connected":true}}`. |
 | POST `/contacts` | `{"id":"si:scout","name":"Research partner","trust":2}` → saved Person. Trust accepts 1–255 (1 in contacts, 2 trusted). Other saved contact fields are preserved. |
 | GET `/contacts/photos/{id}` | The connected caller's saved contact photo as a private PNG. For a relative `pfp_url`, fetch with the caller's bearer from your selected API origin and display a blob URL. An absolute Accounts photo is public and receives no bearer. |
-| GET / POST `/notifications/subscription` | Read McPort's local enrollment or register the authenticated recipient with Ting. Returns `{subscribed,manage_url}`. A repeated POST rechecks enrollment with Ting. Manage recipient preferences and optional hooks in Ting. |
+| GET / POST / DELETE `/notifications/subscription` | Check the recipient’s current Ting subscription, enable it, or disable it. Returns `{subscribed,manage_url}`. A repeated POST rechecks enrollment with Ting. Manage recipient preferences and optional hooks in Ting. |
 
 A Person includes `uuid`, `id`, `kind`, `display_name`, `pfp_url`, `photo_id` and `trust` (null for unsaved accounts). Contact names, trust and private photos belong to the caller. They never confer access.
 
@@ -156,7 +156,7 @@ cannot embed credentials. `DirectoryEntry` includes the input plus
 | Method and path | Behavior |
 |---|---|
 | GET `/connections` | `Connection[]` the caller can use. |
-| POST `/connections` | `ConnectionInput` → `Connection`; the caller becomes the owner. |
+| POST `/connections` | `ConnectionInput` → `Connection`. A personal connection belongs to the caller. A team or organization connection belongs to the selected group. |
 | GET `/connections/{connection}` | Current connection view with account/status metadata. |
 | PATCH `/connections/{connection}` | Manager-only `ConnectionUpdate` → `Connection`; include the current `version` to detect conflicting edits. |
 | DELETE `/connections/{connection}` | Manager-only → `{deleted:true}`; invalidates subsequent execution and queued work. |
@@ -171,7 +171,7 @@ AccountRef, transport, url?, host_id?, command?, args, auth_mode, visibility, st
 AccountStatus, created_at, updated_at, version}`; `access` says why the caller sees it: `owner`, `custodian`, `circle`
 or `invited` on personal connections and `group_member` or `group_manager` on group connections. URL, command and arguments are shown to managers only.
 
-`ConnectionInput`: `{name,description?,transport:"http"|"stdio",url?,host_id?,command?,args?:[],auth_mode:"none"|"per-user"|"shared",visibility?:"invited"|"circle"}`.
+`ConnectionInput`: `{name,description?,transport:"http"|"stdio",url?,host_id?,command?,args?:[],auth_mode:"none"|"per-user"|"shared",visibility?:"invited"|"circle"|"organization:<org>"|"team:<org>/<team>"}`.
 HTTP requires a URL; stdio requires a host the caller registered and an absolute command. Remote HTTP uses public
 upstream hosts unless the operator configures an exception. Names are unique per owner. Visibility defaults to
 `invited` (the owner and the accounts it adds; with no grants it is owner-only). `private` is accepted as `invited`; an

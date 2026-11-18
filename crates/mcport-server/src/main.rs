@@ -233,7 +233,9 @@ fn router(app: App) -> Router {
         .route("/api/v1/contacts/photos/{id}", get(people::photo))
         .route(
             "/api/v1/notifications/subscription",
-            get(ting::subscription).post(ting::enroll),
+            get(ting::subscription)
+                .post(ting::enroll)
+                .delete(ting::unsubscribe),
         )
         .route("/api/v1/iam", get(gone))
         .route("/api/v1/auth/{*removed}", get(gone).post(gone))

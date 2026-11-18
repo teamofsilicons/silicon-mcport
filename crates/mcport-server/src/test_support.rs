@@ -62,6 +62,7 @@ pub struct Stub {
     pub roles: Mutex<BTreeMap<String, String>>,
     pub contacts: Mutex<BTreeMap<(String, String), Value>>,
     pub tings: Mutex<Vec<Value>>,
+    pub ting_subscribers: Mutex<HashSet<String>>,
     pub keys: Mutex<Vec<Value>>,
     /// What an app's lookup answers: the public identity only (no name or photo).
     pub accounts: Mutex<BTreeMap<String, Value>>,

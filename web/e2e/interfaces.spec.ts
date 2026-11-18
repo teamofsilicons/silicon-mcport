@@ -16,13 +16,9 @@ test("a standalone browser can use McPort with its own app bearer", async ({
     await signIn(await primary.newPage(), runAccounts().carbon.email);
     const { session } = await storedSession(primary);
     const page = await standalone.newPage();
-    await page.route("http://127.0.0.1:4242/standalone-interface", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: "<title>Independent interface</title>",
-      }),
-    );
-    await page.goto("http://127.0.0.1:4242/standalone-interface");
+    // Load a real document from the MCP fixture's separate loopback origin.
+    // Browser network policy assigns synthetic documents an unknown address space.
+    await page.goto("http://127.0.0.1:4242/health");
     const result = await page.evaluate(
       async ({ base, token }) => {
         const url = base + "/interface/api/v1";

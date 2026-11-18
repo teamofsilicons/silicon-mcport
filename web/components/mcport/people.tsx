@@ -351,11 +351,12 @@ export function TingSettings() {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  async function enroll() {
+  async function setSubscription(enabled: boolean) {
     setBusy(true);
     setError("");
     try {
-      await api.post(path + "/notifications/subscription");
+      if (enabled) await api.post(path + "/notifications/subscription");
+      else await api.delete(path + "/notifications/subscription");
       await status.refetch();
     } catch (e) {
       setError(message(e));
@@ -373,9 +374,18 @@ export function TingSettings() {
           <ErrorBox error={error || message(status.error)} />
         )}
         {status.data?.subscribed ? (
-          <p>Ting notifications are enabled for this account.</p>
+          <>
+            <p>Ting notifications are enabled for this account.</p>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void setSubscription(false)}
+            >
+              Disable Ting notifications
+            </Button>
+          </>
         ) : (
-          <Button onClick={() => void enroll()} disabled={busy}>
+          <Button onClick={() => void setSubscription(true)} disabled={busy}>
             Enable Ting notifications
           </Button>
         )}

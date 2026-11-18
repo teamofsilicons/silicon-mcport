@@ -41,6 +41,8 @@ See [development](docs/development.md) for configuration, tests and releases.
 
 ## Documentation
 
+Standalone frontends can use the [published interface guide](https://api.mcport.teamofsilicons.com/interface-api) and [OpenAPI contract](https://api.mcport.teamofsilicons.com/openapi.yaml). They cover connections, team ownership, Contacts, Ting and the MCP execution APIs.
+
 - [Usage and workflows](docs/usage.md)
 - [Development and deployment](docs/development.md)
 - [Release candidates and Silicon Apps packages](scripts/README.md)

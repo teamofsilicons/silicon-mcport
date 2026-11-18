@@ -811,6 +811,9 @@ paths:
     get:
       operationId: getTingSubscription
       responses: {'200': {description: 'data contains subscribed and manage_url.'}}
+    delete:
+      operationId: revokeTingSubscription
+      responses: {'200': {description: 'The recipient is unsubscribed. data contains subscribed and manage_url.'}}
     post:
       operationId: registerTingRecipient
       responses: {'200': {description: 'Ting registered this caller. A local webhook is optional.'}}

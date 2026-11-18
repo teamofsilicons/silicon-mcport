@@ -61,12 +61,63 @@ async fn post(app: &App, path: &str, proof: &str, body: &Value) -> Result<Value>
     }
     reply.json().await.map_err(|_| unavailable())
 }
+fn enrollment(app: &App, subscribed: bool) -> Json<Value> {
+    Json(json!({"data":{"subscribed":subscribed,"manage_url":app.config.ting_url}}))
+}
+
+// The registered ID belongs to this McPort account. A recipient can also revoke
+// it directly in Ting, so its active state comes from the delivering service.
+async fn active_subscription(app: &App, a: &Auth) -> Result<Option<String>> {
+    let Some(id) = app.store.get::<String>("ting_subscription", a.uuid())? else {
+        return Ok(None);
+    };
+    let token = app_proof(app, "subscriptions.read").await?;
+    let result = post(
+        app,
+        "/v1/subscriptions/query",
+        &token,
+        &json!({
+            "app_id":app.config.app_id,"for":a.uuid(),"limit":100
+        }),
+    )
+    .await?;
+    let items = result["items"].as_array().ok_or_else(unavailable)?;
+    Ok(items
+        .iter()
+        .any(|v| {
+            v["id"] == id
+                && v["for"] == a.uuid()
+                && v["app_id"] == app.config.app_id
+                && v["active"] == true
+        })
+        .then_some(id))
+}
+
 pub async fn subscription(State(app): State<App>, a: Auth) -> Result<Json<Value>> {
-    Ok(Json(
-        json!({"data":{"subscribed":app.store.get::<String>("ting_subscription",a.uuid())?.is_some(),"manage_url":app.config.ting_url}}),
+    Ok(enrollment(
+        &app,
+        active_subscription(&app, &a).await?.is_some(),
     ))
 }
+pub async fn unsubscribe(State(app): State<App>, a: Auth) -> Result<Json<Value>> {
+    let lock = app.lock(&format!("ting-subscription:{}", a.uuid()));
+    let _guard = lock.lock().await;
+    if let Some(id) = active_subscription(&app, &a).await? {
+        let token = app_proof(&app, "subscriptions.revoke").await?;
+        post(
+            &app,
+            "/v1/subscriptions/revoke",
+            &token,
+            &json!({"app_id":app.config.app_id,"id":id}),
+        )
+        .await?;
+    }
+    app.store.delete("ting_subscription", a.uuid())?;
+    Ok(enrollment(&app, false))
+}
 pub async fn enroll(State(app): State<App>, a: Auth) -> Result<Json<Value>> {
+    let lock = app.lock(&format!("ting-subscription:{}", a.uuid()));
+    let _guard = lock.lock().await;
     let token = user_proof(&app, &a, TING, &["subscriptions.register"]).await?;
     let result = post(
         &app,
@@ -89,9 +140,7 @@ pub async fn enroll(State(app): State<App>, a: Auth) -> Result<Json<Value>> {
         &sub,
         None,
     )?;
-    Ok(Json(
-        json!({"data":{"subscribed":true,"manage_url":app.config.ting_url}}),
-    ))
+    Ok(enrollment(&app, true))
 }
 
 struct ShareKind {

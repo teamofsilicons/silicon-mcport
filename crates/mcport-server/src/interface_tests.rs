@@ -1,6 +1,6 @@
 //! Exercise the standalone bearer entry point with separate Accounts, Contacts,
 //! Organizations and Ting HTTP boundaries. Every mutation uses disposable accounts.
-use crate::test_support::{Fixture, Stub, UPSTREAM, fixture};
+use crate::test_support::{Fixture, Stub, fixture, fixture_with};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -47,17 +47,25 @@ async fn org(State(s): State<Arc<Stub>>, h: HeaderMap) -> Json<Value> {
         .get(&uuid)
         .cloned()
         .unwrap_or_default();
-    let mut groups = vec!["organization:studio"];
-    if role == "member" || role == "admin" {
-        groups.push("team:studio/design");
+    if role.is_empty() {
+        return Json(
+            json!({"account_uuid":uuid, "organizations":[], "groups":[], "share_targets":[]}),
+        );
     }
-    let targets = if groups.len() == 2 {
-        json!([{"org_id":"studio","type":"team","id":"studio/design","name":"Design"}])
+    let mut groups = vec!["organization:studio"];
+    let mut targets =
+        vec![json!({"org_id":"studio","type":"organization","id":"studio","name":"Studio"})];
+    if matches!(role.as_str(), "member" | "admin" | "team_admin") {
+        groups.push("team:studio/design");
+        targets.push(json!({"org_id":"studio","type":"team","id":"studio/design","name":"Design"}));
+    }
+    let managed: Vec<_> = if role == "team_admin" {
+        vec!["design"]
     } else {
-        json!([])
+        vec![]
     };
     Json(
-        json!({"account_uuid":uuid,"organizations":[{"org_id":"studio","name":"Studio","capabilities":{"admin":role=="admin","team_admins":[]}}],"groups":groups,"share_targets":targets}),
+        json!({"account_uuid":uuid,"organizations":[{"org_id":"studio","name":"Studio","capabilities":{"admin":role=="admin","team_admins":managed}}],"groups":groups,"share_targets":targets}),
     )
 }
 async fn one(State(s): State<Arc<Stub>>, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -85,6 +93,16 @@ async fn save_contact(
 }
 pub(crate) fn routes() -> Router<Arc<Stub>> {
     Router::new()
+        .route("/team-tools", post(async |Json(v): Json<Value>| {
+            let result = match v["method"].as_str() {
+                Some("initialize") => json!({"protocolVersion":v["params"]["protocolVersion"],"capabilities":{"tools":{}},"serverInfo":{"name":"team-tools","version":"1"}}),
+                Some("tools/list") => json!({"tools":[{"name":"schedule","inputSchema":{"type":"object"}}]}),
+                Some("tools/call") => json!({"content":[{"type":"text","text":"team schedule"}]}),
+                Some("notifications/initialized") => return StatusCode::ACCEPTED.into_response(),
+                _ => return StatusCode::BAD_REQUEST.into_response(),
+            };
+            Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result})).into_response()
+        }))
         .route("/v1/integrations/mcport/me", get(org))
         .route("/v1/proofs/user-verification", post(issue))
         .route("/v1/proofs/app-verification", post(issue))
@@ -111,7 +129,7 @@ pub(crate) fn routes() -> Router<Arc<Stub>> {
         )
         .route(
             "/v1/subscriptions",
-            post(async |h: HeaderMap, Json(v): Json<Value>| {
+            post(async |State(s): State<Arc<Stub>>, h: HeaderMap, Json(v): Json<Value>| {
                 assert_eq!(
                     h["authorization"],
                     format!(
@@ -119,9 +137,21 @@ pub(crate) fn routes() -> Router<Arc<Stub>> {
                         v["for"].as_str().unwrap()
                     )
                 );
-                Json(json!({"subscription":{"id":"local-sub"}}))
+                let recipient = v["for"].as_str().unwrap();
+                s.ting_subscribers.lock().unwrap().insert(recipient.to_string());
+                Json(json!({"subscription":{"id":format!("sub-{recipient}")}}))
             }),
         )
+        .route("/v1/subscriptions/query", post(async |State(s): State<Arc<Stub>>, h: HeaderMap, Json(v): Json<Value>| {
+            assert_eq!(h["authorization"], "Bearer ting::subscriptions.read");
+            let who = v["for"].as_str().unwrap();
+            Json(json!({"items":[{"id":format!("sub-{who}"),"for":who,"app_id":"mcport","active":s.ting_subscribers.lock().unwrap().contains(who)}]}))
+        }))
+        .route("/v1/subscriptions/revoke", post(async |State(s): State<Arc<Stub>>, h: HeaderMap, Json(v): Json<Value>| {
+            assert_eq!(h["authorization"], "Bearer ting::subscriptions.revoke");
+            s.ting_subscribers.lock().unwrap().remove(v["id"].as_str().unwrap().strip_prefix("sub-").unwrap());
+            Json(json!({"active":false}))
+        }))
         .route(
             "/v1/tings",
             post(
@@ -237,11 +267,35 @@ async fn standalone_contacts_ting_and_share_replay() {
     );
 }
 #[tokio::test]
-async fn live_work_membership_owns_the_connection_and_revokes_team_access() {
+async fn ting_enrollment_tracks_recipient_revocation() {
     let f = fixture().await;
+    f.carbon("Ada", "c:ada");
+    let path = "/api/v1/notifications/subscription";
+    assert_eq!(ok(&f, "Ada", "GET", path, None).await["subscribed"], false);
+    ok(&f, "Ada", "POST", path, None).await;
+    assert_eq!(ok(&f, "Ada", "GET", path, None).await["subscribed"], true);
+    f.stub.ting_subscribers.lock().unwrap().remove("Ada");
+    assert_eq!(ok(&f, "Ada", "GET", path, None).await["subscribed"], false);
+    ok(&f, "Ada", "POST", path, None).await;
+    for _ in 0..2 {
+        assert_eq!(
+            ok(&f, "Ada", "DELETE", path, None).await["subscribed"],
+            false
+        );
+    }
+    assert!(!f.stub.ting_subscribers.lock().unwrap().contains("Ada"));
+}
+#[tokio::test]
+async fn live_work_membership_owns_the_connection_and_revokes_team_access() {
+    let f = fixture_with(|c| {
+        c.upstream_origins.insert(c.accounts_url.clone());
+    })
+    .await;
     for (uuid, id, role) in [
         ("Alice", "c:alice.studio", "admin"),
         ("Bob", "c:bob.studio", "member"),
+        ("TeamAdmin", "c:lead.studio", "team_admin"),
+        ("OtherTeam", "c:outside.studio", "other_team"),
         ("Personal", "c:alice", ""),
     ] {
         f.carbon(uuid, id);
@@ -251,10 +305,30 @@ async fn live_work_membership_owns_the_connection_and_revokes_team_access() {
             .unwrap()
             .insert(uuid.into(), role.into());
     }
-    let input = json!({"name":"design","visibility":"team:studio/design","transport":"http","url":UPSTREAM,"auth_mode":"none"});
+    let input = json!({"name":"design","visibility":"team:studio/design","transport":"http","url":format!("{}/team-tools", f.url),"auth_mode":"none"});
+    let mut org_input = input.clone();
+    org_input["visibility"] = json!("organization:studio");
+    org_input["name"] = json!("company");
+    assert_eq!(
+        f.as_(
+            "TeamAdmin",
+            "POST",
+            "/api/v1/connections",
+            Some(org_input.clone())
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let company = ok(&f, "Alice", "POST", "/api/v1/connections", Some(org_input)).await;
+    let company_path = format!("/api/v1/connections/{}", company["id"].as_str().unwrap());
+    assert_eq!(
+        ok(&f, "OtherTeam", "GET", &company_path, None).await["access"],
+        "group_member"
+    );
     let c = ok(
         &f,
-        "Alice",
+        "TeamAdmin",
         "POST",
         "/api/v1/connections",
         Some(input.clone()),
@@ -281,6 +355,24 @@ async fn live_work_membership_owns_the_connection_and_revokes_team_access() {
         ok(&f, "Personal", "GET", "/api/v1/organizations", None).await["groups"],
         json!([])
     );
+    assert_eq!(
+        f.as_("OtherTeam", "GET", &path, None).await.0,
+        StatusCode::NOT_FOUND
+    );
+    f.stub.roles.lock().unwrap().remove("TeamAdmin");
+    assert_eq!(
+        ok(&f, "Alice", "GET", &path, None).await["can_manage"],
+        true
+    );
+    let result = ok(
+        &f,
+        "Bob",
+        "POST",
+        &format!("{path}/mcp"),
+        Some(json!({"method":"tools/call","params":{"name":"schedule","arguments":{}}})),
+    )
+    .await;
+    assert_eq!(result["result"]["content"][0]["text"], "team schedule");
     f.stub.roles.lock().unwrap().remove("Bob");
     assert_eq!(
         f.as_("Bob", "GET", &path, None).await.0,
