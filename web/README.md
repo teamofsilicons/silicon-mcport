@@ -52,6 +52,8 @@ NEXT_OUTPUT=standalone pnpm build
 
 Playwright starts Next on 4240, signs two fresh Carbons in using the hosted email flow and uses actual API requests. It checks product journeys, public/session flows, refresh concurrency, CSRF, desktop/mobile layout and WCAG 2.2 AA in both themes. Product screenshots go to the ignored `../.mig/screens/`. Provider fixtures prove application behavior, not compatibility with paid external providers. See the migration progress record for exact runs and limits.
 
+To exercise a genuine Accounts Interface grant, set `E2E_INTERFACE_ID` to a local public PKCE interface registered for `mcport`. Register `http://127.0.0.1:4242/finish` as its callback or set `E2E_INTERFACE_CALLBACK` to the registered URL. The browser suite approves the disposable Carbon’s grant, refreshes it, revokes it and checks that McPort immediately denies the previous token.
+
 ## Deployment
 
 Vercel: project root `web`, use the checked-in Next configuration and the environment above. Register production/preview callback URLs before rollout. Self-hosting: `NEXT_OUTPUT=standalone pnpm build`, copy `public` and `.next/static` into `.next/standalone`, then run `server.js` behind the site's TLS proxy.
