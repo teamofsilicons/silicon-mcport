@@ -12,7 +12,7 @@ pub(crate) fn valid_account_uuid(value: &str) -> bool {
 
 use crate::{
     error::{Error, Result},
-    state::{App, hash, now},
+    state::{App, now},
 };
 use mcport_core::AccountRef;
 use silicon_accounts_client::{
@@ -29,8 +29,6 @@ use std::{
 const JWKS_REFETCH_INTERVAL: Duration = Duration::from_secs(30);
 /// Cached signing keys are refetched after this long (kept if the refetch fails).
 const JWKS_MAX_AGE: Duration = Duration::from_secs(3600);
-/// A positive introspection is reused for at most this long.
-const INTROSPECTION_TTL: Duration = Duration::from_secs(30);
 /// A `c:`/`si:` id resolved through Accounts is reused for this long.
 const RESOLVE_TTL: Duration = Duration::from_secs(60);
 /// Account rows of active accounts are refreshed from Accounts this often.
@@ -49,6 +47,8 @@ pub const SIGN_IN_AGAIN: &str = "Sign in again: Carbons run mcport login (the we
 /// What MCPort knows about one Carbon or Silicon.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccountRow {
+    /// Request-scoped verified work membership, never written to the accounts table.
+    pub organization: Option<crate::organizations::Context>,
     pub uuid: String,
     /// `carbon` or `silicon` (empty only for rows created from a webhook about an
     /// account MCPort never saw).
@@ -165,7 +165,6 @@ pub struct Accounts {
     pub issuer: String,
     jwks: tokio::sync::RwLock<Option<CachedJwks>>,
     jwks_fetch: tokio::sync::Mutex<Option<Instant>>,
-    introspected: Mutex<HashMap<String, Instant>>,
     resolved: Mutex<HashMap<String, (AccountSummary, Instant)>>,
     lookups: Mutex<VecDeque<Instant>>,
     resolutions: Mutex<HashMap<String, VecDeque<Instant>>>,
@@ -179,7 +178,6 @@ impl Accounts {
             issuer: issuer.into(),
             jwks: tokio::sync::RwLock::new(None),
             jwks_fetch: tokio::sync::Mutex::new(None),
-            introspected: Mutex::new(HashMap::new()),
             resolved: Mutex::new(HashMap::new()),
             lookups: Mutex::new(VecDeque::new()),
             resolutions: Mutex::new(HashMap::new()),
@@ -191,7 +189,8 @@ impl Accounts {
     /// Verify an access token locally: EdDSA signature by a published key,
     /// `aud` = MCPort's app id, `iss` = the Accounts public URL, `exp`/`nbf`.
     pub async fn verify(&self, token: &str) -> Result<Claims> {
-        let options = VerifyOptions::for_app(&self.app_id).with_issuer(&self.issuer);
+        let mut options = VerifyOptions::for_app(&self.app_id).with_issuer(&self.issuer);
+        options.leeway_seconds = 0;
         let keys = self.keys(false).await?;
         match verify_access_token(&keys, token, &options) {
             Err(silicon_accounts_client::Error::Token(TokenError::UnknownKey { .. })) => {
@@ -245,18 +244,7 @@ impl Accounts {
     }
 
     /// Ask Accounts whether this sign-in is still active (sees revocation at once).
-    /// Positive answers are reused for up to 30 seconds per token.
     pub async fn ensure_active(&self, token: &str, uuid: &str) -> Result<()> {
-        let key = hash(token);
-        if self
-            .introspected
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&key)
-            .is_some_and(|at| at.elapsed() < INTROSPECTION_TTL)
-        {
-            return Ok(());
-        }
         // An inactive token is a normal `{active:false}` answer. Any error means MCPort
         // could not ask (network, or MCPort's own app credentials were refused).
         let result = self.app().introspect(token).await.map_err(|error| {
@@ -265,7 +253,11 @@ impl Accounts {
                 "MCPort could not confirm with Silicon Accounts that this sign-in is still active.",
             )
         })?;
-        if !result.active || result.sub.as_deref() != Some(uuid) {
+        if !result.active
+            || result.sub.as_deref() != Some(uuid)
+            || result.token_type.as_deref() != Some("access_token")
+            || result.client_id.as_deref() != Some(self.app_id.as_str())
+        {
             return Err(Error::new(
                 401,
                 "sign_in_revoked",
@@ -273,19 +265,7 @@ impl Accounts {
                 SIGN_IN_AGAIN,
             ));
         }
-        let mut cache = self.introspected.lock().unwrap_or_else(|e| e.into_inner());
-        if cache.len() > 4096 {
-            cache.retain(|_, at| at.elapsed() < INTROSPECTION_TTL);
-        }
-        cache.insert(key, Instant::now());
         Ok(())
-    }
-    /// Forget cached introspections (after a revocation webhook).
-    pub fn forget_introspections(&self) {
-        self.introspected
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
     }
 
     fn take_lookup_budget(&self, required: bool) -> bool {

@@ -172,7 +172,7 @@ fn embedded(result: &Value) -> Vec<EmbeddedAsset> {
 /// and tool. Revoked access hides old results.
 async fn authorized(app: &App, viewer: &AccountRow, id: &str) -> Result<CallRecord> {
     let record = execution::owned(app, viewer, id).await?;
-    execution::readable(app, &record).await?;
+    execution::readable(app, &record, viewer).await?;
     if record.invocation.result.is_none() {
         return Err(Error::new(
             404,
@@ -190,6 +190,7 @@ pub struct Ticket {
     call_id: String,
     index: u32,
     viewer_uuid: String,
+    work_session: Option<String>,
     issued_at: i64,
     expires_at: i64,
 }
@@ -291,6 +292,10 @@ pub async fn ticket(
                 call_id: record.invocation.id.clone(),
                 index,
                 viewer_uuid: a.uuid().into(),
+                work_session: record
+                    .other
+                    .contains_key("work_group")
+                    .then(|| app.work_sessions.retain(&a)),
                 issued_at: now(),
                 expires_at,
             },
@@ -319,11 +324,12 @@ pub async fn redeem(State(app): State<App>, Path(value): Path<String>) -> Result
         })?;
     // A sign-out after the ticket was issued ends it too; one in the same second
     // (times are whole seconds) counts as after.
-    let viewer = app
+    let mut viewer = app
         .store
         .account(&ticket.viewer_uuid)?
         .filter(|viewer| viewer.active() && viewer.revoked_before < ticket.issued_at)
         .ok_or_else(Error::missing)?;
+    crate::organizations::restore(&app, &mut viewer, ticket.work_session.as_deref()).await?;
     let record = authorized(&app, &viewer, &ticket.call_id).await?;
     let asset = embedded(record.invocation.result.as_ref().expect("checked result"))
         .into_iter()

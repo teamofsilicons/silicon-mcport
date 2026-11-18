@@ -166,7 +166,13 @@ pub fn cancel_account_work(app: &App, uuid: &str) -> Result<()> {
 /// Re-check stored work against current account state, connection access, tool
 /// policy and provider account, as the caller that started it.
 pub async fn revalidate(app: &App, r: &CallRecord) -> Result<(Auth, ConnectionRecord)> {
-    let a = auth::for_account(app, &r.caller_uuid, r.invocation.created_at)?;
+    let mut a = auth::for_account(app, &r.caller_uuid, r.invocation.created_at)?;
+    crate::organizations::restore(
+        app,
+        &mut a.account,
+        r.other.get("work_session").and_then(Value::as_str),
+    )
+    .await?;
     let (c, _) = con::resolve(app, &a.account, &r.invocation.connection_id, false).await?;
     if c.version != r.connection_version {
         return Err(Error::new(
@@ -452,6 +458,11 @@ pub async fn execute(
         progress: None,
         other: Map::new(),
     };
+    if crate::organizations::is_group(&c.owner_uuid) {
+        r.other
+            .insert("work_session".into(), json!(app.work_sessions.retain(&a)));
+        r.other.insert("work_group".into(), json!(&c.owner_uuid));
+    }
     let (r, created) = app.store.create_public(
         "call",
         ENV,
@@ -621,6 +632,7 @@ pub async fn list(
         .filter(|r| {
             !r.caller_uuid.is_empty()
                 && visible.contains(&r.caller_uuid)
+                && work_result_visible(&a.account, r)
                 && cid
                     .as_ref()
                     .is_none_or(|id| id == &r.invocation.connection_id)
@@ -633,13 +645,26 @@ pub async fn list(
         .collect::<Vec<_>>();
     Ok(Json(json!({"data":out})))
 }
+fn work_result_visible(who: &AccountRow, r: &CallRecord) -> bool {
+    r.other
+        .get("work_group")
+        .and_then(Value::as_str)
+        .is_none_or(|group| {
+            r.caller_uuid == who.uuid
+                && who
+                    .organization
+                    .as_ref()
+                    .and_then(|ctx| ctx.access(group))
+                    .is_some()
+        })
+}
 /// A call `who` made, or one made by a Silicon `who` looks after. Others answer 404.
 pub async fn owned(app: &App, who: &AccountRow, id: &str) -> Result<CallRecord> {
     let r = app
         .store
         .get::<CallRecord>("call", id)?
         .ok_or_else(Error::missing)?;
-    if r.caller_uuid.is_empty() {
+    if r.caller_uuid.is_empty() || !work_result_visible(who, &r) {
         return Err(Error::missing());
     }
     if r.caller_uuid == who.uuid {
@@ -652,12 +677,15 @@ pub async fn owned(app: &App, who: &AccountRow, id: &str) -> Result<CallRecord> 
 }
 /// The caller of `r` must still be able to use its connection and tool: revoked
 /// access also hides old results (from the caller and its custodian alike).
-pub async fn readable(app: &App, r: &CallRecord) -> Result<()> {
-    let caller = app
+pub async fn readable(app: &App, r: &CallRecord, viewer: &AccountRow) -> Result<()> {
+    let mut caller = app
         .store
         .account(&r.caller_uuid)?
         .filter(|caller| caller.active())
         .ok_or_else(Error::missing)?;
+    if caller.uuid == viewer.uuid {
+        caller.organization = viewer.organization.clone();
+    }
     let (connection, _) = con::resolve(app, &caller, &r.invocation.connection_id, false).await?;
     if let Some(tool) = &r.invocation.tool_name
         && !con::allowed_tool(app, &connection, &caller.uuid, tool)?
@@ -668,7 +696,7 @@ pub async fn readable(app: &App, r: &CallRecord) -> Result<()> {
 }
 pub async fn get(State(app): State<App>, a: Auth, Path(id): Path<String>) -> Result<Json<Value>> {
     let r = owned(&app, &a.account, &id).await?;
-    readable(&app, &r).await?;
+    readable(&app, &r, &a.account).await?;
     let mut value = serde_json::to_value(r.view(&app))?;
     value["progress"] = r.progress.unwrap_or(Value::Null);
     Ok(Json(json!({"data":value})))

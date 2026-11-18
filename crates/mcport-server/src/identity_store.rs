@@ -14,6 +14,7 @@ const ACCOUNT_COLUMNS: &str = "uuid,kind,id,display_name,pfp_url,status,custodia
 
 fn account_row(row: &Row) -> rusqlite::Result<AccountRow> {
     Ok(AccountRow {
+        organization: None,
         uuid: row.get(0)?,
         kind: row.get(1)?,
         id: row.get(2)?,

@@ -125,17 +125,24 @@ pub enum Access {
     Owner,
     /// The owner is a Silicon the caller looks after.
     Custodian,
+    GroupMember,
+    GroupManager,
     Circle,
     Invited,
 }
 impl Access {
     pub fn manages(self) -> bool {
-        matches!(self, Access::Owner | Access::Custodian)
+        matches!(
+            self,
+            Access::Owner | Access::Custodian | Access::GroupManager
+        )
     }
     pub fn as_str(self) -> &'static str {
         match self {
             Access::Owner => "owner",
             Access::Custodian => "custodian",
+            Access::GroupMember => "group_member",
+            Access::GroupManager => "group_manager",
             Access::Circle => "circle",
             Access::Invited => "invited",
         }
@@ -145,6 +152,12 @@ impl Access {
 pub async fn access(app: &App, c: &ConnectionRecord, who: &AccountRow) -> Result<Option<Access>> {
     if c.owner_uuid.is_empty() || who.uuid.is_empty() || !who.active() {
         return Ok(None);
+    }
+    if crate::organizations::is_group(&c.owner_uuid) {
+        return Ok(who
+            .organization
+            .as_ref()
+            .and_then(|ctx| ctx.access(&c.owner_uuid)));
     }
     if c.owner_uuid == who.uuid {
         return Ok(Some(Access::Owner));
@@ -358,7 +371,18 @@ pub fn view(
     };
     let manages = access.manages();
     Ok(Connection {
-        owner: accounts::reference(app, &c.owner_uuid),
+        owner: who
+            .organization
+            .as_ref()
+            .and_then(|ctx| ctx.target(&c.owner_uuid))
+            .map(|t| AccountRef {
+                uuid: c.owner_uuid.clone(),
+                id: c.owner_uuid.clone(),
+                kind: t.kind.clone(),
+                display_name: t.name.clone(),
+                pfp_url: None,
+            })
+            .unwrap_or_else(|| accounts::reference(app, &c.owner_uuid)),
         status: status.into(),
         can_manage: manages,
         access: access.as_str().into(),
@@ -449,7 +473,20 @@ pub async fn create(
     Json(input): Json<ConnectionInput>,
 ) -> Result<Json<Value>> {
     validate_name(&input.name)?;
-    let visibility = visibility(&input.visibility)?;
+    let group = crate::organizations::is_group(&input.visibility);
+    let visibility = if group {
+        if a.account
+            .organization
+            .as_ref()
+            .and_then(|ctx| ctx.access(&input.visibility))
+            != Some(Access::GroupManager)
+        {
+            return Err(Error::denied());
+        }
+        input.visibility.as_str()
+    } else {
+        visibility(&input.visibility)?
+    };
     if !matches!(input.transport.as_str(), "http" | "stdio")
         || !matches!(input.auth_mode.as_str(), "none" | "per-user" | "shared")
     {
@@ -498,7 +535,11 @@ pub async fn create(
             crate::execution::network_policy(&app, u).await?;
         }
     }
-    let owner = a.uuid().to_owned();
+    let owner = if group {
+        visibility.to_owned()
+    } else {
+        a.uuid().to_owned()
+    };
     let mut c = ConnectionRecord {
         id: String::new(),
         name: input.name,
@@ -524,7 +565,7 @@ pub async fn create(
                 c
             })?;
     Ok(Json(
-        json!({"data":view(&app, c, Access::Owner, &a.account)?}),
+        json!({"data":view(&app, c, if group {Access::GroupManager} else {Access::Owner}, &a.account)?}),
     ))
 }
 pub async fn update(
@@ -554,7 +595,14 @@ pub async fn update(
         c.description = d
     }
     let reset = input.visibility.as_deref() == Some("private");
-    if let Some(v) = input.visibility {
+    if let Some(v) = input.visibility
+        && v != c.visibility
+    {
+        if crate::organizations::is_group(&c.owner_uuid) {
+            return Err(Error::bad(
+                "This connection belongs to its organization or team. Select its audience when creating the connection.",
+            ));
+        }
         c.visibility = visibility(&v)?.into();
     }
     c.updated_at = now();
@@ -638,6 +686,11 @@ pub async fn invite(
     Json(input): Json<AccessInput>,
 ) -> Result<Json<Value>> {
     let (c, _) = resolve(&app, &a.account, &name, true).await?;
+    if crate::organizations::is_group(&c.owner_uuid) {
+        return Err(Error::bad(
+            "Manage this connection’s membership in Silicon Organizations.",
+        ));
+    }
     let target = accounts::resolve(&app, a.uuid(), &input.account).await?;
     if target.uuid == c.owner_uuid {
         return Err(Error::bad(
@@ -648,29 +701,26 @@ pub async fn invite(
     let lock = app.lock(&format!("connection:{}", c.id));
     let _guard = lock.lock().await;
     let key = grant_key(&c.id, &target.uuid);
-    let grant = match app.store.get::<GrantRecord>("grant", &key)? {
-        Some(existing) if existing.account_uuid == target.uuid => existing,
-        _ => {
-            let grant = GrantRecord {
-                connection_id: c.id.clone(),
-                account_uuid: target.uuid.clone(),
-                created_at: now(),
-                created_by: Some(a.uuid().into()),
-                other: Map::new(),
-            };
-            app.store.put(
-                "grant",
-                &key,
-                ENV,
-                &c.owner_uuid,
-                &c.owner_uuid,
-                None,
-                &grant,
-                None,
-            )?;
-            grant
-        }
+    let proposed = GrantRecord {
+        connection_id: c.id.clone(),
+        account_uuid: target.uuid.clone(),
+        created_at: now(),
+        created_by: Some(a.uuid().into()),
+        other: Map::new(),
     };
+    let grant = crate::ting::grant(
+        &app,
+        &key,
+        crate::ting::ShareDetails {
+            kind: crate::ting::Share::Connection,
+            owner: &c.owner_uuid,
+            recipient: &target.uuid,
+            sender: a.uuid(),
+            resource_id: &c.id,
+            name: &c.name,
+        },
+        &proposed,
+    )?;
     Ok(Json(json!({"data":grant_view(&app, &grant)})))
 }
 /// The uuid a path segment names: a uuid with a grant, a cached current id, or

@@ -1,8 +1,4 @@
-//! Authentication: every `/api/v1` route except discovery takes a Silicon
-//! Accounts access token (`Authorization: Bearer <JWT>`, `aud` = MCPort's app id),
-//! verified locally against the cached JWKS. Sensitive routes also ask Accounts
-//! (introspection, cached ≤ 30 s) so revocation applies at once. MCPort issues no
-//! sessions or cookies of its own.
+//! Every caller token is verified locally and introspected for current McPort access.
 use crate::{
     accounts::{self, ACCOUNT_MAX_AGE, AccountRow, SIGN_IN_AGAIN},
     error::{Error, Result},
@@ -41,8 +37,7 @@ impl Auth {
     }
 }
 
-/// A caller whose sign-in Silicon Accounts confirmed as active just now (≤ 30 s):
-/// used for execution, provider accounts, sharing, deletion and host creation.
+/// Marker for operations that require a current caller at the point of mutation.
 pub struct Live(pub Auth);
 
 impl FromRequestParts<App> for Auth {
@@ -54,11 +49,7 @@ impl FromRequestParts<App> for Auth {
 impl FromRequestParts<App> for Live {
     type Rejection = Error;
     async fn from_request_parts(parts: &mut Parts, app: &App) -> Result<Self> {
-        let auth = authenticate(app, &parts.headers).await?;
-        app.accounts
-            .ensure_active(auth.token(), auth.uuid())
-            .await?;
-        Ok(Live(auth))
+        authenticate(app, &parts.headers).await.map(Live)
     }
 }
 
@@ -131,71 +122,63 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
         return Err(signed_out());
     }
     let iat = claims.iat.unwrap_or(0);
-    // `iat` is in whole seconds, so a token issued in the very second of a
-    // revocation may predate it (an STK rotation just ended it) or follow it (a new
-    // sign-in right after). Silicon Accounts knows which: introspection decides.
-    let mut confirmed = false;
-    let (mut account, lookup) = loop {
-        let mut verdict = None;
-        let mut lookup = false;
-        let mut tie = false;
-        let row = app.store.update_account(&claims.sub, |current| {
-            let mut row = current
-                .clone()
-                .unwrap_or_else(|| AccountRow::new(&claims.sub, kind));
-            if current.is_none() {
-                lookup = true;
-            }
-            if row.status == "deleted" {
-                verdict = Some(deleted());
-                return None;
-            }
-            if iat < row.revoked_before {
-                verdict = Some(signed_out());
-                return None;
-            }
-            if iat == row.revoked_before && row.revoked_before > 0 && !confirmed {
-                tie = true;
-                return None;
-            }
-            // A token issued after access was removed means the account signed in again.
-            row.status = "active".into();
-            row.signed_in_at = row.signed_in_at.max(iat);
-            row.kind = kind.into();
-            if let Some(id) = claims.id.as_deref().filter(|id| !id.is_empty())
-                && iat.saturating_mul(1000) >= row.synced_at_ms
+    let previous = app.store.account(&claims.sub)?;
+    if let Some(row) = &previous {
+        if row.status == "deleted" {
+            return Err(deleted());
+        }
+        if iat < row.revoked_before {
+            return Err(signed_out());
+        }
+    }
+    app.accounts
+        .ensure_active(&token, &claims.sub)
+        .await
+        .map_err(|err| {
+            if err.1.code == "sign_in_revoked"
+                && previous.is_some_and(|row| row.revoked_before > 0 && iat == row.revoked_before)
             {
-                row.id = id.into();
+                signed_out()
+            } else {
+                err
             }
-            if claims.fid.is_some() && claims.fid != row.last_fid {
-                // A new sign-in: confirm custodian and profile with Accounts.
-                row.last_fid.clone_from(&claims.fid);
-                lookup = true;
-            }
-            if now() - row.looked_up_at > ACCOUNT_MAX_AGE {
-                lookup = true;
-            }
-            Some(row)
         })?;
-        if let Some(error) = verdict {
-            return Err(error);
+    let mut verdict = None;
+    let mut lookup = false;
+    let row = app.store.update_account(&claims.sub, |current| {
+        lookup = current.is_none();
+        let mut row = current.unwrap_or_else(|| AccountRow::new(&claims.sub, kind));
+        if row.status == "deleted" {
+            verdict = Some(deleted());
+            return None;
         }
-        if tie {
-            app.accounts
-                .ensure_active(&token, &claims.sub)
-                .await
-                .map_err(|error| {
-                    if error.1.code == "sign_in_revoked" {
-                        signed_out()
-                    } else {
-                        error
-                    }
-                })?;
-            confirmed = true;
-            continue;
+        if iat < row.revoked_before {
+            verdict = Some(signed_out());
+            return None;
         }
-        break (row.ok_or_else(Error::internal)?, lookup);
-    };
+        // A token issued after access was removed means the account signed in again.
+        row.status = "active".into();
+        row.signed_in_at = row.signed_in_at.max(iat);
+        row.kind = kind.into();
+        if let Some(id) = claims.id.as_deref().filter(|id| !id.is_empty())
+            && iat.saturating_mul(1000) >= row.synced_at_ms
+        {
+            row.id = id.into();
+        }
+        if claims.fid.is_some() && claims.fid != row.last_fid {
+            // A new sign-in: confirm custodian and profile with Accounts.
+            row.last_fid.clone_from(&claims.fid);
+            lookup = true;
+        }
+        if now() - row.looked_up_at > ACCOUNT_MAX_AGE {
+            lookup = true;
+        }
+        Some(row)
+    })?;
+    if let Some(error) = verdict {
+        return Err(error);
+    }
+    let mut account = row.ok_or_else(Error::internal)?;
     if lookup {
         match accounts::refresh(app, &account.uuid, false).await {
             // Lookups carry no name or photo; the caller shared them by signing in.
@@ -209,6 +192,7 @@ pub async fn authenticate(app: &App, headers: &HeaderMap) -> Result<Auth> {
             return Err(deleted());
         }
     }
+    crate::organizations::populate(app, &mut account, &token).await?;
     Ok(Auth {
         account,
         expires_at: claims.exp,
@@ -323,9 +307,9 @@ mod tests {
         assert_eq!(body["data"]["kind"], "silicon");
         assert_eq!(body["data"]["custodian"]["uuid"], "Ca1");
         assert_eq!(body["data"]["custodian"]["id"], "c:ada");
-        // The JWKS was fetched once and reused; no introspection on plain reads.
+        // The JWKS was fetched once and reused. Accounts confirmed both access tokens.
         assert_eq!(f.stub.jwks_requests.load(Ordering::SeqCst), 1);
-        assert_eq!(f.stub.introspections.load(Ordering::SeqCst), 0);
+        assert_eq!(f.stub.introspections.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -564,7 +548,7 @@ mod tests {
             f.stub.introspections.load(Ordering::SeqCst),
             introspections + 2
         );
-        // Tokens from other seconds need no introspection.
+        // Older tokens are rejected locally, and a new token receives a live check.
         let older = f.token_with("Ca1", |c| c["iat"] = json!(second - 1));
         assert_eq!(
             f.call("GET", "/api/v1/me", Some(&older), None).await.0,
@@ -576,7 +560,7 @@ mod tests {
         );
         assert_eq!(
             f.stub.introspections.load(Ordering::SeqCst),
-            introspections + 2
+            introspections + 3
         );
         // Work accepted in the second of a revocation counts as accepted before it.
         assert_eq!(
@@ -587,7 +571,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sensitive_routes_introspect_and_reuse_a_positive_answer_briefly() {
+    async fn every_account_request_checks_current_access() {
         let f = fixture().await;
         f.carbon("Ca1", "c:ada");
         let token = f.token("Ca1");
@@ -612,18 +596,23 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             f.stub.introspections.load(Ordering::SeqCst),
-            1,
-            "cached for 30 s"
+            2,
+            "each request is checked"
         );
-        // Plain reads never introspect.
+        // Reads share the same verification boundary.
         assert_eq!(
             f.call("GET", "/api/v1/hosts", Some(&token), None).await.0,
             StatusCode::OK
         );
-        assert_eq!(f.stub.introspections.load(Ordering::SeqCst), 1);
+        assert_eq!(f.stub.introspections.load(Ordering::SeqCst), 3);
         // Accounts says the sign-in ended: sensitive routes refuse at once.
         f.stub.inactive.lock().unwrap().insert(token.clone());
-        f.app.accounts.forget_introspections();
+        assert_eq!(
+            f.call("GET", "/api/v1/connections", Some(&token), None)
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
         let (status, body) = f
             .call(
                 "POST",

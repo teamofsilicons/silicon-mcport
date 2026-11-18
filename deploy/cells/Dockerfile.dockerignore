@@ -1,6 +1,9 @@
 **
 !Cargo.toml
 !Cargo.lock
+!docs/
+!docs/API.md
+!docs/openapi.yaml
 !crates/
 !crates/**
 !deploy/

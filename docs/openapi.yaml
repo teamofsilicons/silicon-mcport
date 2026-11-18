@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Silicon MCPort API
-  version: 0.4.0
+  version: 0.5.0
   summary: Configure MCP servers once and use their tools from the CLI, the Rust package and the website.
   description: >
     Success responses are `{"data": …}`; errors are `{"error": ApiError}`. Accounts are Silicon Accounts
@@ -11,11 +11,16 @@ info:
   license:
     name: MIT
 servers:
-  - url: https://backend.mcport.teamofsilicons.com
+  - url: https://api.mcport.teamofsilicons.com
+  - url: https://mcport.teamofsilicons.com/interface
+    description: Cross-origin browser transport for /api/v1 operations using an explicit bearer.
   - url: http://127.0.0.1:4241
     description: Local development (the migration's port block)
 security:
   - bearerAuth: []
+externalDocs:
+  description: Interface guide, examples and authorization rules
+  url: https://api.mcport.teamofsilicons.com/interface-api
 tags:
   - name: discovery
   - name: allow
@@ -34,8 +39,7 @@ components:
       bearerFormat: JWT
       description: >
         A Silicon Accounts access token issued to the `mcport` app (EdDSA, `aud` mcport, `iss` the Accounts
-        public URL, 30 minutes). Verified locally against the Accounts JWKS. Operations marked `x-live: true`
-        also introspect the token (cached 30 s), so revocation applies at once.
+        public URL, 30 minutes). Every account request verifies the signature and checks live introspection, token type, subject and client ID.
     hostToken:
       type: http
       scheme: bearer
@@ -102,6 +106,13 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/ErrorEnvelope'}
   schemas:
+    Person:
+      allOf:
+        - {$ref: '#/components/schemas/AccountRef'}
+        - {type: object, properties: {trust: {type: [integer, 'null'], minimum: 1, maximum: 255}, photo_id: {type: [string, 'null'], format: uuid}}}
+    PersonEnvelope:
+      type: object
+      properties: {data: {$ref: '#/components/schemas/Person'}}
     ApiError:
       type: object
       required: [code, message, outcome_unknown]
@@ -121,7 +132,7 @@ components:
       properties:
         uuid: {type: string, description: Permanent Silicon Accounts uuid (case-sensitive).}
         id: {type: string, description: Current public id; empty when unknown.}
-        kind: {type: string, enum: [carbon, silicon, '']}
+        kind: {type: string, enum: [carbon, silicon, organization, team, '']}
         display_name: {type: string}
         pfp_url: {type: string}
     Me:
@@ -164,10 +175,10 @@ components:
         command: {type: [string, 'null'], description: Managers only.}
         args: {type: array, items: {type: string}}
         auth_mode: {type: string, enum: [none, per-user, shared]}
-        visibility: {type: string, enum: [invited, circle]}
+        visibility: {type: string, description: "invited, circle, or an organization/team target key"}
         status: {type: string, enum: [ready, offline, checking, authentication_required]}
         can_manage: {type: boolean}
-        access: {type: string, enum: [owner, custodian, circle, invited]}
+        access: {type: string, enum: [owner, custodian, circle, invited, group_member, group_manager]}
         account: {$ref: '#/components/schemas/AccountStatus'}
         created_at: {type: integer}
         updated_at: {type: integer}
@@ -185,14 +196,14 @@ components:
         command: {type: [string, 'null']}
         args: {type: array, items: {type: string}, maxItems: 128}
         auth_mode: {type: string, enum: [none, per-user, shared]}
-        visibility: {type: string, enum: ['', invited, circle, private], description: '`org` answers 400 visibility_removed.'}
+        visibility: {type: string, description: "invited, circle, private or an authorized organization/team target key"}
     ConnectionUpdate:
       type: object
       additionalProperties: false
       properties:
         name: {type: string}
         description: {type: string}
-        visibility: {type: string, enum: [invited, circle, private]}
+        visibility: {type: string, description: "Personal visibility or the existing group owner key"}
         version: {type: integer}
     AccessInput:
       type: object
@@ -756,3 +767,63 @@ paths:
       security: []
       responses:
         '200': {description: OAuth Client ID Metadata Document (public HTTPS deployments only).}
+
+  /api/v1/people:
+    get:
+      operationId: suggestPeople
+      parameters:
+        - {in: query, name: q, schema: {type: string}, description: Fuzzy name or ID}
+        - {in: query, name: kind, schema: {type: string, enum: [carbon, silicon]}}
+        - {in: query, name: saved, schema: {type: boolean}}
+      responses:
+        '200': {description: Address book connection state and trust-ranked people, content: {application/json: {schema: {type: object, properties: {data: {type: object, properties: {connected: {type: boolean}, items: {type: array, items: {$ref: '#/components/schemas/Person'}}}}}}}}}
+  /api/v1/people/resolve:
+    get:
+      operationId: resolvePerson
+      parameters: [{in: query, name: q, required: true, schema: {type: string}, example: 'si:scout'}]
+      responses:
+        '200': {description: Private contact overlay or public profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonEnvelope'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v1/contacts/connection:
+    put:
+      operationId: connectContacts
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [enabled], properties: {enabled: {type: boolean}}}}}}
+      responses:
+        '200': {description: 'data.connected is the saved consent for this caller.'}
+  /api/v1/contacts:
+    post:
+      operationId: saveContact
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, name, trust], properties: {id: {type: string}, name: {type: string, maxLength: 200}, trust: {type: integer, minimum: 1, maximum: 255}}}}}}
+      responses:
+        '200': {description: Saved contact, content: {application/json: {schema: {$ref: '#/components/schemas/PersonEnvelope'}}}}
+  /api/v1/contacts/photos/{id}:
+    get:
+      operationId: contactPhoto
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Private contact photo, content: {image/png: {schema: {type: string, format: binary}}}}
+  /api/v1/organizations:
+    get:
+      operationId: workMembership
+      responses:
+        '200': {description: 'data contains account_uuid, organizations with capabilities, current groups and share_targets with type, org_id, id and name. Personal accounts receive empty arrays.'}
+  /api/v1/notifications/subscription:
+    get:
+      operationId: getTingSubscription
+      responses: {'200': {description: 'data contains subscribed and manage_url.'}}
+    post:
+      operationId: registerTingRecipient
+      responses: {'200': {description: 'Ting registered this caller. A local webhook is optional.'}}
+  /api/v1/hosts/{host}/legacy-accounts:
+    get:
+      parameters: [{$ref: '#/components/parameters/Host'}]
+      security: [{bearerAuth: []}]
+      responses: {'200': {description: Legacy account mapping for an registered host owner.}}
+  /interface-api:
+    get:
+      security: []
+      responses: {'200': {description: Interface guide and integration examples.}}
+  /openapi.yaml:
+    get:
+      security: []
+      responses: {'200': {description: Machine-readable OpenAPI document.}}

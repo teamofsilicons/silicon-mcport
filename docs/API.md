@@ -1,6 +1,6 @@
 # MCPort API contract
 
-API contract **0.4.0** (`GET /health` and `GET /api/v1/discovery` report it as `version`). Application endpoints use
+API contract **0.5.0** (`GET /health` and `GET /api/v1/discovery` report it as `version`). Application endpoints use
 `/api/v1`. Success is `{ "data": value }`; errors use an HTTP failure status and
 `{ "error": {"code", "message", "recovery": string|null, "outcome_unknown": boolean} }`. Raw asset downloads are the
 exception. Public DTOs live in `mcport-core`; timestamps are Unix seconds. Lists return arrays in `data`. Connection and
@@ -14,10 +14,66 @@ complete width is exhausted. Deleted IDs are never reused. Treat IDs as opaque l
 still required. Existing UUID and legacy invocation IDs remain valid. Account uuids, tokens and OAuth state keep their
 own formats.
 
+## Start an interface
+
+Request app ID `mcport` at Silicon Accounts sign-in. Take `apps["mcport"].access_token` from the result. Your interface backend calls `https://api.mcport.teamofsilicons.com/api/v1`. Browser clients on another origin can call `https://mcport.teamofsilicons.com/interface/api/v1` with the same bearer and `credentials: "omit"`. Use the service origin from your backend for large uploads and long calls, and one-time download tickets for large files. Keep refresh credentials and the interface secret on the interface backend. See the [OpenAPI contract](https://api.mcport.teamofsilicons.com/openapi.yaml).
+
+```js
+const token = signIn.apps["mcport"].access_token;
+const base = "https://mcport.teamofsilicons.com/interface/api/v1";
+async function mcport(path, method = "GET", input) {
+  const headers = { Authorization: "Bearer " + token };
+  if (input !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(base + path, {
+    method, headers, credentials: "omit", body: JSON.stringify(input)
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error?.message || String(response.status));
+  return body.data;
+}
+const me = await mcport("/me");
+const connections = await mcport("/connections");
+const entries = await mcport("/directory?q=docs");
+```
+
+A new account can receive `{"data":[]}` from the connections list. Create a personal directory entry with `POST /directory {"name":"Research library","category":"Reference"}`. The returned `data.id` is the selector for reading, updating, or sharing that entry. A recipient with a McPort Ting subscription receives the share in Ting.
+
+## People, contacts and share notifications
+
+| Method and path | Request and response |
+|---|---|
+| GET `/people?q=&kind=&saved=` | `{connected,items:[Person]}`. Searches the caller's saved contacts, known circle and direct sharing partners. Optional `kind=carbon\|silicon`, `saved=true` for contacts only. An ordered subsequence matches the name or ID. Highest trust first, then name and ID. Returns the full matching list. |
+| GET `/people/resolve?q=si:scout` | Exact Accounts ID or UUID → Person, overlaying the viewer's saved name/photo. |
+| PUT `/contacts/connection` | Explicit consent `{"enabled":true}` enables address-book reads and edits. Send false to disconnect. Returns `{"data":{"connected":true}}`. |
+| POST `/contacts` | `{"id":"si:scout","name":"Research partner","trust":2}` → saved Person. Trust accepts 1–255 (1 in contacts, 2 trusted). Other saved contact fields are preserved. |
+| GET `/contacts/photos/{id}` | The connected caller's saved contact photo as a private PNG. For a relative `pfp_url`, fetch with the caller's bearer from your selected API origin and display a blob URL. An absolute Accounts photo is public and receives no bearer. |
+| GET / POST `/notifications/subscription` | Read McPort's local enrollment or register the authenticated recipient with Ting. Returns `{subscribed,manage_url}`. A repeated POST rechecks enrollment with Ting. Manage recipient preferences and optional hooks in Ting. |
+
+A Person includes `uuid`, `id`, `kind`, `display_name`, `pfp_url`, `photo_id` and `trust` (null for unsaved accounts). Contact names, trust and private photos belong to the caller. They never confer access.
+
+New direct grants enqueue `mcport.connectionShared` or `mcport.directoryEntryShared` with the sender UUID, recipient UUID, resource ID, name and link. No hook URL is required. For additional delivery to a local endpoint, the recipient signs in to the Ting CLI and runs `ting webhook http://localhost:8080/ting`. The endpoint returns HTTP 204 after durable acceptance. A repeated grant keeps its original event. Pending shares retry with the same key for up to 13 days while the corresponding grant exists. Ting controls subscription, inbox delivery and per-recipient forwarding.
+
+## Work accounts and team connections
+
+`GET /organizations` returns `{account_uuid,organizations,groups,share_targets}` for the signed-in work identity. Personal accounts receive empty arrays. A target's `type` and `id` form its stable visibility value, for example `team:acme/design-team-id` or `organization:acme`. Use an actual target returned by the API. An organization admin can set up organization or team connections. A team admin can set up their own team's connections. Members use enabled tools, with the chosen shared or per-account provider authentication.
+
+```js
+const org = await mcport("/organizations");
+const team = org.share_targets.find(t => t.type === "team");
+if (team) {
+  const connection = await mcport("/connections", "POST", {
+    name: "team-docs", transport: "http", url: providerMcpUrl,
+    auth_mode: "per-user", visibility: team.type + ":" + team.id
+  });
+}
+```
+
+The selected group owns the connection independently of its creator. Current work membership, app policy and admin roles determine access on each request and deferred execution. Manage membership in Silicon Organizations. Personal invitations apply to personally owned connections. Group owners appear in the connection response with kind `organization` or `team`. Group connections retain their owning audience when edited.
+
 ## Accounts and authentication
 
 Every Carbon and Silicon is a [Silicon Accounts](https://accounts.teamofsilicons.com) account. MCPort stores the
-account's permanent **uuid** (short and case-sensitive, e.g. `zQo`) and shows its current **id** (`c:ada`, `si:scout`),
+account's permanent **uuid** (canonical UUID or a case-sensitive legacy identifier) and shows its current **id** (`c:ada`, `si:scout`),
 which can change. Wherever a request names an account, it accepts a `c:`/`si:` id (resolved through Silicon Accounts;
 current ids only) or a uuid. Responses describe accounts as `AccountRef`:
 `{uuid, id, kind: "carbon"|"silicon", display_name, pfp_url?}`.
@@ -25,8 +81,7 @@ current ids only) or a uuid. Responses describe accounts as `AccountRef`:
 Send `Authorization: Bearer <access token>` with a Silicon Accounts access token issued to the `mcport` app (EdDSA JWT,
 `aud` = `mcport`, `iss` = the Accounts public URL, 30 minutes). MCPort verifies it locally against the Accounts JWKS
 (cached; refetched for an unknown key id at most every 30 seconds) and refuses tokens issued before the account signed
-out everywhere, rotated its key or removed MCPort's access. Routes marked **live** also confirm the sign-in with
-Silicon Accounts (introspection, reused for 30 seconds), so revocation applies to them at once. MCPort issues no
+out everywhere, rotated its key or removed MCPort's access. Every account request also requires live Accounts introspection with matching subject, client ID and access-token type. A failed verification denies access. MCPort issues no
 sessions or cookies; the website's server holds the sign-in and sends the bearer token.
 
 How to get a token: Carbons run `mcport login` (device flow) or sign in on the website; Silicons run
@@ -68,8 +123,8 @@ Each connection, host and directory entry belongs to the account that created it
 | Method and path | Behavior |
 |---|---|
 | GET `/allow?silicon=` | The allow list of the caller (a Silicon) or of a Silicon the caller looks after: `Allowance[]` (`{silicon, account, created_at, created_by}`). |
-| POST `/allow` **live** | `{account, silicon?}` → `Allowance`. The Silicon itself, or its custodian. |
-| DELETE `/allow/{account}?silicon=` **live** | `{deleted:boolean}`. |
+| POST `/allow` | `{account, silicon?}` → `Allowance`. The Silicon itself, or its custodian. |
+| DELETE `/allow/{account}?silicon=` | `{deleted:boolean}`. |
 
 ## Directory
 
@@ -87,8 +142,8 @@ connection; later directory edits do not change it.
 | PUT `/directory/{id}` | Manager-only `{input:DirectoryInput,version:i64}` → updated entry; a stale version returns 409. |
 | DELETE `/directory/{id}` | Manager-only → `{deleted:true}`; configured connections remain. |
 | GET `/directory/{id}/access` | Manager-only `AccessGrant[]`. |
-| POST `/directory/{id}/access` **live** | Manager-only `{account}` → `AccessGrant`. |
-| DELETE `/directory/{id}/access/{account}` **live** | Manager-only → `{deleted:true}`. |
+| POST `/directory/{id}/access` | Manager-only `{account}` → `AccessGrant`. |
+| DELETE `/directory/{id}/access/{account}` | Manager-only → `{deleted:true}`. |
 
 `DirectoryInput`: `{name,description?,category?,source_url?:string|null,template?:DirectoryTemplate|null}`.
 `DirectoryTemplate`: `{transport:"http"|"stdio",url?:string|null,command?:string|null,args?:[],auth_mode:"none"|"per-user"|"shared"}`.
@@ -103,18 +158,18 @@ cannot embed credentials. `DirectoryEntry` includes the input plus
 | GET `/connections` | `Connection[]` the caller can use. |
 | POST `/connections` | `ConnectionInput` → `Connection`; the caller becomes the owner. |
 | GET `/connections/{connection}` | Current connection view with account/status metadata. |
-| PATCH `/connections/{connection}` **live** | Manager-only `ConnectionUpdate` → `Connection`; include the current `version` to detect conflicting edits. |
-| DELETE `/connections/{connection}` **live** | Manager-only → `{deleted:true}`; invalidates subsequent execution and queued work. |
+| PATCH `/connections/{connection}` | Manager-only `ConnectionUpdate` → `Connection`; include the current `version` to detect conflicting edits. |
+| DELETE `/connections/{connection}` | Manager-only → `{deleted:true}`; invalidates subsequent execution and queued work. |
 | GET `/connections/{connection}/access` | Manager-only `AccessGrant[]` (`{account, created_at, created_by: AccountRef|null}`). |
-| POST `/connections/{connection}/access` **live** | Manager-only `{account}` (`principal_id` is accepted as the same field) → `AccessGrant`. |
-| DELETE `/connections/{connection}/access/{account}` **live** | Manager-only → `{deleted:true}`. |
+| POST `/connections/{connection}/access` | Manager-only `{account}` (`principal_id` is accepted as the same field) → `AccessGrant`. |
+| DELETE `/connections/{connection}/access/{account}` | Manager-only → `{deleted:true}`. |
 | GET `/connections/{connection}/policies` | `ToolPolicy[]` (`{tool, account: AccountRef|null, enabled}`); managers see all, others the ones that apply to them. |
-| PUT `/connections/{connection}/policies` **live** | Manager-only `{tool, account: string|null, enabled}` → `ToolPolicy`. An account-specific allow cannot override a connection-wide deny. |
+| PUT `/connections/{connection}/policies` | Manager-only `{tool, account: string|null, enabled}` → `ToolPolicy`. An account-specific allow cannot override a connection-wide deny. |
 
-Managers are the owner and, for a Silicon owner, its custodian. `Connection` is `{id, name, description, owner:
+For personal connections, managers are the owner and, for a Silicon owner, its custodian. Group managers are described above. `Connection` is `{id, name, description, owner:
 AccountRef, transport, url?, host_id?, command?, args, auth_mode, visibility, status, can_manage, access, account:
 AccountStatus, created_at, updated_at, version}`; `access` says why the caller sees it: `owner`, `custodian`, `circle`
-or `invited`. URL, command and arguments are shown to managers only.
+or `invited` on personal connections and `group_member` or `group_manager` on group connections. URL, command and arguments are shown to managers only.
 
 `ConnectionInput`: `{name,description?,transport:"http"|"stdio",url?,host_id?,command?,args?:[],auth_mode:"none"|"per-user"|"shared",visibility?:"invited"|"circle"}`.
 HTTP requires a URL; stdio requires a host the caller registered and an absolute command. Remote HTTP uses public
@@ -134,10 +189,10 @@ registered endpoints and the selected account, never tool calls.
 
 | Method and path | Behavior |
 |---|---|
-| GET `/connections/{connection}/account?account=` **live** | Secret-free `AccountStatus`: `{connected, account: AccountRef|null, label, kind}`. `account=` names a Silicon the caller looks after. |
-| POST `/connections/{connection}/account` **live** | `{kind:"bearer"|"header",secret,label?,header_name?}` → `AccountStatus`. Per-user accounts belong to the caller; only managers configure a shared account. Custodians never connect one for a Silicon. |
-| DELETE `/connections/{connection}/account?account=` **live** | `{disconnected:true}`; the caller's own per-user account, a Silicon's one by its custodian, or (managers) the shared account. |
-| POST `/connections/{connection}/account/authorize` **live** | `{client_id?:string}` → `{authorization_url,state}`. Discovers OAuth metadata and prepares PKCE. |
+| GET `/connections/{connection}/account?account=` | Secret-free `AccountStatus`: `{connected, account: AccountRef|null, label, kind}`. `account=` names a Silicon the caller looks after. |
+| POST `/connections/{connection}/account` | `{kind:"bearer"|"header",secret,label?,header_name?}` → `AccountStatus`. Per-user accounts belong to the caller; only managers configure a shared account. Custodians never connect one for a Silicon. |
+| DELETE `/connections/{connection}/account?account=` | `{disconnected:true}`; the caller's own per-user account, a Silicon's one by its custodian, or (managers) the shared account. |
+| POST `/connections/{connection}/account/authorize` | `{client_id?:string}` → `{authorization_url,state}`. Discovers OAuth metadata and prepares PKCE. |
 
 Remote credentials require HTTPS and never travel in URLs. The returned authorization URL opens `/oauth/start` (a
 confirmation page naming the account by its current id) before provider consent; `/oauth/callback` checks the
@@ -147,7 +202,7 @@ Client ID Metadata when the service has a public HTTPS URL. Provider OAuth is un
 
 ## MCP execution and history
 
-POST `/connections/{connection}/mcp` **live** accepts `RpcInput`:
+POST `/connections/{connection}/mcp` accepts `RpcInput`:
 
 ```json
 {"method":"tools/call","params":{"name":"example","arguments":{}},"timeout_ms":60000,"idempotency_key":"one-logical-operation"}
@@ -179,9 +234,9 @@ see other accounts' calls. Revoking the caller's access also hides its old resul
 | Method and path | Behavior |
 |---|---|
 | GET `/hosts` | `Host[]` the caller owns or looks after (`{id, name, owner, online, last_seen, created_at, can_manage}`). |
-| POST `/hosts` **live** | `{name}` → `HostRegistration`; `host_token` is returned only once. |
+| POST `/hosts` | `{name}` → `HostRegistration`; `host_token` is returned only once. |
 | GET `/hosts/{id}` | Host metadata/status (owner or custodian). |
-| DELETE `/hosts/{id}` **live** | `{deleted:true}`; revokes host authority and cancels dispatch (owner or custodian). |
+| DELETE `/hosts/{id}` | `{deleted:true}`; revokes host authority and cancels dispatch (owner or custodian). |
 | POST `/hosts/{id}/poll` | `HostPoll` → `HostPollResult`; bounded long poll, up to 20 seconds. |
 | POST `/hosts/{id}/jobs/{job}/result` | `HostJobResult` → `{accepted:true}`. |
 | POST `/hosts/{id}/jobs/{job}/progress` | `{progress:Value}` → `{accepted:true}`. |

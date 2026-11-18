@@ -239,7 +239,6 @@ pub fn revoke(app: &App, uuid: &str, at_ms: i64, status: Option<&str>) -> Result
         }
         Some(row)
     })?;
-    app.accounts.forget_introspections();
     execution::cancel_account_work(app, uuid)?;
     for (kind, id) in app.store.owned_by(uuid, &["oauth_attempt"])? {
         app.store.delete(&kind, &id)?;
@@ -271,6 +270,9 @@ pub fn delete_account_data(app: &App, uuid: &str) -> Result<()> {
             "account_epoch",
             "call",
             "settings",
+            "contacts_connection",
+            "ting_subscription",
+            "ting_event",
             "report",
             "oauth_attempt",
             "grant",

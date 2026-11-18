@@ -436,7 +436,8 @@ pub async fn poll(
             .get::<crate::connections::ConnectionRecord>("connection", &cid)?
             && c.host_id.as_deref() == Some(&id)
             && !c.owner_uuid.is_empty()
-            && c.owner_uuid == host.host.owner_uuid
+            && (c.owner_uuid == host.host.owner_uuid
+                || crate::organizations::is_group(&c.owner_uuid))
         {
             registered.push(cid)
         }
